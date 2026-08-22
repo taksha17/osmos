@@ -65,6 +65,13 @@ check_system_deps() {
     fi
   done
   
+  # Audio capture dependencies for system audio / Smart assist
+  for dep in pipewire pulseaudio-utils; do
+    if ! dpkg -l "$dep" >/dev/null 2>&1; then
+      MISSING+=("$dep")
+    fi
+  done
+  
   if [ ${#MISSING[@]} -ne 0 ]; then
     echo "Installing missing system dependencies..."
     sudo apt-get update

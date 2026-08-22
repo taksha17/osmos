@@ -564,7 +564,7 @@ $bmp.Dispose();
       if (!hasPw && !hasParec) {
         return {
           ok: false,
-          error: 'System audio capture requires PipeWire/PulseAudio utilities (pw-record or parec). None were found on PATH.',
+          error: 'System audio capture needs either PipeWire or PulseAudio tools. On Ubuntu/Debian install: sudo apt install pipewire pulseaudio-utils',
         };
       }
       return {
