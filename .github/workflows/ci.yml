@@ -7,6 +7,10 @@ on:
   pull_request:
     branches: [main, master]
 
+env:
+  ELECTRON_MIRROR: https://registry.npmmirror.com/-/binary/electron/
+  GH_TOKEN: ${{ github.token }}
+
 jobs:
   typecheck-build:
     name: Typecheck & build (${{ matrix.os }})
@@ -30,16 +34,28 @@ jobs:
     needs: typecheck-build
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
-    env:
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron-builder
+            ~/.npm
+          key: electron-builder-linux-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            electron-builder-linux-
       - run: npm ci
-      - run: npm run pack:linux
+      - name: Package Linux with retry
+        uses: nick-fields/retry@v2
+        with:
+          timeout_minutes: 30
+          max_attempts: 3
+          retry_on: error
+          command: npm run pack:linux
       - uses: actions/upload-artifact@v4
         with:
           name: osmos-linux
@@ -54,38 +70,64 @@ jobs:
     needs: typecheck-build
     runs-on: windows-latest
     if: github.event_name == 'push'
-    env:
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
+      - uses: actions/cache@v4
+        with:
+          path: |
+            C:\Users\runneradmin\AppData\Local\electron-builder\Cache
+            C:\Users\runneradmin\.cache\electron-builder
+            C:\Users\runneradmin\.npm
+          key: electron-builder-windows-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            electron-builder-windows-
       - run: npm ci
-      - run: npm run pack:win
+      - name: Package Windows with retry
+        uses: nick-fields/retry@v2
+        with:
+          timeout_minutes: 45
+          max_attempts: 3
+          retry_on: error
+          command: npm run pack:win
       - uses: actions/upload-artifact@v4
         with:
           name: osmos-windows
           path: |
             release/*.exe
             release/*.msi
+          if-no-files-found: error
 
   pack-macos:
     name: Package macOS
     needs: typecheck-build
     runs-on: macos-latest
     if: github.event_name == 'push'
-    env:
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron-builder
+            ~/.npm
+          key: electron-builder-macos-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            electron-builder-macos-
       - run: npm ci
-      - run: npm run pack:mac
+      - name: Package macOS with retry
+        uses: nick-fields/retry@v2
+        with:
+          timeout_minutes: 30
+          max_attempts: 3
+          retry_on: error
+          command: npm run pack:mac
       - uses: actions/upload-artifact@v4
         with:
           name: osmos-macos
@@ -93,14 +135,13 @@ jobs:
             release/*.dmg
             release/*.pkg
             release/*.zip
+          if-no-files-found: error
 
   create-release:
     name: Create GitHub Release
     needs: [pack-linux, pack-windows, pack-macos]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-    env:
-      GH_TOKEN: ${{ github.token }} && startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
