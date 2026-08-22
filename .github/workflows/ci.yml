@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main, master]
+    tags: ['v*']
   pull_request:
     branches: [main, master]
 
@@ -45,3 +46,83 @@ jobs:
             release/*.deb
             release/*.tar.gz
           if-no-files-found: warn
+
+  pack-windows:
+    name: Package Windows
+    needs: typecheck-build
+    runs-on: windows-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run pack:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: osmos-windows
+          path: |
+            release/*.exe
+            release/*.msi
+
+  pack-macos:
+    name: Package macOS
+    needs: typecheck-build
+    runs-on: macos-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run pack:mac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: osmos-macos
+          path: |
+            release/*.dmg
+            release/*.pkg
+            release/*.zip
+
+  create-release:
+    name: Create GitHub Release
+    needs: [pack-linux, pack-windows, pack-macos]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: osmos-linux
+          path: ./artifacts/linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: osmos-windows
+          path: ./artifacts/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: osmos-macos
+          path: ./artifacts/macos
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            OSMOS ${{ github.ref_name }} release
+            
+            ## Installation
+            - **Linux**: Download the AppImage or .deb from the assets below
+            - **Windows**: Run the .exe installer
+            - **macOS**: Open the .dmg and drag OSMOS to Applications
+          files: |
+            artifacts/linux/**/*
+            artifacts/windows/**/*
+            artifacts/macos/**/*
