@@ -591,14 +591,13 @@ export function ChatPanel({
               ? 'Paused — tap ▶ to resume'
               : `${continuousEnabled ? '⚡ Smart · ' : ''}${
                   ocrStatus ||
-                  system.partial ||
-                  (system.listening
-                    ? 'Meeting audio…'
-                    : mic.listening
-                      ? continuousEnabled
-                        ? 'Listening…'
-                        : 'Mic on'
-                      : streamMeta || 'Ready')
+                  system.error ||
+                  mic.error ||
+                  (system.partial && !system.error ? system.partial : '') ||
+                  (system.listening && !system.error ? 'Meeting audio…' : '') ||
+                  (mic.listening && !mic.error ? (continuousEnabled ? 'Listening…' : 'Mic on') : '') ||
+                  streamMeta ||
+                  'Ready'
                 }`}
           </span>
         </div>
