@@ -1,0 +1,99 @@
+{
+  "name": "osmos",
+  "productName": "OSMOS",
+  "version": "0.5.0",
+  "description": "OSMOS — open-source, cross-platform AI interview & meeting copilot for Linux, macOS, and Windows.",
+  "author": {
+    "name": "OSMOS contributors",
+    "email": "maintainers@osmos.app"
+  },
+  "homepage": "https://github.com/taksha17/osmos",
+  "license": "MIT",
+  "private": true,
+  "main": "dist-electron/main/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build:renderer && npm run build:electron",
+    "build:renderer": "vite build",
+    "build:electron": "node scripts/build-electron.mjs",
+    "start": "electron . --no-sandbox",
+    "start:release": "node scripts/start-release.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "pack": "npm run build && node scripts/pack.mjs",
+    "pack:linux": "npm run build && electron-builder --linux",
+    "pack:mac": "npm run build && electron-builder --mac",
+    "pack:win": "npm run build && electron-builder --win",
+    "pack:all": "node -e \"console.error('pack:all cannot cross-build mac/win from Linux (or vice versa). Use: npm run pack  (current OS), or pack:linux / pack:mac / pack:win on matching hosts / CI.'); process.exit(1)\""
+  },
+  "dependencies": {
+    "@xenova/transformers": "^2.17.2",
+    "electron-store": "^10.0.1",
+    "mammoth": "^1.12.1",
+    "pdf-parse": "^2.4.5",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^34.3.0",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.25.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0"
+  },
+  "build": {
+    "appId": "app.osmos.desktop",
+    "productName": "OSMOS",
+    "icon": "resources/icon.png",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "scripts/whisper-worker.mjs",
+      "resources/icon.png",
+      "resources/logo-ui.png",
+      "package.json",
+      "node_modules/@xenova/transformers/**/*",
+      "node_modules/onnxruntime-node/**/*",
+      "node_modules/onnxruntime-common/**/*",
+      "node_modules/protobufjs/**/*",
+      "node_modules/guid-typescript/**/*",
+      "node_modules/long/**/*",
+      "node_modules/sharp/**/*",
+      "node_modules/tesseract.js/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/onnxruntime-node/**/*",
+      "node_modules/sharp/**/*",
+      "node_modules/tesseract.js/**/*"
+    ],
+    "linux": {
+      "target": [
+        "dir",
+        "deb",
+        "AppImage",
+        "tar.gz"
+      ],
+      "category": "Utility",
+      "maintainer": "OSMOS contributors <maintainers@osmos.app>"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
+  }
+}
