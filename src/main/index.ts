@@ -243,7 +243,7 @@ function createLauncher() {
       preload: preloadPath(),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   });
   void launcher.loadURL(rendererUrl(''));
@@ -272,7 +272,7 @@ function createOverlay() {
       preload: preloadPath(),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   });
   void overlay.loadURL(rendererUrl('#/overlay'));

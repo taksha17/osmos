@@ -1,0 +1,208 @@
+diff --git a/index.html b/index.html
+index b79a221..0cb1cf0 100644
+--- a/index.html
++++ b/index.html
+@@ -3,6 +3,10 @@
+   <head>
+     <meta charset="UTF-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
++    <meta
++      http-equiv="Content-Security-Policy"
++      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src *; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none';"
++    />
+     <title>OSMOS</title>
+     <link rel="preconnect" href="https://fonts.googleapis.com" />
+     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+diff --git a/src/main/index.ts b/src/main/index.ts
+index c510ce4..6c269f9 100644
+--- a/src/main/index.ts
++++ b/src/main/index.ts
+@@ -243,7 +243,7 @@ function createLauncher() {
+       preload: preloadPath(),
+       contextIsolation: true,
+       nodeIntegration: false,
+-      sandbox: false,
++      sandbox: true,
+     },
+   });
+   void launcher.loadURL(rendererUrl(''));
+@@ -272,7 +272,7 @@ function createOverlay() {
+       preload: preloadPath(),
+       contextIsolation: true,
+       nodeIntegration: false,
+-      sandbox: false,
++      sandbox: true,
+     },
+   });
+   void overlay.loadURL(rendererUrl('#/overlay'));
+diff --git a/src/main/services/secretStore.ts b/src/main/services/secretStore.ts
+new file mode 100644
+index 0000000..2fe820f
+--- /dev/null
++++ b/src/main/services/secretStore.ts
+@@ -0,0 +1,64 @@
++import { safeStorage } from 'electron';
++
++/**
++ * Encrypts/decrypts small secret strings (API keys) using Electron's
++ * `safeStorage`, which is backed by the OS keychain (Keychain on macOS,
++ * DPAPI on Windows, libsecret/kwallet on Linux where available).
++ *
++ * Values are persisted to the plain-JSON settings store, so this exists to
++ * avoid writing provider API keys to disk in plaintext. It intentionally
++ * degrades to plaintext (with a logged warning, once) rather than throwing
++ * or losing data if OS-level encryption isn't available — e.g. some
++ * headless Linux setups with no secret service running.
++ */
++
++const ENC_PREFIX = 'enc:v1:';
++
++let warnedUnavailable = false;
++
++export function isEncryptionAvailable(): boolean {
++  try {
++    return safeStorage.isEncryptionAvailable();
++  } catch {
++    return false;
++  }
++}
++
++export function encryptSecret(plain: string | undefined | null): string {
++  const value = plain || '';
++  if (!value) return '';
++  // Idempotent: callers may pass an already-encrypted value through this
++  // path (e.g. a defensive re-encrypt during settings migration) — never
++  // double-wrap it, or decryptSecret will unwrap to ciphertext instead of
++  // the real secret.
++  if (value.startsWith(ENC_PREFIX)) return value;
++  if (!isEncryptionAvailable()) {
++    if (!warnedUnavailable) {
++      warnedUnavailable = true;
++      console.warn(
++        '[secretStore] OS secret storage unavailable — API keys will be saved in plaintext. ' +
++          'On Linux, install/enable a Secret Service provider (gnome-keyring or kwallet) to fix this.',
++      );
++    }
++    return value;
++  }
++  try {
++    return ENC_PREFIX + safeStorage.encryptString(value).toString('base64');
++  } catch (e) {
++    console.warn('[secretStore] encryption failed, storing plaintext:', e);
++    return value;
++  }
++}
++
++export function decryptSecret(value: string | undefined | null): string {
++  const raw = value || '';
++  if (!raw) return '';
++  if (!raw.startsWith(ENC_PREFIX)) return raw; // legacy plaintext, or encryption unavailable
++  try {
++    const buf = Buffer.from(raw.slice(ENC_PREFIX.length), 'base64');
++    return safeStorage.decryptString(buf);
++  } catch (e) {
++    console.warn('[secretStore] decryption failed (key changed / keychain unavailable):', e);
++    return '';
++  }
++}
+diff --git a/src/main/services/settingsStore.ts b/src/main/services/settingsStore.ts
+index 045377f..c290823 100644
+--- a/src/main/services/settingsStore.ts
++++ b/src/main/services/settingsStore.ts
+@@ -4,6 +4,7 @@ import {
+   DEFAULT_SETTINGS,
+   type AppSettings,
+   type DocumentReference,
++  type LlmProvider,
+   type SavedProfile,
+   type WebSearchProvider,
+ } from '../../shared/types.js';
+@@ -12,12 +13,61 @@ import {
+   normalizeSavedProfile,
+   toUserProfile,
+ } from '../../shared/profiles.js';
++import { decryptSecret, encryptSecret } from './secretStore.js';
+ 
+ const store = new Store<{ settings: AppSettings }>({
+   name: 'osmos-settings',
+   defaults: { settings: DEFAULT_SETTINGS },
+ });
+ 
++const PROVIDER_IDS: LlmProvider[] = [
++  'ollama',
++  'openai',
++  'anthropic',
++  'groq',
++  'openrouter',
++  'litellm',
++];
++
++/**
++ * API keys are kept encrypted (via OS keychain, see secretStore.ts) in the
++ * on-disk JSON at all times. These two helpers are the only place secrets
++ * cross that boundary: `withSecrets` decrypts for in-memory use by callers
++ * that need to actually call an API, `withEncryptedSecrets` re-encrypts
++ * immediately before every `store.set`.
++ */
++function withSecrets(settings: AppSettings): AppSettings {
++  return {
++    ...settings,
++    tavilyApiKey: decryptSecret(settings.tavilyApiKey),
++    openaiApiKey: decryptSecret(settings.openaiApiKey),
++    providers: PROVIDER_IDS.reduce(
++      (acc, id) => {
++        const p = settings.providers?.[id];
++        if (p) acc[id] = { ...p, apiKey: decryptSecret(p.apiKey) };
++        return acc;
++      },
++      { ...settings.providers },
++    ),
++  };
++}
++
++function withEncryptedSecrets(settings: AppSettings): AppSettings {
++  return {
++    ...settings,
++    tavilyApiKey: encryptSecret(settings.tavilyApiKey),
++    openaiApiKey: encryptSecret(settings.openaiApiKey),
++    providers: PROVIDER_IDS.reduce(
++      (acc, id) => {
++        const p = settings.providers?.[id];
++        if (p) acc[id] = { ...p, apiKey: encryptSecret(p.apiKey) };
++        return acc;
++      },
++      { ...settings.providers },
++    ),
++  };
++}
++
+ const DEFAULT_SEARX = 'http://127.0.0.1/searxng';
+ 
+ function migrateWebSearch(raw: Partial<AppSettings>): {
+@@ -137,10 +187,13 @@ export function getSettings(): AppSettings {
+       !(raw.profiles || []).some((p) => (p.documents || []).length > 0)) ||
+     (next.sttProvider === 'local-whisper' && raw.sttProvider === 'webspeech' && process.platform === 'linux')
+   ) {
+-    store.set('settings', next);
++    // `next` here is still the as-stored (possibly encrypted, possibly
++    // legacy-plaintext) shape — re-encrypt defensively so a first run that
++    // migrates old plaintext keys doesn't write them back out unencrypted.
++    store.set('settings', withEncryptedSecrets(next));
+   }
+ 
+-  return next;
++  return withSecrets(next);
+ }
+ 
+ export function updateSettings(patch: Partial<AppSettings>): AppSettings {
+@@ -212,6 +265,9 @@ export function updateSettings(patch: Partial<AppSettings>): AppSettings {
+     next.useWebSearch = patch.useWebSearch;
+   }
+ 
+-  store.set('settings', next);
++  // `next` at this point holds plaintext keys (merged from `current`, which
++  // getSettings() already decrypted, and `patch`, which arrives plaintext
++  // from the renderer). Encrypt only the copy written to disk.
++  store.set('settings', withEncryptedSecrets(next));
+   return next;
+ }

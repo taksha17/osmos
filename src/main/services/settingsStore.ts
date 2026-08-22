@@ -4,6 +4,7 @@ import {
   DEFAULT_SETTINGS,
   type AppSettings,
   type DocumentReference,
+  type LlmProvider,
   type SavedProfile,
   type WebSearchProvider,
 } from '../../shared/types.js';
@@ -12,11 +13,60 @@ import {
   normalizeSavedProfile,
   toUserProfile,
 } from '../../shared/profiles.js';
+import { decryptSecret, encryptSecret } from './secretStore.js';
 
 const store = new Store<{ settings: AppSettings }>({
   name: 'osmos-settings',
   defaults: { settings: DEFAULT_SETTINGS },
 });
+
+const PROVIDER_IDS: LlmProvider[] = [
+  'ollama',
+  'openai',
+  'anthropic',
+  'groq',
+  'openrouter',
+  'litellm',
+];
+
+/**
+ * API keys are kept encrypted (via OS keychain, see secretStore.ts) in the
+ * on-disk JSON at all times. These two helpers are the only place secrets
+ * cross that boundary: `withSecrets` decrypts for in-memory use by callers
+ * that need to actually call an API, `withEncryptedSecrets` re-encrypts
+ * immediately before every `store.set`.
+ */
+function withSecrets(settings: AppSettings): AppSettings {
+  return {
+    ...settings,
+    tavilyApiKey: decryptSecret(settings.tavilyApiKey),
+    openaiApiKey: decryptSecret(settings.openaiApiKey),
+    providers: PROVIDER_IDS.reduce(
+      (acc, id) => {
+        const p = settings.providers?.[id];
+        if (p) acc[id] = { ...p, apiKey: decryptSecret(p.apiKey) };
+        return acc;
+      },
+      { ...settings.providers },
+    ),
+  };
+}
+
+function withEncryptedSecrets(settings: AppSettings): AppSettings {
+  return {
+    ...settings,
+    tavilyApiKey: encryptSecret(settings.tavilyApiKey),
+    openaiApiKey: encryptSecret(settings.openaiApiKey),
+    providers: PROVIDER_IDS.reduce(
+      (acc, id) => {
+        const p = settings.providers?.[id];
+        if (p) acc[id] = { ...p, apiKey: encryptSecret(p.apiKey) };
+        return acc;
+      },
+      { ...settings.providers },
+    ),
+  };
+}
 
 const DEFAULT_SEARX = 'http://127.0.0.1/searxng';
 
@@ -137,10 +187,13 @@ export function getSettings(): AppSettings {
       !(raw.profiles || []).some((p) => (p.documents || []).length > 0)) ||
     (next.sttProvider === 'local-whisper' && raw.sttProvider === 'webspeech' && process.platform === 'linux')
   ) {
-    store.set('settings', next);
+    // `next` here is still the as-stored (possibly encrypted, possibly
+    // legacy-plaintext) shape — re-encrypt defensively so a first run that
+    // migrates old plaintext keys doesn't write them back out unencrypted.
+    store.set('settings', withEncryptedSecrets(next));
   }
 
-  return next;
+  return withSecrets(next);
 }
 
 export function updateSettings(patch: Partial<AppSettings>): AppSettings {
@@ -212,6 +265,9 @@ export function updateSettings(patch: Partial<AppSettings>): AppSettings {
     next.useWebSearch = patch.useWebSearch;
   }
 
-  store.set('settings', next);
+  // `next` at this point holds plaintext keys (merged from `current`, which
+  // getSettings() already decrypted, and `patch`, which arrives plaintext
+  // from the renderer). Encrypt only the copy written to disk.
+  store.set('settings', withEncryptedSecrets(next));
   return next;
 }
