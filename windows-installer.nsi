@@ -4,6 +4,7 @@
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 !include "x64.nsh"
+!include "WinVer.nsh"
 
 ; Basic settings
 Name "OSMOS"
@@ -76,16 +77,32 @@ Section "Node.js" SecNode
 SectionEnd
 
 Section "ffmpeg" SecFFmpeg
-  ${IfNot} ${FileExists} "$SYSDIR\ffmpeg.exe"
+  ${IfNot} ${FileExists} "$INSTDIR\ffmpeg.exe"
     ${If} ${FileExists} "$SYSDIR\choco.exe"
       nsExec::Exec 'choco install ffmpeg -y'
+      ; If choco installed it to a standard location, copy it to our install dir
+      ${If} ${FileExists} "C:\ProgramData\chocolatey\bin\ffmpeg.exe"
+        CopyFiles /SILENT "C:\ProgramData\chocolatey\bin\ffmpeg.exe" "$INSTDIR\ffmpeg.exe"
+      ${EndIf}
+      ${If} ${FileExists} "C:\Program Files\ffmpeg\bin\ffmpeg.exe"
+        CopyFiles /SILENT "C:\Program Files\ffmpeg\bin\ffmpeg.exe" "$INSTDIR\ffmpeg.exe"
+      ${EndIf}
     ${Else}
-      ; Download ffmpeg
+      ; Download ffmpeg standalone build and extract ffmpeg.exe
       StrCpy $0 "$TEMP\ffmpeg-master-latest-win64-gpl.zip"
       nsisdl::download "https://www.gyan.dev/ffmpeg/builds/ffmpeg-master-latest-win64-gpl.zip" $0
       ${If} ${FileExists} $0
-        ; Extract to INSTDIR
-        ; (Simplified - actual extraction would need more code)
+        ; Extract using PowerShell
+        nsExec::ExecToStack 'powershell -Command "Expand-Archive -Path '\''$0'\'' -DestinationPath '\''$TEMP\ffmpeg-extract'\'' -Force"'
+        ; Find ffmpeg.exe in extracted folder
+        FindFirst $1 $2 "$TEMP\ffmpeg-extract\*\bin\ffmpeg.exe"
+        ${If} $2 != ""
+          CopyFiles /SILENT "$TEMP\ffmpeg-extract\$2\bin\ffmpeg.exe" "$INSTDIR\ffmpeg.exe"
+        ${EndIf}
+        FindClose $1
+        ; Cleanup
+        RMDir /r "$TEMP\ffmpeg-extract"
+        Delete $0
       ${EndIf}
     ${EndIf}
   ${EndIf}
@@ -106,11 +123,13 @@ SectionEnd
 
 ; Functions
 Function .onInit
+  StrCpy $VERSION "0.5.0"
+
   ; Check for required Windows version
   ${If} ${AtLeastWinVista}
     ; Windows 7+
   ${Else}
-    MessageBox MB_ICONERROR "OSMOS requires Windows 7 or later."
+    MessageBox MB_ICONSTOP "OSMOS requires Windows 7 or later."
     Abort
   ${EndIf}
   
@@ -118,7 +137,7 @@ Function .onInit
   UserInfo::GetAccountType
   Pop $0
   ${If} $0 != "Admin"
-    MessageBox MB_ICONERROR "Administrator privileges required."
+    MessageBox MB_ICONSTOP "Administrator privileges required."
     Abort
   ${EndIf}
 FunctionEnd
@@ -135,7 +154,6 @@ FunctionEnd
 
 ; Variables
 Var VERSION
-Var TEMP
 
 ; Load functions
 Function GetTime
@@ -152,6 +170,3 @@ Function GetTime
 FunctionEnd
 
 ; Entry point
-Function .onInit
-  StrCpy $VERSION "0.5.0"
-FunctionEnd

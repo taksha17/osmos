@@ -99,6 +99,8 @@ export function ChatPanel({
   systemStopRef.current = system.stop;
   systemStartRef.current = system.start;
   const lastAssistRef = useRef({ key: '', at: 0 });
+  const micFailRef = useRef(0);
+  const systemFailRef = useRef(0);
 
   const assistSource = settings?.assistAudioSource || 'system';
   const wantsSystem =
@@ -128,14 +130,20 @@ export function ChatPanel({
 
   useEffect(() => {
     if (!overlay || paused || !wantsMic || !settings || busy || mic.listening) return;
+    if (mic.error && Date.now() - micFailRef.current < 5000) return;
     const useChunk = settings.sttProvider !== 'webspeech';
-    void micStartRef.current(useChunk ? { continuous: true } : undefined);
-  }, [overlay, paused, wantsMic, settings, busy, mic.listening]);
+    void micStartRef.current(useChunk ? { continuous: true } : undefined).catch(() => {
+      micFailRef.current = Date.now();
+    });
+  }, [overlay, paused, wantsMic, settings, busy, mic.listening, mic.error]);
 
   useEffect(() => {
     if (!overlay || paused || !wantsSystem || !settings || system.listening) return;
-    void systemStartRef.current();
-  }, [overlay, paused, wantsSystem, settings, system.listening]);
+    if (system.error && Date.now() - systemFailRef.current < 5000) return;
+    void systemStartRef.current().catch(() => {
+      systemFailRef.current = Date.now();
+    });
+  }, [overlay, paused, wantsSystem, settings, system.listening, system.error]);
 
   useEffect(() => {
     if (settings?.micDeviceId === micDeviceRef.current) return;
@@ -143,7 +151,10 @@ export function ChatPanel({
     if (!overlay || paused || !wantsMic || !settings) return;
     micStopRef.current();
     const useChunk = settings.sttProvider !== 'webspeech';
-    void micStartRef.current(useChunk ? { continuous: true } : undefined);
+    if (mic.error && Date.now() - micFailRef.current < 5000) return;
+    void micStartRef.current(useChunk ? { continuous: true } : undefined).catch(() => {
+      micFailRef.current = Date.now();
+    });
   }, [settings?.micDeviceId, overlay, paused, wantsMic, settings]);
 
   useEffect(() => {
@@ -153,11 +164,12 @@ export function ChatPanel({
       return;
     }
     if (continuousEnabled && settings && !busy && !mic.listening) {
+      if (mic.error && Date.now() - micFailRef.current < 5000) return;
       void micStartRef.current();
     } else if (!continuousEnabled && mic.listening) {
       micStopRef.current();
     }
-  }, [overlay, continuousEnabled, paused, wantsMic, wantsSystem, settings, busy, mic.listening, system.listening]);
+  }, [overlay, continuousEnabled, paused, wantsMic, wantsSystem, settings, busy, mic.listening, system.listening, mic.error]);
 
   const togglePause = useCallback(() => {
     const next = !pausedRef.current;
@@ -168,6 +180,8 @@ export function ChatPanel({
       cancelRef.current?.();
       cancelRef.current = null;
     } else if (overlay) {
+      micFailRef.current = 0;
+      systemFailRef.current = 0;
       setContinuousEnabled(true);
     }
   }, [onPausedChange, overlay]);
@@ -279,11 +293,15 @@ export function ChatPanel({
       if (!overlay || !continuousRef.current || pausedRef.current || !settings) return;
       const source = settings.assistAudioSource || 'system';
       if ((source === 'mic' || source === 'both') && !mic.listening) {
-        const useChunk = settings.sttProvider !== 'webspeech';
-        void mic.start(useChunk ? { continuous: true } : undefined);
+        if (!mic.error || Date.now() - micFailRef.current >= 5000) {
+          const useChunk = settings.sttProvider !== 'webspeech';
+          void mic.start(useChunk ? { continuous: true } : undefined);
+        }
       }
       if ((source === 'system' || source === 'both') && !system.listening) {
-        void system.start();
+        if (!system.error || Date.now() - systemFailRef.current >= 5000) {
+          void system.start();
+        }
       }
     }
   }, [busy, input, overlay, settings, mic, system]);
