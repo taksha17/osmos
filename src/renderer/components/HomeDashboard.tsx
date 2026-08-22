@@ -119,9 +119,17 @@ async function probeServices(settings: AppSettings): Promise<Probes> {
   }
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach((t) => t.stop());
-    probes.mic = 'ok';
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const inputs = devices.filter((d) => d.kind === 'audioinput');
+    if (inputs.length === 0) {
+      probes.mic = 'fail';
+      probes.micDetail = 'No audio input devices found';
+    } else {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
+      probes.mic = 'ok';
+      probes.micDetail = `${inputs.length} device${inputs.length === 1 ? '' : 's'} · ${sttLabel(settings)}`;
+    }
   } catch {
     probes.mic = 'fail';
     probes.micDetail = 'Mic permission needed';

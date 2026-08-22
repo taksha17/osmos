@@ -57,9 +57,26 @@ export function applyOsCaptureExclusion(win: BrowserWindow, enabled: boolean, pl
   }
 }
 
+async function commandExists(command: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const child = spawn('which', [command], { stdio: 'ignore' });
+    child.on('close', (code) => resolve(code === 0));
+    child.on('error', () => resolve(false));
+  });
+}
+
 async function tryCapture(command: string, args: string[], tmp: string): Promise<boolean> {
   return new Promise((resolve) => {
     const child = spawn(command, args, { stdio: 'ignore' });
+    const missing = new Set(['ENOENT', 'EACCES', 'EPERM']);
+    child.on('error', (err: any) => {
+      const code = String(err?.code || '');
+      if (missing.has(code)) {
+        resolve(false);
+        return;
+      }
+      resolve(false);
+    });
     child.on('close', (code) => {
       if (code === 0 && fs.existsSync(tmp)) {
         const stat = fs.statSync(tmp);
@@ -72,7 +89,6 @@ async function tryCapture(command: string, args: string[], tmp: string): Promise
         resolve(false);
       }
     });
-    child.on('error', () => resolve(false));
   });
 }
 
@@ -381,7 +397,6 @@ $bmp.Dispose();
           ];
           if (await tryCapture('ffmpeg', ffmpegNamed, tmp)) return readAudioFile(tmp);
         }
-        // Prefer ffmpeg WASAPI loopback (real samples). Legacy PowerShell stub removed.
         const ffmpegLoopback = [
           '-f',
           'wasapi',
@@ -412,10 +427,16 @@ $bmp.Dispose();
           tmp,
         ];
         if (await tryCapture('ffmpeg', ffmpegDefault, tmp)) return readAudioFile(tmp);
+        const hasFfmpeg = await commandExists('ffmpeg');
+        if (!hasFfmpeg) {
+          return {
+            ok: false,
+            error: 'Windows system audio needs ffmpeg on PATH with WASAPI loopback support. Install ffmpeg and retry.',
+          };
+        }
         return {
           ok: false,
-          error:
-            'Windows system audio needs ffmpeg on PATH with WASAPI loopback support (e.g. winget install ffmpeg).',
+          error: 'Windows system audio needs ffmpeg on PATH with WASAPI loopback support (e.g. winget install ffmpeg).',
         };
       },
     };
@@ -538,9 +559,17 @@ $bmp.Dispose();
           }
         }
       }
+      const hasPw = await commandExists('pw-record');
+      const hasParec = await commandExists('parec');
+      if (!hasPw && !hasParec) {
+        return {
+          ok: false,
+          error: 'System audio capture requires PipeWire/PulseAudio utilities (pw-record or parec). None were found on PATH.',
+        };
+      }
       return {
         ok: false,
-        error: 'System audio capture requires PipeWire/PulseAudio utilities (pw-record or parec).',
+        error: 'System audio capture failed. If you are on PipeWire, install pw-record; on PulseAudio, install parec.',
       };
     },
   };

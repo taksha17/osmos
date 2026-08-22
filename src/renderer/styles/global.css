@@ -692,7 +692,7 @@ p { color: var(--muted); line-height: 1.6; margin: 0; }
 
 .dash-hero {
   display: grid;
-  grid-template-columns: 1.1fr 0.9fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 24px;
   align-items: center;
   padding: 24px 26px;
@@ -780,7 +780,7 @@ p { color: var(--muted); line-height: 1.6; margin: 0; }
 }
 .dash-profile {
   display: grid;
-  grid-template-columns: 1.1fr 0.9fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px;
   margin-top: 8px;
 }
@@ -1027,7 +1027,7 @@ p { color: var(--muted); line-height: 1.6; margin: 0; }
 }
 .dash-status__grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 10px;
 }
 .dash-status__item {
@@ -1145,7 +1145,7 @@ p { color: var(--muted); line-height: 1.6; margin: 0; }
 
 .dash-mode-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 8px;
 }
 .dash-mode {
@@ -1577,7 +1577,6 @@ p { color: var(--muted); line-height: 1.6; margin: 0; }
   background: rgba(255, 93, 108, 0.12);
   border-color: rgba(255, 93, 108, 0.38);
   color: #ff9aa3;
-  animation: pulse 1.4s ease-in-out infinite;
 }
 .mic-btn--live:hover:not(:disabled) {
   background: rgba(255, 93, 108, 0.2);
@@ -1587,10 +1586,6 @@ p { color: var(--muted); line-height: 1.6; margin: 0; }
   font-size: 0.82rem;
   opacity: 0.75;
   font-style: italic;
-}
-@keyframes pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.03); }
 }
 
 /* ── Overlay (Cluely-like) ── */
@@ -1810,6 +1805,7 @@ body.overlay-route {
   color: #ff9aa3;
   background: rgba(255, 93, 108, 0.1);
 }
+
 .overlay-tools__status {
   margin-left: auto;
   font-size: 0.72rem;

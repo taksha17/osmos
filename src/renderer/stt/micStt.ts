@@ -37,19 +37,23 @@ function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
 }
 
 export async function listMicrophones(): Promise<MicDevice[]> {
+  let granted = false;
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     stream.getTracks().forEach((t) => t.stop());
+    granted = true;
   } catch {
     /* still try enumerate */
   }
   const devices = await navigator.mediaDevices.enumerateDevices();
-  return devices
-    .filter((d) => d.kind === 'audioinput')
-    .map((d, i) => ({
-      deviceId: d.deviceId,
-      label: d.label || `Microphone ${i + 1}`,
-    }));
+  const audio = devices.filter((d) => d.kind === 'audioinput');
+  if (!granted && audio.length === 0) {
+    return [];
+  }
+  return audio.map((d, i) => ({
+    deviceId: d.deviceId,
+    label: d.label || `Microphone ${i + 1}`,
+  }));
 }
 
 export function webspeechAvailable(): boolean {
