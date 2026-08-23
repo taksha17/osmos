@@ -4,29 +4,97 @@
  * Plain Node on PATH works; Electron's own Node crashes on GLib when loading ORT.
  *
  * Uses a persistent `--serve` worker so continuous chunks reuse a warm model.
+ *
+ * Packaged builds: worker + @xenova/transformers live under app.asar.unpacked
+ * (external Node cannot read asar). Never use app.getAppPath() as spawn cwd —
+ * that path is the asar *file* and causes spawn ENOTDIR.
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app } from 'electron';
 import type { TranscribeRequest, TranscribeResponse } from '../../shared/types.js';
 import readline from 'node:readline';
+import { findOnPath, isExecutableFile, safeSpawnCwd } from './resolveBin.js';
+
+function isDir(p: string): boolean {
+  try {
+    return fsSync.existsSync(p) && fsSync.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function isFile(p: string): boolean {
+  try {
+    return fsSync.existsSync(p) && fsSync.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** Unpacked app root for packaged builds (real directory). */
+function unpackedRoot(): string {
+  return path.join(process.resourcesPath, 'app.asar.unpacked');
+}
 
 function projectRoot(): string {
-  if (app.isPackaged) return app.getAppPath();
+  if (app.isPackaged) {
+    const unpacked = unpackedRoot();
+    if (isDir(unpacked)) return unpacked;
+    return process.resourcesPath;
+  }
+  // Bundled main lives at dist-electron/main/index.js → repo root is ../..
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 }
 
+function resolveWorkerScript(): string {
+  if (app.isPackaged) {
+    const candidates = [
+      path.join(unpackedRoot(), 'scripts', 'whisper-worker.mjs'),
+      path.join(process.resourcesPath, 'scripts', 'whisper-worker.mjs'),
+      path.join(process.resourcesPath, 'app.asar.unpacked', 'scripts', 'whisper-worker.mjs'),
+    ];
+    for (const c of candidates) {
+      if (isFile(c)) return c;
+    }
+    return candidates[0]!;
+  }
+  return path.join(projectRoot(), 'scripts', 'whisper-worker.mjs');
+}
+
 function resolveNodeBinary(): string {
-  return (
-    process.env.OSMOS_NODE_BINARY ||
-    process.env.UNCON_NODE_BINARY ||
-    process.env.npm_node_execpath ||
-    process.env.NODE_BINARY ||
-    'node'
-  );
+  const fromEnv = [
+    process.env.OSMOS_NODE_BINARY,
+    process.env.UNCON_NODE_BINARY,
+    process.env.NODE_BINARY,
+    // Only trust npm's path when it is a real file (packaged apps often inherit junk).
+    process.env.npm_node_execpath,
+  ];
+  for (const c of fromEnv) {
+    if (c && isExecutableFile(c)) return c;
+  }
+  const onPath = findOnPath('node');
+  if (onPath) return onPath;
+  return process.platform === 'win32' ? 'node.exe' : 'node';
+}
+
+function spawnErrorHint(err: NodeJS.ErrnoException, nodeBin: string, worker: string, cwd: string): string {
+  const code = err.code || '';
+  if (code === 'ENOTDIR') {
+    return (
+      `Local Whisper spawn ENOTDIR (cwd or binary is not a directory/file). ` +
+      `node=${nodeBin} worker=${worker} cwd=${cwd}. ` +
+      `If this is a packaged build, ensure scripts/whisper-worker.mjs is asar-unpacked.`
+    );
+  }
+  if (code === 'ENOENT' || /ENOENT/i.test(err.message)) {
+    return 'Local Whisper needs the `node` binary on PATH (or set OSMOS_NODE_BINARY).';
+  }
+  return err.message;
 }
 
 type Pending = {
@@ -72,23 +140,41 @@ function ensureServe(): Promise<void> {
 
   const starting: Promise<void> = new Promise<void>((resolve, reject) => {
     const root = projectRoot();
-    const worker = path.join(root, 'scripts/whisper-worker.mjs');
+    const worker = resolveWorkerScript();
     const nodeBin = resolveNodeBinary();
     const cacheDir = cacheDirPath();
+    const cwd = safeSpawnCwd(root);
+
+    if (!isFile(worker)) {
+      reject(
+        new Error(
+          `Local Whisper worker missing at ${worker}. ` +
+            (app.isPackaged
+              ? 'Repack with scripts/whisper-worker.mjs in asarUnpack.'
+              : 'Check scripts/whisper-worker.mjs exists in the repo.'),
+        ),
+      );
+      return;
+    }
 
     let child;
     try {
       child = spawn(nodeBin, [worker, '--serve', cacheDir], {
-        cwd: root,
+        cwd,
         env: {
           ...process.env,
           OSMOS_ROOT: root,
           UNCON_ROOT: root,
+          // Help system Node find unpacked deps next to the worker.
+          NODE_PATH: [path.join(root, 'node_modules'), process.env.NODE_PATH]
+            .filter(Boolean)
+            .join(path.delimiter),
         },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch (e) {
-      reject(new Error(`Could not start local Whisper (${resolveNodeBinary()}): ${e instanceof Error ? e.message : String(e)}`));
+      const err = e as NodeJS.ErrnoException;
+      reject(new Error(spawnErrorHint(err, nodeBin, worker, cwd)));
       return;
     }
     serveProc = child;
@@ -102,11 +188,7 @@ function ensureServe(): Promise<void> {
     };
 
     child.on('error', (err) => {
-      failStart(
-        err.message.includes('ENOENT')
-          ? 'Local Whisper needs the `node` binary on PATH (or set OSMOS_NODE_BINARY).'
-          : err.message,
-      );
+      failStart(spawnErrorHint(err as NodeJS.ErrnoException, nodeBin, worker, cwd));
     });
 
     child.on('close', () => {
@@ -187,23 +269,33 @@ function runOneShot(
   cacheDir: string,
 ): Promise<{ ok: boolean; text?: string; error?: string }> {
   const root = projectRoot();
-  const worker = path.join(root, 'scripts/whisper-worker.mjs');
+  const worker = resolveWorkerScript();
   const nodeBin = resolveNodeBinary();
+  const cwd = safeSpawnCwd(root);
 
   return new Promise((resolve) => {
+    if (!isFile(worker)) {
+      resolve({ ok: false, error: `Local Whisper worker missing at ${worker}` });
+      return;
+    }
+
     let child;
     try {
       child = spawn(nodeBin, [worker, audioPath, cacheDir], {
-        cwd: root,
+        cwd,
         env: {
           ...process.env,
           OSMOS_ROOT: root,
           UNCON_ROOT: root,
+          NODE_PATH: [path.join(root, 'node_modules'), process.env.NODE_PATH]
+            .filter(Boolean)
+            .join(path.delimiter),
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch (e) {
-      resolve({ ok: false, error: `Could not start local Whisper (${resolveNodeBinary()}): ${e instanceof Error ? e.message : String(e)}` });
+      const err = e as NodeJS.ErrnoException;
+      resolve({ ok: false, error: spawnErrorHint(err, nodeBin, worker, cwd) });
       return;
     }
 
@@ -219,10 +311,7 @@ function runOneShot(
     child.on('error', (err) => {
       resolve({
         ok: false,
-        error:
-          err.message.includes('ENOENT')
-            ? 'Local Whisper needs the `node` binary on PATH (or set OSMOS_NODE_BINARY).'
-            : err.message,
+        error: spawnErrorHint(err as NodeJS.ErrnoException, nodeBin, worker, cwd),
       });
     });
 

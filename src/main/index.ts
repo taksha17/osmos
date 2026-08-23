@@ -26,6 +26,7 @@ import { checkForUpdates } from './services/updates.js';
 import { retrieveChunks } from './services/retrieval.js';
 import { extractTextFromUpload } from './services/documentExtract.js';
 import { assembleInterviewPrep } from './services/profilePrep.js';
+import { listAudioDevices } from './services/audioDevices.js';
 import {
   addQuestionBankItem,
   deleteQuestionBankItem,
@@ -63,6 +64,7 @@ import {
   type SystemAudioResponse,
   type TranscribeRequest,
   type UpdateStatus,
+  type AudioDevicesResponse,
   type AppSettings,
 } from '../shared/types.js';
 
@@ -88,10 +90,16 @@ function resolveAppIcon() {
 const appIcon = resolveAppIcon();
 
 // Linux: unpacked/dev Electron lacks a correctly configured chrome-sandbox.
-// AppImages and dir builds need --no-sandbox; ozone auto picks Wayland/X11.
+// AppImages and dir builds need --no-sandbox.
+// Packaged builds force X11: Wayland + GTK can fatal-abort on GNOME schema
+ // mismatch (`xsettings` / `antialiasing`) — see scripts/start-release.mjs.
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('no-sandbox');
-  app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
+  if (app.isPackaged) {
+    app.commandLine.appendSwitch('ozone-platform', 'x11');
+  } else {
+    app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
+  }
   app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer');
 }
 
@@ -439,6 +447,10 @@ function registerIpc() {
     return platform.captureRegion();
   });
 
+  ipcMain.handle('screen:capture-full', async (): Promise<CaptureResult> => {
+    return platform.captureFullScreen();
+  });
+
   ipcMain.handle('system:audio', async (_e, req: SystemAudioRequest): Promise<SystemAudioResponse> => {
     try {
       return await platform.captureSystemAudio(req?.durationMs, req?.device);
@@ -446,6 +458,38 @@ function registerIpc() {
       return {
         ok: false,
         error: err instanceof Error ? err.message : 'System audio capture failed',
+      };
+    }
+  });
+
+  ipcMain.handle('audio:list-devices', async (): Promise<AudioDevicesResponse> => {
+    try {
+      const list = await listAudioDevices();
+      if (!list) {
+        return { ok: false, error: 'Audio device listing is only available on Linux.' };
+      }
+      return {
+        ok: true,
+        inputs: list.inputs,
+        monitors: list.monitors,
+        preferredInputId: list.preferredInputId,
+        preferredMonitorId: list.preferredMonitorId,
+      };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'Could not list audio devices' };
+    }
+  });
+
+  ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise<SystemAudioResponse> => {
+    try {
+      if (!platform.captureMicAudio) {
+        return { ok: false, error: 'Native mic capture is not available on this platform.' };
+      }
+      return await platform.captureMicAudio(req?.durationMs, req?.device);
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Microphone capture failed',
       };
     }
   });
@@ -663,13 +707,24 @@ function registerShortcuts() {
     });
     const b = globalShortcut.register(`${mod}+Shift+A`, () => {
       if (!overlay || overlay.isDestroyed()) createOverlay();
+      overlay?.showInactive();
       overlay?.webContents.send('shortcut', 'ask');
     });
     const c = globalShortcut.register(`${mod}+Shift+C`, () => {
       if (!overlay || overlay.isDestroyed()) createOverlay();
+      overlay?.showInactive();
       overlay?.webContents.send('shortcut', 'capture');
     });
+    // Ctrl/Cmd+Enter → Assist (same as overlay composer)
+    const d = globalShortcut.register('CommandOrControl+Enter', () => {
+      if (!overlay || overlay.isDestroyed()) createOverlay();
+      overlay?.showInactive();
+      overlay?.webContents.send('shortcut', 'ask');
+    });
     shortcutsRegistered = Boolean(a && b && c);
+    if (!d) {
+      console.warn('[shortcuts] CommandOrControl+Enter unavailable (common on Wayland)');
+    }
     if (!shortcutsRegistered) {
       console.warn(
         '[shortcuts] registration returned false (common on Wayland) — use in-app overlay controls',
@@ -686,7 +741,13 @@ app.whenReady().then(() => {
   migrateLegacyBanksIntoActiveProfile();
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
     const p = String(permission);
-    if (p === 'media' || p === 'microphone' || p === 'audioCapture') {
+    if (
+      p === 'media' ||
+      p === 'microphone' ||
+      p === 'audioCapture' ||
+      p === 'display-capture' ||
+      p === 'desktopCapture'
+    ) {
       callback(true);
       return;
     }
@@ -694,7 +755,13 @@ app.whenReady().then(() => {
   });
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
     const p = String(permission);
-    return p === 'media' || p === 'microphone' || p === 'audioCapture';
+    return (
+      p === 'media' ||
+      p === 'microphone' ||
+      p === 'audioCapture' ||
+      p === 'display-capture' ||
+      p === 'desktopCapture'
+    );
   });
 
   registerIpc();

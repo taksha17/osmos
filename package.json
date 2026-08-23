@@ -71,9 +71,13 @@
       "node_modules/tesseract.js/**/*"
     ],
     "asarUnpack": [
+      "scripts/whisper-worker.mjs",
+      "node_modules/@xenova/transformers/**/*",
       "node_modules/onnxruntime-node/**/*",
+      "node_modules/onnxruntime-common/**/*",
       "node_modules/sharp/**/*",
-      "node_modules/tesseract.js/**/*"
+      "node_modules/tesseract.js/**/*",
+      "node_modules/protobufjs/**/*"
     ],
     "linux": {
       "target": [

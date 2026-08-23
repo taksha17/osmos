@@ -4,9 +4,10 @@
 
 ## Product
 
-**OSMOS** is an MIT-licensed, open-source alternative to Cluely: a real-time desktop AI copilot for interviews, meetings, sales calls, and exams. It listens to audio, watches your screen, and suggests answers through a floating overlay—without subscription fees or cloud lock-in.
+**OSMOS** is an MIT-licensed, open-source alternative to Cluely: a real-time desktop AI copilot for interviews, meetings, sales calls, and exams. It listens to audio, can OCR the screen on demand, and suggests answers through a floating overlay—without subscription fees or cloud lock-in.
 
 - Path: `/media/taksha/New Volume/OSMOS` (repo folder; product name is **OSMOS**)
+- GitHub: `https://github.com/taksha17/osmos` (public)
 - **Not** a fork or rebrand of Natively. Natively at `/media/taksha/New Volume/natively` is **personal reference only** — study ideas, never copy proprietary/source-available code.
 - License: MIT (`LICENSE`)
 - Current version: **0.5.1** (`package.json`)
@@ -23,7 +24,7 @@
 | Web search | DuckDuckGo (default) / Tavily / SearXNG |
 | Offline STT | System Node worker + `@xenova/transformers` Whisper tiny |
 | Screen OCR | Main-process `tesseract.js` via `ocr:extract` IPC |
-| Audio loopback | Platform adapters: Linux `pw-record`/`parec`, Windows PowerShell WASAPI stub, macOS `ffmpeg`/`rec` |
+| Audio loopback | Platform adapters: Linux `pw-record`/`parec` (sink `*.monitor`), Windows `ffmpeg` WASAPI, macOS `ffmpeg`/`rec` + BlackHole |
 | Settings | `electron-store` → `~/.config/OSMOS/osmos-settings.json` (Linux); migrates from legacy `Unconventionally/` |
 | Packaging | electron-builder (AppImage + deb on Linux) |
 
@@ -31,13 +32,15 @@
 
 ```bash
 npm install
-npm run dev          # Vite :5179 + Electron (OSMOS_DEV=1)
-npm run build        # renderer + electron bundles
+npm run dev              # Vite :5179 + Electron (OSMOS_DEV=1)
+npm run build            # renderer + electron bundles
+npm run build:electron   # main/preload only (fast after main/preload edits)
 npm run typecheck
-npm run pack         # package for **current OS only** → release/
-npm run pack:linux   # AppImage + deb + tar.gz (Linux host)
-npm run pack:mac     # dmg (must run on macOS host)
-npm run pack:win     # NSIS installer (must run on Windows host)
+npm run pack             # package for **current OS only** → release/
+npm run pack:linux       # AppImage + deb + tar.gz (Linux host)
+npm run pack:mac         # dmg (must run on macOS host)
+npm run pack:win         # NSIS installer (must run on Windows host)
+npm run start:release    # run unpacked Linux build (see Symptom D)
 ```
 
 **Do not run `npm run pack:all` on a single machine.** It tries to build mac+win+linux together and fails on Linux with `Cannot find module 'dmg-license'` (mac dmg tooling). Use `npm run pack` or OS-specific scripts / CI.
@@ -52,12 +55,15 @@ Dev entry: `scripts/dev.mjs` → builds electron → Vite → `electron . --no-s
 
 ```
 src/
-  shared/          # types, features registry, modes (imported by main + renderer)
-  main/            # Electron main: windows, IPC, Ollama/SearXNG/Whisper/OCR/Providers/History
-    platform/      # Linux / macOS / Windows adapters (region capture, audio loopback)
-    services/      # ollama, searxng, whisper, localWhisper, ocr, providers, companyIntel, history, updates, retrieval, questionBank
+  shared/          # types, features, modes, continuousAssist, linuxAudioDevices
+  main/
+    platform/      # Linux / macOS / Windows adapters (capture, audio loopback, stealth)
+    services/      # ollama, whisper, localWhisper, ocr, audioDevices, screenCapture,
+                   # resolveBin, providers, retrieval, history, …
   preload/         # contextBridge → window.osmos
-  renderer/        # React UI (App tabs, ChatPanel, ProfilePanel, STT, History, Evidence, QuestionBankTab)
+  renderer/
+    stt/           # micStt, useMicStt, useSystemAudioStt, ocr (no Transformers.js)
+    components/    # ChatPanel (Smart overlay), Settings, Profile, …
 scripts/
   whisper-worker.mjs   # system Node Whisper (NOT Electron) — required for local STT
 docs/
@@ -74,31 +80,39 @@ docs/
 6. Prefer `@shared/...` imports in renderer; main uses relative `../shared/...` with `.js` extensions in compiled ESM.
 7. Heavy native/WASM work (Whisper, Tesseract) stays in **main or a system Node worker** — not the Electron renderer.
 8. Provider abstraction: chat routes through `chatWithProvider` / `streamWithProvider` in `src/main/services/providers.ts`, not direct Ollama calls.
+9. After **main/preload** changes: `npm run build:electron` and restart `npm run dev` (Vite HMR is not enough).
+
+## Smart assist model (do not confuse with Cluely screen-share)
+
+**Smart / Continuous mode listens to meeting audio — it does not steal the user’s Zoom/Meet screen share.**
+
+| Capability | Mechanism | Notes |
+|---|---|---|
+| Meeting audio | PipeWire/Pulse **sink monitor** (`default-sink.monitor`) via `pw-record` / `parec` | Independent of screen-share portal |
+| Mic STT | Linux: native `pw-record` on preferred input; else MediaRecorder | Device list from `pactl` via `audio:list-devices` |
+| Screen OCR | **On-demand only** (📷 / Alt+Shift+C / `screen:capture-full`) | Never loop `desktopCapturer` on Wayland |
+| Assist trigger | Transcript finals → `shouldAutoAssist` → LLM | Ctrl+Enter / Assist button also works |
+
+**Why:** On Ubuntu Wayland, Electron `desktopCapturer` opens the xdg-desktop-portal picker. Looping it every few seconds spam-popups, breaks PipeWire (`thread-loop` errors), and fights real meeting shares. Do **not** reintroduce continuous portal capture.
+
+Optional CLI tools for quieter on-demand screenshots: `gnome-screenshot`, `grim`, `spectacle`.
 
 ## What is live (v0.5.1)
 
 - Launcher + frameless overlay (`#/overlay`) — always-on-top, translucent, draggable
 - Streaming LLM chat + cancel (Ollama + cloud providers)
-- SearXNG grounding (skipped in **interview** mode unless query looks like research)
+- SearXNG / DuckDuckGo / Tavily grounding (skipped in **interview** mode unless query looks like research)
 - Profile + **named multi-profiles** + modes (interview / meeting / general) → injected into system prompt
 - First-run onboarding wizard; overlay quick menu (profile / mode / mic)
 - Mic STT: `local-whisper` (Node worker), `webspeech`, `openai-whisper`
-- Screen region capture + OCR into chat (Linux: gnome-screenshot/spectacle; macOS: screencapture; Windows: PowerShell full-screen fallback)
-- System audio: continuous loopback → STT → Smart assist (Linux `pw-record`/`parec`, Windows `ffmpeg` WASAPI, macOS `ffmpeg`/`rec`); overlay Audio toggles listen; Chat 🔊 is one-shot
-- Settings persistence, mic picker, stealth (OS capture exclusion on Win/macOS)
-- Global shortcuts: toggle overlay, focus ask, trigger capture
-- Company intel: SearXNG research + provider-based synthesis for interview prep
-- Document RAG: attach reference files, lightweight TF-IDF retrieval injected into chat context
-- Question bank + STAR templates: file-backed interview prep via `question:list/add/delete` and `star:list/add/delete` IPC
-- Meeting history: file-backed session persistence + history tab
-- Live transcript timeline with auto-scroll
-- Answer attribution / evidence chips per assistant message
-- Multi-provider LLM settings UI (OpenAI, Anthropic, Groq, OpenRouter, LiteLLM)
-- Auto-update checker scaffold (update feed URL input)
-- Branding: app icon placeholder, name lock in package metadata
-- Linux packaging metadata fixed (`homepage`, author email, deb `maintainer`)
-- Cross-platform CI: GitHub Actions matrix builds all three platforms from `v*` tags
-- Auto-dependency installers: Linux installer pulls `pipewire`/`pulseaudio-utils` for Smart assist; Windows NSIS installer extracts `ffmpeg` automatically
+- On-demand screen OCR (`captureFullScreen` → Tesseract); region tools when installed
+- System audio: continuous loopback → STT → Smart assist (Linux monitor, Windows WASAPI, macOS BlackHole/`ffmpeg`)
+- Linux audio device sanitization (`src/shared/linuxAudioDevices.ts` + `audioDevices.ts`) — prefer laptop mic / speaker monitor
+- Settings persistence, mic + loopback pickers, stealth (OS capture exclusion on Win/macOS)
+- Shortcuts: Ctrl/Cmd+Enter Assist; Alt+Shift+Space overlay; Alt+Shift+A ask; Alt+Shift+C capture (Wayland globals often fail — in-app still works)
+- Company intel, document RAG, question bank + STAR, meeting history
+- Live transcript timeline; evidence chips; multi-provider settings; update-feed scaffold
+- Cross-platform CI from `v*` tags; Linux installer pulls PipeWire deps; Windows NSIS extracts `ffmpeg`
 
 ## Recent fixes (do not regress)
 
@@ -110,99 +124,98 @@ Documented so the next agent does not reintroduce these bugs:
   - **Fix:** Keep `homepage`, `author.email`, and `build.linux.maintainer` in `package.json`.
 - **Symptom B:** `npm run pack:all` fails on Linux with `Cannot find module 'dmg-license'`.
   - **Cause:** That script tried to build mac+win targets from Linux.
-  - **Fix:** Use `npm run pack` (current OS) or OS-specific scripts / CI. `pack:all` now exits with a clear error instead of a cryptic module miss.
+  - **Fix:** Use `npm run pack` (current OS) or OS-specific scripts / CI. `pack:all` now exits with a clear error.
 - **Symptom C:** Packaged `.AppImage` “doesn't run” with `dlopen(): error loading libfuse.so.2`.
-  - **Cause:** AppImage runtime needs FUSE 2; Ubuntu often only has fuse3.
   - **Fix:** `npm run start:release` (uses `release/linux-unpacked/`), or install the `.deb`, or `sudo apt install libfuse2t64`.
+- **Symptom D:** Unpacked Linux binary / `start:release` dies with
+  `GLib-GIO-ERROR … xsettings … antialiasing`.
+  - **Cause:** Electron/GTK under Wayland + bad `XDG_DATA_DIRS`.
+  - **Fix:** `scripts/start-release.mjs` forces `GDK_BACKEND=x11`, cleans schema dirs, `--ozone-platform=x11`. Packaged main also forces X11 ozone.
+- **Symptom E:** Overlay audio / Local Whisper fails with `spawn ENOTDIR` (Ubuntu packaged) or vague ffmpeg/spawn errors.
+  - **Cause:** Packaged Whisper used `app.getAppPath()` (`…/app.asar`, a *file*) as `spawn` cwd; bare tools on a dirty PATH can also ENOTDIR.
+  - **Fix:** Run Whisper from `app.asar.unpacked` with a real directory cwd (`resolveBin.ts` / `safeSpawnCwd`); asarUnpack `scripts/whisper-worker.mjs` + `@xenova/transformers`; absolute paths for capture tools (incl. bundled `ffmpeg.exe` on Windows).
 - Packaged `files` / `asarUnpack` must include `tesseract.js` (and existing Whisper/ORT deps).
 - Linux main process always appends `no-sandbox` + ozone auto (packaged and unpackaged).
-- **CI packaging failures:** electron-builder on tag push tried to auto-publish releases from packaging jobs and failed with 403 / auth errors.
-  - **Fix:** Set `publish: []` in `package.json` `build` config; keep `GH_TOKEN` only in the dedicated `create-release` job; added `--publish never` to `pack:linux`, `pack:mac`, `pack:win` scripts.
-- **Windows build flakes:** GitHub-hosted Windows runners intermittently fail downloading Electron release assets.
-  - **Fix:** Added `ELECTRON_MIRROR` mirror, per-platform `electron-builder` cache, and `nick-fields/retry` wrapper around packaging jobs in `.github/workflows/ci.yml`.
-- **Linux installer missing audio deps:** fresh Ubuntu installs failed system audio because `pw-record`/`parec` were absent.
-  - **Fix:** `linux-install.sh` now installs `pipewire` and `pulseaudio-utils`; error messages mention exact `apt` packages.
+- **CI packaging:** `publish: []` in electron-builder; `--publish never` on pack scripts; `GH_TOKEN` only in `create-release` job.
+- **Windows build flakes:** `ELECTRON_MIRROR`, electron-builder cache, retry wrapper in `.github/workflows/ci.yml`.
+- **Linux installer missing audio deps:** `linux-install.sh` installs `pipewire` + `pulseaudio-utils`.
 
-### Screen OCR
+### Screen OCR + Wayland portal
 
-- **Symptom:** Stub `main/services/ocr.ts` returned empty text; running `tesseract.js` in the **renderer** is brittle under Electron.
-- **Fix:** Real OCR in `src/main/services/ocr.ts` via `createWorker('eng')`. IPC `ocr:extract`. Renderer `src/renderer/stt/ocr.ts` only forwards to `window.osmos.ocrExtract`. Chat 📷 button: `captureRegion` → `ocrExtract` → paste into composer.
-- Capture helpers live on `PlatformAdapter.captureRegion()` in `src/main/platform/index.ts`.
+- **Symptom:** Stub OCR / renderer Tesseract brittle under Electron.
+  - **Fix:** Main-process `src/main/services/ocr.ts`; IPC `ocr:extract`; renderer only forwards.
+- **Symptom F:** No `gnome-screenshot`/`spectacle` on many Ubuntu installs → region capture always cancelled.
+  - **Fix:** `captureFullScreen()` via `src/main/services/screenCapture.ts` — try CLI (`gnome-screenshot -f`, `spectacle -f`, `grim`, `scrot`) then Electron `desktopCapturer` last.
+- **Symptom F2 (critical):** Continuous Smart screen OCR looped `desktopCapturer` → endless portal dialogs, PipeWire `thread-loop` errors, fights Zoom/Meet share.
+  - **Fix:** Smart = **audio only**. Screen OCR = **on-demand** (📷 / hotkey). Never reintroduce a continuous portal capture loop.
+
+### Shortcuts
+
+- **Symptom G:** Ctrl+Enter Assist dead (plain Enter handled first); Alt+Shift+A/C sent `shortcut` but preload never exposed it.
+  - **Fix:** Check Ctrl/Cmd+Enter **before** Enter; `window.osmos.onShortcut`; overlay capture-phase keydown; register `CommandOrControl+Enter` when OS allows. Wayland often cannot register globals — in-app still works.
+
+### Linux system audio (PipeWire)
+
+- **Symptom H:** `pw-record` without `--target` records the default *mic*, not the sink monitor; many builds reject `--duration`.
+  - **Fix:** Always resolve a real `*.monitor` via `pactl` (`audioDevices.ts` + `linuxAudioDevices.ts`); `tryPwRecordTimed` writes a file and SIGTERM after duration (no `--duration` flag); serialize captures with `withLinuxAudioLock`; soft-retry in `useSystemAudioStt`.
+- Working smoke test on Zenbook-class machines:
+  ```bash
+  timeout 2 pw-record --target="$(pactl get-default-sink).monitor" \
+    --rate=16000 --channels=1 --format=s16 /tmp/osmos-test.wav
+  ```
+- Device heuristics live in `src/shared/linuxAudioDevices.ts` (inspired by personal Natively logic — **reimplemented**, not copied wholesale). Prefer laptop digital mic (`DEV=6` / `_6__source`) and speaker sink monitor over HDMI.
 
 ### Ollama empty answers / “only (web: N hits)”
 
-- **Symptom:** SearXNG succeeded, UI showed `(web: 8 hits)` with no body. `gemma4:*` spent ~1–2 min in `thinking` on huge résumé+JD+web prompts before any `content`.
-- **Fixes:**
-  - Stream parser yields `{ kind: 'thinking' | 'content' }` (`src/main/services/ollama.ts`).
-  - UI status: “Model thinking…”.
-  - Interview mode skips web search unless the query looks like research.
-  - Profile/JD clipped in `buildChatContext`.
-  - Empty final answer → explicit `error` event (not a blank bubble + web footer).
-  - Probe Ollama saves form URL first, then probes that host (LAN often `http://192.168.4.31:11434`).
+- Stream parser yields `{ kind: 'thinking' | 'content' }`; UI “Model thinking…”.
+- Interview mode skips web search unless the query looks like research.
+- Profile/JD clipped in `buildChatContext`; empty final → explicit `error` event.
+- Probe Ollama saves form URL first, then probes that host (LAN often `http://192.168.4.31:11434`).
 
 ### Local Whisper `registerBackend`
 
-- **Symptom:** Transformers.js/ONNX in the renderer crashed (`Cannot read properties of undefined (reading 'registerBackend')`).
-- **Fix:** MediaRecorder → WAV in renderer → IPC → `localWhisper.ts` spawns `node scripts/whisper-worker.mjs` (system Node, not Electron).
+- **Do not** run `@xenova/transformers` / onnxruntime in the Electron **renderer**.
+- Path: MediaRecorder or native WAV → IPC → `localWhisper.ts` → `scripts/whisper-worker.mjs` (system Node).
 
-### Multi-provider chat
+### Multi-provider / RAG / history / question bank
 
-- **Symptom:** Chat was hardcoded to Ollama only; cloud providers could not be used.
-- **Fix:** Added `ProviderConfig` / `LlmProvider` types, `src/main/services/providers.ts` with `chatWithProvider` and `streamWithProvider`. OpenAI-compatible providers use `/chat/completions`. Settings UI added under Settings tab.
+- `providers.ts` + Settings UI for cloud LLMs.
+- Document RAG: TF-IDF retrieval in `retrieval.ts` (not full-text paste).
+- Question bank + STAR + company intel + file-backed history — see IPC table.
 
-### Document RAG
+### Overlay polish
 
-- **Symptom:** Full document text was pasted into system prompt, quickly hitting context limits for large files.
-- **Fix:** Added `src/main/services/retrieval.ts` with lightweight chunk/TF-IDF retrieval. `buildChatContext` now retrieves top-k relevant chunks instead of full-text paste. Renderer `Documents` tab remains the attachment surface.
-
-### Company intel / RAG / history / question bank
-
-- Company intel: web search + provider-based synthesis.
-- Document RAG stores `DocumentReference[]` in settings; `buildChatContext` uses lightweight TF-IDF retrieval instead of full-text paste.
-- Question bank + STAR templates: file-backed via `question:list/add/delete` and `star:list/add/delete` IPC; injected into interview system prompts; overlay **STAR story** action.
-- Meeting history uses file-backed `chat-history.json` via `history:list/save/delete` IPC. ChatPanel auto-saves sessions.
-
-### Overlay polish / audio retry loop / Ubuntu home layout
-
-- **Symptom:** overlay “buffering” / vibration on Ubuntu/Windows when no audio device or missing `ffmpeg`.
-  - **Fix:** `ChatPanel.tsx` now guards mic/system auto-start with 5s error backoff so failed capture does not thrash start/stop.
-- **Symptom:** Windows installer `ffmpeg` section was a stub and NSIS had compile/runtime issues.
-  - **Fix:** Real PowerShell-based ffmpeg extraction in `windows-installer.nsi`; removed duplicate `.onInit`, `Var TEMP` shadowing, invalid `MB_ICONERROR`, and added `WinVer.nsh`.
-- **Symptom:** Ubuntu home dashboard layout collapsed / overflowed.
-  - **Fix:** Use `minmax(0, ...)` and `auto-fit` for hero/profile/status/mode grids; added responsive breakpoints.
-- **Symptom:** Overlay live mic button caused visible vibration.
-  - **Fix:** Removed aggressive `pulse` animation from `.mic-btn--live`; stabilized idle transitions.
-- **Symptom:** Linux system audio showed generic missing-tool error.
-  - **Fix:** `linux-install.sh` installs `pipewire` and `pulseaudio-utils`; `src/main/platform/index.ts` checks `pw-record`/`parec` availability and returns actionable `apt` instructions.
+- Mic/system auto-start: 5s error backoff (no thrash).
+- Home dashboard: `minmax(0, …)` / `auto-fit` grids.
+- Windows NSIS: real ffmpeg extract; no duplicate `.onInit` / invalid `MB_ICONERROR`.
 
 ### Stealth / screen-share exclusion
 
-- `platform.applyOsCaptureExclusion` → Electron `setContentProtection` on Windows (`WDA_EXCLUDEFROMCAPTURE`) and macOS (`NSWindowSharingNone`).
-- Re-applied on overlay `show` / `focus` (Windows can drop affinity across hide/show).
-- Linux: no OS exclusion API — skip taskbar + always-on-top; tell users to share a tab/window, not the full desktop.
-- macOS caveat: newer ScreenCaptureKit full-desktop shares may still include the overlay — prefer app/tab share.
+- Win/macOS: `setContentProtection`; re-apply on overlay show/focus.
+- Linux: no OS exclusion API — skip taskbar + always-on-top; share a **tab/window**, not full desktop.
+- macOS: prefer app/tab share (ScreenCaptureKit full-desktop may still include overlay).
 
 ## Known gotchas (do not regress)
 
 ### Ollama
 
-- Default settings may be `http://127.0.0.1:11434`. This machine’s LAN server is often `http://192.168.4.31:11434` with models `gemma4:e4b`, `qwen2.5:1.5b`.
-- **Probe Ollama** must save the form URL first, then call `listOllamaModels(baseUrl)` — never probe only stale disk settings.
-- Prefer `qwen2.5:1.5b` when speed matters; `gemma4:e4b` is slower because of thinking.
+- Default may be `http://127.0.0.1:11434`. Dev LAN often `http://192.168.4.31:11434` (`gemma4:e4b`, `qwen2.5:1.5b`).
+- Prefer `qwen2.5:1.5b` when speed matters; `gemma4:e4b` is slower (thinking).
 
-### STT / Whisper
+### STT / Whisper / audio
 
-- **Do not** run `@xenova/transformers` / onnxruntime in the Electron **renderer**.
-- Local Whisper path: MediaRecorder → WAV in renderer → IPC → persistent `scripts/whisper-worker.mjs --serve` (or one-shot fallback).
-- Web Speech on Linux often fails with `network` (Google cloud). Prefer `local-whisper`.
+- Local Whisper = system Node worker only.
+- Web Speech on Linux often fails with `network` — prefer `local-whisper`.
+- Concurrent `pw-record` without the audio lock causes PipeWire errors — keep `withLinuxAudioLock`.
+- Harmless Chromium log: `GetVSyncParametersIfAvailable` failed.
 
 ### Electron / Vite / packaging
 
-- Main/preload are esbuild’d to `dist-electron/`; renderer to `dist/`.
-- After changing main/preload, restart `npm run dev` (Vite HMR alone is not enough).
-- `GetVSyncParametersIfAvailable` log spam is harmless.
-- Do not remove packaging metadata fields required for `.deb` builds.
-- If `npm run dev` hangs, check for stuck `npm run dev` / `vite` / `electron` / `tsc` processes and kill them before retrying.
+- Main/preload → `dist-electron/`; renderer → `dist/`.
+- After main/preload edits: rebuild electron + restart Electron.
+- Do not remove `.deb` packaging metadata fields.
+- If `npm run dev` hangs, kill stuck `npm run dev` / `vite` / `electron` / `tsc` before retrying.
+- Incomplete `release/linux-unpacked` (interrupted pack) cannot `start:release` — repack or use `npm run dev`.
 
 ## IPC cheat sheet
 
@@ -210,35 +223,34 @@ Documented so the next agent does not reintroduce these bugs:
 |---|---|
 | `settings:get` / `settings:update` | AppSettings |
 | `chat:ask` / `chat:ask-stream` / `chat:cancel-stream` / event `chat:stream` | Chat |
-| `ollama:list-models` | Probe models (optional `baseUrl` arg) |
-| `searxng:test` | Probe SearXNG |
+| `ollama:list-models` | Probe models (optional `baseUrl`) |
+| `searxng:test` / `websearch:test` | Probe search |
 | `stt:transcribe` | Whisper API or local worker (`engine: 'local' \| 'openai'`) |
-| `screen:capture` | Region screenshot → `{ dataUrl, cancelled }` |
-| `ocr:extract` | Tesseract OCR on image base64/data URL |
-| `system:audio` | Capture system audio → `{ ok, base64?, mimeType?, error? }` |
-| `company:intel` | Company research → `{ ok, intel?, error? }` |
-| `history:list` / `history:save` / `history:delete` | Meeting history CRUD |
-| `question:list` / `question:add` / `question:delete` | Question bank CRUD |
-| `star:list` / `star:add` / `star:delete` | STAR template CRUD |
-| `app:check-updates` | Update feed check → `UpdateStatus` |
-| `overlay:reset-idle` | Reset overlay auto-hide timer |
-| `window:toggle-overlay` | Overlay show/hide |
+| `screen:capture` | Interactive region (when tools exist) → `{ dataUrl, cancelled }` |
+| `screen:capture-full` | Silent fullscreen for OCR (CLI first, portal last) |
+| `ocr:extract` | Tesseract OCR |
+| `system:audio` | System/loopback capture → WAV base64 |
+| `audio:list-devices` | Linux pactl inputs/monitors + preferred ids |
+| `audio:capture-mic` | Native Linux mic via `pw-record`/`parec` |
+| `company:intel` | Company research |
+| `history:*` / `question:*` / `star:*` | CRUD |
+| `app:check-updates` | Update feed |
+| `overlay:reset-idle` / `window:toggle-overlay` | Overlay |
+| event `shortcut` | `'ask'` \| `'capture'` → preload `onShortcut` |
+| event `overlay` | idle, etc. → `onOverlayEvent` |
+| event `settings:changed` | Live settings push |
 
 Chat stream events: `meta` | `status` | `delta` | `done` | `error`.
 
 ## Profile / modes
 
 - Types: `UserProfile`, `SavedProfile`, `CopilotMode`, `activeMode`, `profile`, `profiles`, `activeProfileId` on `AppSettings`
-- Helpers: `src/shared/profiles.ts`
-- Mode prompts: `src/shared/modes.ts`
-- UI: Profile tab → `ProfilePanel.tsx`; Home Profile hub; overlay `OverlayQuickMenu` (profile / mode / mic)
-- First-run: `OnboardingWizard` when `onboardingCompleted` is false (existing installs migrate to true)
-- Nested profile merges in `settingsStore.updateSettings` (keeps active slot mirrored)
-- Each `SavedProfile` owns: résumé/JD, company name/URL/intel, documents, questions, STAR templates
-- PDF/DOCX upload via `file:extract-text` (`documentExtract.ts` + mammoth / pdf-parse)
-- `profile:assemble-prep` researches company + seeds question bank from web + JD/résumé
-- Documents / Company / Questions tabs operate on the **active** profile only
-- Interview prep: question bank + STAR + company intel inject into `buildChatContext`
+- Helpers: `src/shared/profiles.ts`; mode prompts: `src/shared/modes.ts`
+- Continuous assist helpers: `src/shared/continuousAssist.ts` (`shouldAutoAssist`, `continuousAssistPrompt`, `continuousScreenPrompt`)
+- UI: Profile tab; Home hub; overlay `OverlayQuickMenu`
+- First-run: `OnboardingWizard` when `onboardingCompleted` is false
+- Each `SavedProfile` owns résumé/JD, company intel, documents, questions, STAR templates
+- PDF/DOCX via `file:extract-text`; `profile:assemble-prep` seeds prep from web + JD/résumé
 
 ## Legal / ethics for agents
 
@@ -249,27 +261,30 @@ Chat stream events: `meta` | `status` | `delta` | `done` | `error`.
 
 ## Suggested next work (roadmap)
 
-Core Cluely-style loop is largely live. Public GitHub + CI pack artifacts + GitHub Releases for all three platforms are now working. Priority candidates:
-
-1. Signed / notarized builds (EV/OV cert on Windows, Apple Developer ID + notarization on macOS) so installers don't trigger SmartScreen / Gatekeeper.
+1. Signed / notarized builds (Windows EV/OV, macOS Developer ID + notarization).
 2. Real-device stealth + BlackHole validation on Windows / macOS with Zoom / Teams / Meet.
 3. Faster default model path / tighter overlay answer cards.
+4. Optional long-lived PipeWire stream (vs chunked spawn/kill) for lower Smart-listen latency.
+5. Optional opt-in continuous screen OCR **only** where a non-portal path exists (not Wayland `desktopCapturer` loop).
 
 See `docs/ROADMAP.md` and `src/shared/features.ts`.
 
 ## Validation checklist before declaring done
 
 - [ ] `npm run typecheck`
-- [ ] `npm run build`
+- [ ] `npm run build` (or at least `build:electron` after main/preload edits)
 - [ ] If packaging touched: `npm run pack:linux` (needs homepage + author email + maintainer)
-- [ ] To ship installers: push a `v*` tag → triggers CI matrix on ubuntu/macos/windows → releases all platform assets
-- [ ] Consider Linux + note macOS/Windows impact for platform-sensitive changes
+- [ ] To ship installers: push a `v*` tag → CI matrix → GitHub Release assets
+- [ ] Note Linux + macOS/Windows impact for platform-sensitive changes
 - [ ] Update `features.ts` / `ROADMAP.md` if capability status changed
 - [ ] Restart Electron after main/preload edits
+- [ ] On Linux audio changes: smoke-test `pw-record --target="$(pactl get-default-sink).monitor" …`
+- [ ] Never leave continuous `desktopCapturer` / portal capture enabled on Wayland
 
 ## Session notes (human machine)
 
-- Dev machine: Linux Zenbook; Ollama often on LAN `192.168.4.31:11434`
+- Dev machine: Linux Zenbook (PipeWire / GNOME Wayland); Ollama often on LAN `192.168.4.31:11434`
+- Default mic often `…_6__source` (laptop digital); default monitor `…sofhdadsp__sink.monitor`
 - SearXNG often at `http://127.0.0.1/searxng` with limiter disabled for private JSON
 - User profile may already be populated in local settings — treat as private
 - If builds hang, kill stale `npm run dev` / `vite` / `electron` / `tsc` processes before retrying

@@ -37,6 +37,15 @@ function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
 }
 
 export async function listMicrophones(): Promise<MicDevice[]> {
+  try {
+    const native = await window.osmos.listAudioDevices?.();
+    if (native?.ok && native.inputs?.length) {
+      return native.inputs.map((d) => ({ deviceId: d.id, label: d.name }));
+    }
+  } catch {
+    /* fall back to browser enumeration */
+  }
+
   let granted = false;
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -54,6 +63,10 @@ export async function listMicrophones(): Promise<MicDevice[]> {
     deviceId: d.deviceId,
     label: d.label || `Microphone ${i + 1}`,
   }));
+}
+
+function shouldUseNativeLinuxMic(provider: SttProvider): boolean {
+  return provider !== 'webspeech' && Boolean(window.osmos.captureMicAudio);
 }
 
 export function webspeechAvailable(): boolean {
@@ -76,6 +89,10 @@ export class MicSttSession {
     private settings: Pick<AppSettings, 'sttProvider' | 'sttLanguage' | 'micDeviceId'>,
     private handlers: SttHandlers,
     private transcribe?: (blob: Blob) => Promise<{ ok: boolean; text?: string; error?: string }>,
+    private transcribeBase64?: (
+      base64: string,
+      mimeType: string,
+    ) => Promise<{ ok: boolean; text?: string; error?: string }>,
   ) {}
 
   get isListening() {
@@ -93,6 +110,17 @@ export class MicSttSession {
       await this.startWebSpeech();
       return;
     }
+    if (shouldUseNativeLinuxMic(provider)) {
+      await this.startNativeLinuxCapture(
+        this.continuousCapture
+          ? 'Smart listen — auto-segmenting…'
+          : provider === 'local-whisper'
+            ? 'Listening… (native mic)'
+            : 'Listening… (native mic, Whisper API)',
+        opts?.continuous,
+      );
+      return;
+    }
     await this.startCaptureTranscribe(
       this.continuousCapture
         ? 'Smart listen — auto-segmenting…'
@@ -104,6 +132,7 @@ export class MicSttSession {
 
   stop(): void {
     this.intentionalStop = true;
+    this.nativeLoopRef = false;
     this.chunkStop = false;
     if (this.chunkTimer) {
       clearTimeout(this.chunkTimer);
@@ -320,5 +349,58 @@ export class MicSttSession {
         }
       }, CONTINUOUS_CHUNK_MS);
     }
+  }
+
+  private nativeLoopRef = false;
+
+  private async startNativeLinuxCapture(partialHint: string, continuous?: boolean): Promise<void> {
+    if (!window.osmos.captureMicAudio) {
+      await this.startCaptureTranscribe(partialHint);
+      return;
+    }
+    this.continuousCapture = Boolean(continuous);
+    this.nativeLoopRef = true;
+    this.setListening(true);
+    this.handlers.onPartial?.(partialHint);
+
+    while (this.nativeLoopRef && !this.intentionalStop) {
+      this.handlers.onPartial?.(this.continuousCapture ? 'Listening…' : partialHint);
+      let capture;
+      try {
+        capture = await window.osmos.captureMicAudio({
+          durationMs: CONTINUOUS_CHUNK_MS,
+          device: this.settings.micDeviceId || undefined,
+        });
+      } catch (e) {
+        this.handlers.onError?.(e instanceof Error ? e.message : String(e));
+        break;
+      }
+      if (!this.nativeLoopRef || this.intentionalStop) break;
+      if (!capture.ok || !capture.base64) {
+        this.handlers.onError?.(capture.error || 'Microphone capture failed');
+        break;
+      }
+      this.handlers.onPartial?.('Transcribing…');
+      const runTranscribe =
+        this.transcribeBase64 ||
+        (async (base64: string, mimeType: string) => {
+          if (!this.transcribe) return { ok: false, error: 'Transcribe bridge missing.' };
+          const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+          return this.transcribe(new Blob([bytes], { type: mimeType }));
+        });
+      const res = await runTranscribe(capture.base64, capture.mimeType || 'audio/wav');
+      if (!this.nativeLoopRef || this.intentionalStop) break;
+      this.handlers.onPartial?.('');
+      if (!res.ok) {
+        this.handlers.onError?.(res.error || 'Transcription failed');
+        if (this.continuousCapture && !this.intentionalStop) continue;
+        break;
+      }
+      if (res.text?.trim()) this.handlers.onFinal?.(res.text.trim());
+      if (!this.continuousCapture) break;
+    }
+
+    this.nativeLoopRef = false;
+    this.setListening(false);
   }
 }

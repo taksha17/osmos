@@ -81,7 +81,8 @@ export const FEATURES: FeatureDef[] = [
   {
     id: 'screen-capture',
     name: 'Screen / screenshot OCR',
-    description: 'Capture screen regions and extract text for grounding.',
+    description:
+      'On-demand full-screen OCR (📷 / hotkey). Not continuous on Linux — avoids stealing the Wayland screen-share portal from Zoom/Meet.',
     status: 'live',
     platforms: ['linux', 'darwin', 'win32'],
   },

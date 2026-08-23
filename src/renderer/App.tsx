@@ -52,7 +52,11 @@ declare global {
         engine?: 'local' | 'openai';
       }) => Promise<{ ok: boolean; text?: string; error?: string }>;
       captureRegion: () => Promise<{ dataUrl: string; cancelled: boolean }>;
+      captureFullScreen: () => Promise<{ dataUrl: string; cancelled: boolean }>;
       captureSystemAudio: (payload?: { durationMs?: number; device?: string }) =>
+        Promise<{ ok: boolean; base64?: string; mimeType?: string; error?: string }>;
+      listAudioDevices: () => Promise<import('@shared/types').AudioDevicesResponse>;
+      captureMicAudio: (payload?: { durationMs?: number; device?: string }) =>
         Promise<{ ok: boolean; base64?: string; mimeType?: string; error?: string }>;
       listHistory: () => Promise<{ ok: boolean; sessions?: Array<{ id: string; mode: string; messages: Array<{ role: string; content: string; createdAt: number }>; createdAt: number; updatedAt: number }>; error?: string }>;
       saveHistory: (session: { id: string; mode: string; messages: Array<{ role: string; content: string; createdAt: number }>; createdAt: number; updatedAt: number }) =>
@@ -98,6 +102,7 @@ declare global {
         onEvent: (event: ChatStreamEvent) => void,
       ) => { requestId: string; done: Promise<unknown>; cancel: () => Promise<unknown> };
       onOverlayEvent: (listener: (event: { type: string }) => void) => () => void;
+      onShortcut: (listener: (action: string) => void) => () => void;
       onSettingsChanged: (listener: (settings: AppSettings) => void) => () => void;
       resetOverlayIdle: () => Promise<{ ok: boolean }>;
     };

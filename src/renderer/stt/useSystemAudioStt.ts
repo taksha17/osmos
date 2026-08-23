@@ -81,14 +81,13 @@ export function useSystemAudioStt(settings: AppSettings | null) {
         }
         if (!transcription.ok && transcription.error && !/too short|empty/i.test(transcription.error)) {
           setError(transcription.error);
-          activeRef.current = false;
+          // Keep listening — Whisper blips should not stop Smart mode.
         }
         held.set(seq, null);
         emitReady();
       } catch (e) {
         if (generationRef.current !== gen) return;
         setError(e instanceof Error ? e.message : String(e));
-        activeRef.current = false;
         held.set(seq, null);
         emitReady();
       }
@@ -106,20 +105,28 @@ export function useSystemAudioStt(settings: AppSettings | null) {
       try {
         capture = await window.osmos.captureSystemAudio({
           durationMs: chunkMs,
-          device: settingsRef.current?.systemAudioDevice,
+          device: settingsRef.current?.systemAudioDevice || undefined,
         });
       } catch (e) {
         if (generationRef.current !== gen) break;
         setError(e instanceof Error ? e.message : String(e));
-        break;
+        setPartial('Retrying system audio…');
+        await new Promise((r) => setTimeout(r, 2000));
+        if (generationRef.current === gen) setError('');
+        continue;
       }
       if (!activeRef.current || generationRef.current !== gen) break;
 
       if (!capture.ok || !capture.base64) {
-        setError(capture.error || 'System audio capture failed');
-        break;
+        const msg = capture.error || 'System audio capture failed';
+        setError(msg);
+        setPartial('Retrying system audio…');
+        await new Promise((r) => setTimeout(r, 2000));
+        if (generationRef.current === gen) setError('');
+        continue;
       }
 
+      setPartial('Transcribing meeting audio…');
       const seq = ++nextSeq;
       const job = transcribeChunk(seq, { base64: capture.base64, mimeType: capture.mimeType });
       pending.add(job);

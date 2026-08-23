@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppSettings, ChatStreamEvent, StarTemplate } from '../../shared/types';
-import { continuousAssistPrompt, shouldAutoAssist } from '@shared/continuousAssist';
+import {
+  continuousAssistPrompt,
+  continuousScreenPrompt,
+  shouldAutoAssist,
+} from '@shared/continuousAssist';
 import { useMicStt } from '../stt/useMicStt';
 import { useSystemAudioStt } from '../stt/useSystemAudioStt';
 import { extractTextFromBase64 } from '../stt/ocr';
@@ -410,16 +414,23 @@ export function ChatPanel({
     busy && messages[messages.length - 1]?.role === 'assistant'
       ? messages[messages.length - 1].content
       : latestAssistant?.content || '';
-  const answerPlaceholder =
+      const answerPlaceholder =
     system.listening || mic.listening
       ? system.partial || mic.partial || (system.listening ? 'Listening to meeting audio…' : 'Listening…')
       : 'Answers appear here while you interview, meet, or share your screen.';
 
   const captureScreen = async () => {
-    setOcrStatus('Capturing…');
+    setOcrStatus('Capturing screen…');
     try {
-      const result = await window.osmos.captureRegion();
-      if (result.cancelled) {
+      // Prefer full-screen IPC (CLI tools first). Avoid looping — Wayland portal
+      // is one-shot only; do not call this from a timer.
+      const result = window.osmos.captureFullScreen
+        ? await window.osmos.captureFullScreen()
+        : await window.osmos.captureRegion();
+      if (result.cancelled || !result.dataUrl) {
+        setError(
+          'Screen capture cancelled. On Linux, OSMOS does not take your meeting share — use 📷 only when you want OCR. Install grim or gnome-screenshot to avoid the portal picker.',
+        );
         setOcrStatus('');
         return;
       }
@@ -427,6 +438,11 @@ export function ChatPanel({
       const ocr = await extractTextFromBase64(result.dataUrl);
       if (ocr.text) {
         setInput((prev) => (prev ? `${prev}\n\n[Screen]\n${ocr.text}` : `[Screen]\n${ocr.text}`));
+        // In Smart overlay, immediately assist from this one-shot screen read.
+        if (overlay && continuousRef.current && !pausedRef.current) {
+          const mode = settings?.activeMode || 'general';
+          void sendRef.current(continuousScreenPrompt(ocr.text, mode));
+        }
       } else {
         setError(ocr.error || 'OCR returned no text');
       }
@@ -436,6 +452,29 @@ export function ChatPanel({
       setOcrStatus('');
     }
   };
+  const captureScreenRef = useRef(captureScreen);
+  captureScreenRef.current = captureScreen;
+
+  useEffect(() => {
+    if (!overlay) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        void sendRef.current(input.trim() || OVERLAY_PROMPTS.assist);
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [overlay, input]);
+
+  useEffect(() => {
+    if (!overlay || !window.osmos.onShortcut) return;
+    return window.osmos.onShortcut((action) => {
+      if (action === 'ask') void sendRef.current(OVERLAY_PROMPTS.assist);
+      if (action === 'capture') void captureScreenRef.current();
+    });
+  }, [overlay]);
 
   const captureAudio = async () => {
     if (system.listening) {
@@ -594,6 +633,7 @@ export function ChatPanel({
                   system.error ||
                   mic.error ||
                   (system.partial && !system.error ? system.partial : '') ||
+                  ocrStatus ||
                   (system.listening && !system.error ? 'Meeting audio…' : '') ||
                   (mic.listening && !mic.error ? (continuousEnabled ? 'Listening…' : 'Mic on') : '') ||
                   streamMeta ||
@@ -622,14 +662,14 @@ export function ChatPanel({
             placeholder="Ask about your screen or conversation, or Ctrl+Enter for Assist"
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                void sendMessage();
-                return;
-              }
               if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                 e.preventDefault();
                 void sendMessage(input.trim() || OVERLAY_PROMPTS.assist);
+                return;
+              }
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                void sendMessage();
               }
             }}
           />
@@ -688,8 +728,11 @@ export function ChatPanel({
           onClick={async () => {
             setOcrStatus('Capturing…');
             try {
-              const result = await window.osmos.captureRegion();
-              if (result.cancelled) {
+              const result = window.osmos.captureFullScreen
+                ? await window.osmos.captureFullScreen()
+                : await window.osmos.captureRegion();
+              if (result.cancelled || !result.dataUrl) {
+                setError('Screen capture failed — grant screen-share permission if prompted.');
                 setOcrStatus('');
                 return;
               }
@@ -786,6 +829,11 @@ export function ChatPanel({
           placeholder="Ask anything, or use the mic…"
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+              e.preventDefault();
+              void sendMessage(input.trim() || OVERLAY_PROMPTS.assist);
+              return;
+            }
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
               void sendMessage();

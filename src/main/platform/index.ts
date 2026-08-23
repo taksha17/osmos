@@ -4,6 +4,13 @@ import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
+import { findOnPath, resolveCaptureTool, resolveFfmpeg, safeSpawnCwd } from '../services/resolveBin.js';
+import {
+  listLinuxAudioDevices,
+  resolveLinuxMicSource,
+  resolveLinuxMonitor,
+} from '../services/audioDevices.js';
+import { capturePrimaryScreen } from '../services/screenCapture.js';
 
 export type PlatformId = 'linux' | 'darwin' | 'win32';
 
@@ -58,29 +65,19 @@ export function applyOsCaptureExclusion(win: BrowserWindow, enabled: boolean, pl
 }
 
 async function hasOnPath(command: string): Promise<boolean> {
-  // Portable lookup that doesn't depend on `which` (which can throw ENOTDIR
-  // synchronously in some environments). We check PATH ourselves.
-  const exts = process.platform === 'win32' ? ['', '.exe', '.cmd'] : [''];
-  const dirs = (process.env.PATH || '').split(process.platform === 'win32' ? ';' : ':');
-  for (const dir of dirs) {
-    if (!dir) continue;
-    for (const ext of exts) {
-      const full = require('node:path').join(dir, command + ext);
-      try {
-        if (fs.existsSync(full) && fs.statSync(full).isFile()) return true;
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-  return false;
+  if (command === 'ffmpeg') return Boolean(resolveFfmpeg());
+  return Boolean(findOnPath(command));
 }
 
 async function tryCapture(command: string, args: string[], tmp: string): Promise<boolean> {
+  const bin =
+    resolveCaptureTool(command) ||
+    (command.includes(path.sep) || command.includes('/') ? command : null);
+  if (!bin) return false;
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(command, args, { stdio: 'ignore' });
+      child = spawn(bin, args, { stdio: 'ignore', cwd: safeSpawnCwd(), windowsHide: true });
     } catch {
       resolve(false);
       return;
@@ -108,6 +105,10 @@ async function tryCaptureTimed(
   tmp: string,
   durationMs: number,
 ): Promise<boolean> {
+  const bin =
+    resolveCaptureTool(command) ||
+    (command.includes(path.sep) || command.includes('/') ? command : null);
+  if (!bin) return false;
   return new Promise((resolve) => {
     let out: number | undefined;
     try {
@@ -118,7 +119,11 @@ async function tryCaptureTimed(
     }
     let child;
     try {
-      child = spawn(command, args, { stdio: ['ignore', out, 'ignore'] });
+      child = spawn(bin, args, {
+        stdio: ['ignore', out, 'ignore'],
+        cwd: safeSpawnCwd(),
+        windowsHide: true,
+      });
     } catch {
       try { if (out !== undefined) fs.closeSync(out); } catch { /* ignore */ }
       try { fs.unlinkSync(tmp); } catch { /* ignore */ }
@@ -172,6 +177,71 @@ async function tryCaptureTimed(
   });
 }
 
+/** Serialize PipeWire/Pulse captures — concurrent pw-record breaks with thread-loop errors. */
+let linuxAudioLock: Promise<void> = Promise.resolve();
+
+function withLinuxAudioLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = linuxAudioLock.then(fn, fn);
+  linuxAudioLock = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/** pw-record has no --duration on many PipeWire builds — record to file, kill after durationMs. */
+async function tryPwRecordTimed(
+  target: string | undefined,
+  tmp: string,
+  durationMs: number,
+): Promise<boolean> {
+  const bin = resolveCaptureTool('pw-record');
+  if (!bin) return false;
+  const args = ['--rate=16000', '--channels=1', '--format=s16'];
+  if (target) args.push(`--target=${target}`);
+  args.push(tmp);
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(bin, args, { stdio: 'ignore', cwd: safeSpawnCwd(), windowsHide: true });
+    } catch {
+      resolve(false);
+      return;
+    }
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        /* ignore */
+      }
+      // Give pw-record a moment to flush the WAV header after SIGTERM.
+      setTimeout(() => {
+        if (ok && fs.existsSync(tmp) && fs.statSync(tmp).size > 400) resolve(true);
+        else {
+          try {
+            fs.unlinkSync(tmp);
+          } catch {
+            /* ignore */
+          }
+          resolve(false);
+        }
+      }, 120);
+    };
+    const timer = setTimeout(() => finish(true), durationMs);
+    child.on('error', () => {
+      clearTimeout(timer);
+      finish(false);
+    });
+    child.on('close', () => {
+      clearTimeout(timer);
+      if (!settled) finish(true);
+    });
+  });
+}
+
 function wrapPcmS16leAsWav(pcm: Buffer, sampleRate: number, channels: number): Buffer {
   const dataSize = pcm.length;
   const header = Buffer.alloc(44);
@@ -204,9 +274,16 @@ function listAvfoundationAudioDevices(): Promise<Array<{ index: number; name: st
     return Promise.resolve(avAudioCache.devices);
   }
   return new Promise((resolve) => {
+    const ffmpeg = resolveFfmpeg();
+    if (!ffmpeg) {
+      resolve([]);
+      return;
+    }
     let child;
     try {
-      child = spawn('ffmpeg', ['-hide_banner', '-f', 'avfoundation', '-list_devices', 'true', '-i', '']);
+      child = spawn(ffmpeg, ['-hide_banner', '-f', 'avfoundation', '-list_devices', 'true', '-i', ''], {
+        cwd: safeSpawnCwd(),
+      });
     } catch {
       resolve([]);
       return;
@@ -294,7 +371,10 @@ export interface PlatformAdapter {
   applyStealth(enabled: boolean, windows: Electron.BrowserWindow[]): void;
   defaultShortcutModifier(): 'Alt' | 'CommandOrControl';
   captureRegion(): Promise<CaptureResult>;
+  /** Silent full-screen capture (no interactive region picker). */
+  captureFullScreen(): Promise<CaptureResult>;
   captureSystemAudio(_durationMs?: number, _device?: string): Promise<SystemAudioResponse>;
+  captureMicAudio?(_durationMs?: number, _device?: string): Promise<SystemAudioResponse>;
 }
 
 export function detectPlatform(): PlatformId {
@@ -322,16 +402,19 @@ export function createPlatformAdapter(): PlatformAdapter {
       captureRegion: async () => {
         const tmp = path.join(os.tmpdir(), `uncon-capture-${Date.now()}.png`);
         const ok = await tryCapture('screencapture', ['-i', tmp], tmp);
-        if (!ok) return { dataUrl: '', cancelled: true };
-        try {
-          const buffer = fs.readFileSync(tmp);
-          const base64 = buffer.toString('base64');
-          fs.unlinkSync(tmp);
-          return { dataUrl: `data:image/png;base64,${base64}`, cancelled: false };
-        } catch {
-          return { dataUrl: '', cancelled: true };
+        if (ok) {
+          try {
+            const buffer = fs.readFileSync(tmp);
+            const base64 = buffer.toString('base64');
+            fs.unlinkSync(tmp);
+            return { dataUrl: `data:image/png;base64,${base64}`, cancelled: false };
+          } catch {
+            return { dataUrl: '', cancelled: true };
+          }
         }
+        return capturePrimaryScreen();
       },
+      captureFullScreen: () => capturePrimaryScreen(),
       captureSystemAudio: async (durationMs = 5_000, device?: string) => {
         const tmp = path.join(os.tmpdir(), `osmos-audio-${Date.now()}.wav`);
         const durationSec = Math.max(1, Math.round(durationMs / 1000));
@@ -389,16 +472,19 @@ $g.Dispose();
 $bmp.Dispose();
 `;
         const ok = await tryCapture('powershell', ['-NoProfile', '-Command', psScript], tmp);
-        if (!ok) return { dataUrl: '', cancelled: true };
-        try {
-          const buffer = fs.readFileSync(tmp);
-          const base64 = buffer.toString('base64');
-          fs.unlinkSync(tmp);
-          return { dataUrl: `data:image/png;base64,${base64}`, cancelled: false };
-        } catch {
-          return { dataUrl: '', cancelled: true };
+        if (ok) {
+          try {
+            const buffer = fs.readFileSync(tmp);
+            const base64 = buffer.toString('base64');
+            fs.unlinkSync(tmp);
+            return { dataUrl: `data:image/png;base64,${base64}`, cancelled: false };
+          } catch {
+            /* fall through */
+          }
         }
+        return capturePrimaryScreen();
       },
+      captureFullScreen: () => capturePrimaryScreen(),
       captureSystemAudio: async (durationMs = 5_000, device?: string) => {
         const tmp = path.join(os.tmpdir(), `osmos-audio-${Date.now()}.wav`);
         const durationSec = Math.max(1, Math.round(durationMs / 1000));
@@ -470,8 +556,8 @@ $bmp.Dispose();
     capabilityNotes: () => [
       'Wayland global shortcuts are often unavailable — use in-app controls.',
       'Stealth: skip taskbar + always-on-top. Linux has no OS capture-exclusion flag — share a browser tab/window, not the full desktop.',
-      'System audio: pw-record (PipeWire) or timed parec monitor → WAV for continuous Smart listen.',
-      'Region capture uses gnome-screenshot or spectacle.',
+      'System audio: pw-record/parec on the default sink *.monitor (meeting audio). Not screen-share.',
+      'Screen OCR is on-demand only (📷). Continuous portal capture is disabled so Zoom/Meet screen share still works.',
     ],
     applyStealth(enabled, windows) {
       for (const win of windows) {
@@ -494,7 +580,7 @@ $bmp.Dispose();
           fs.unlinkSync(tmp);
           return { dataUrl: `data:image/png;base64,${base64}`, cancelled: false };
         } catch {
-          return { dataUrl: '', cancelled: true };
+          /* fall through */
         }
       }
       if (await tryCapture('spectacle', ['-r', '-n', '-b', '-o', tmp], tmp)) {
@@ -504,66 +590,44 @@ $bmp.Dispose();
           fs.unlinkSync(tmp);
           return { dataUrl: `data:image/png;base64,${base64}`, cancelled: false };
         } catch {
-          return { dataUrl: '', cancelled: true };
+          /* fall through */
         }
       }
+      // Ubuntu Wayland often has neither gnome-screenshot nor spectacle.
+      // Do NOT fall back to desktopCapturer here for interactive region — that
+      // pops the portal. Use captureFullScreen() for on-demand OCR instead.
       return { dataUrl: '', cancelled: true };
     },
+    captureFullScreen: () => capturePrimaryScreen(),
     captureSystemAudio: async (durationMs = 5_000, device?: string) => {
+      return withLinuxAudioLock(async () => {
       const tmp = path.join(os.tmpdir(), `osmos-audio-${Date.now()}.wav`);
-      const durationSec = Math.max(1, Math.round(durationMs / 1000));
-      const named = preferredAudioDevice(device);
-      if (named) {
-        if (
-          await tryCapture(
-            'pw-record',
-            [
-              `--target=${named}`,
-              `--duration=${durationSec}`,
-              '--format=s16',
-              '--rate=16000',
-              '--channels=1',
-              tmp,
-            ],
-            tmp,
-          )
-        ) {
-          return readAudioFile(tmp);
-        }
-        const namedPcm = path.join(os.tmpdir(), `osmos-audio-${Date.now()}.pcm`);
-        if (
-          await tryCaptureTimed(
-            'parec',
-            ['--format=s16le', '--rate=16000', '--channels=1', '-d', named],
-            namedPcm,
-            durationMs,
-          )
-        ) {
-          try {
-            const pcm = fs.readFileSync(namedPcm);
-            fs.unlinkSync(namedPcm);
-            const wav = wrapPcmS16leAsWav(pcm, 16000, 1);
-            fs.writeFileSync(tmp, wav);
-            return readAudioFile(tmp);
-          } catch {
-            try {
-              fs.unlinkSync(namedPcm);
-            } catch {
-              /* ignore */
-            }
-          }
-        }
+      const list = await listLinuxAudioDevices();
+      // Always pass a real sink.monitor id — bare pw-record (no --target) records the
+      // default *source* (mic), not meeting loopback.
+      let monitor = resolveLinuxMonitor(device, list);
+      if (!monitor || monitor === '@DEFAULT_MONITOR@') {
+        monitor =
+          list.preferredMonitorId !== '@DEFAULT_MONITOR@'
+            ? list.preferredMonitorId
+            : list.monitors.find((m) => m.id.endsWith('.monitor'))?.id || '';
       }
-      if (await tryCapture('pw-record', [`--duration=${durationSec}`, '--format=s16', '--rate=16000', '--channels=1', tmp], tmp)) {
+      if (!monitor) {
+        return {
+          ok: false,
+          error:
+            'No PipeWire/Pulse sink monitor found. Play audio through speakers, then Settings → Speech → Refresh.',
+        };
+      }
+
+      if (await tryPwRecordTimed(monitor, tmp, durationMs)) {
         return readAudioFile(tmp);
       }
-      if (await tryCapture('pw-record', [`--duration=${durationSec}`, tmp], tmp)) {
-        return readAudioFile(tmp);
-      }
+
       const pcmTmp = path.join(os.tmpdir(), `osmos-audio-${Date.now()}.pcm`);
       const parecOk = await tryCaptureTimed(
         'parec',
-        ['--format=s16le', '--rate=16000', '--channels=1', '-d', '@DEFAULT_MONITOR@'],
+        ['--format=s16le', '--rate=16000', '--channels=1', '-d', monitor],
         pcmTmp,
         durationMs,
       );
@@ -582,18 +646,69 @@ $bmp.Dispose();
           }
         }
       }
+
       const hasPw = await hasOnPath('pw-record');
       const hasParec = await hasOnPath('parec');
       if (!hasPw && !hasParec) {
         return {
           ok: false,
-          error: 'System audio capture needs either PipeWire or PulseAudio tools. On Ubuntu/Debian install: sudo apt install pipewire pulseaudio-utils',
+          error:
+            'System audio needs PipeWire (pw-record) or PulseAudio (parec). On Ubuntu: sudo apt install pipewire pulseaudio-utils',
         };
       }
       return {
         ok: false,
-        error: 'System audio capture failed. If you are on PipeWire, install pw-record; on PulseAudio, install parec.',
+        error: `System audio capture failed (monitor: ${monitor}). Play audio on your speakers and retry.`,
       };
+      });
+    },
+    captureMicAudio: async (durationMs = 5_000, device?: string) => {
+      return withLinuxAudioLock(async () => {
+      const tmp = path.join(os.tmpdir(), `osmos-mic-${Date.now()}.wav`);
+      const list = await listLinuxAudioDevices();
+      const source = resolveLinuxMicSource(device, list);
+      const target =
+        source && source !== 'default' ? source : list.preferredInputId || list.inputs[0]?.id;
+
+      if (!target || target === 'default') {
+        return {
+          ok: false,
+          error: 'No microphone source found. Check Settings → Speech → Microphone.',
+        };
+      }
+
+      if (await tryPwRecordTimed(target, tmp, durationMs)) {
+        return readAudioFile(tmp);
+      }
+
+      const pcmTmp = path.join(os.tmpdir(), `osmos-mic-${Date.now()}.pcm`);
+      const parecOk = await tryCaptureTimed(
+        'parec',
+        ['--format=s16le', '--rate=16000', '--channels=1', '-d', target],
+        pcmTmp,
+        durationMs,
+      );
+      if (parecOk) {
+        try {
+          const pcm = fs.readFileSync(pcmTmp);
+          fs.unlinkSync(pcmTmp);
+          const wav = wrapPcmS16leAsWav(pcm, 16000, 1);
+          fs.writeFileSync(tmp, wav);
+          return readAudioFile(tmp);
+        } catch {
+          try {
+            fs.unlinkSync(pcmTmp);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+
+      return {
+        ok: false,
+        error: `Microphone capture failed (source: ${target}). Check Settings → Speech or pick another mic.`,
+      };
+      });
     },
   };
 }

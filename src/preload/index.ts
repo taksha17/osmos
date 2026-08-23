@@ -22,6 +22,7 @@ const api = {
     engine?: 'local' | 'openai';
   }) => ipcRenderer.invoke('stt:transcribe', payload),
   captureRegion: () => ipcRenderer.invoke('screen:capture'),
+  captureFullScreen: () => ipcRenderer.invoke('screen:capture-full'),
   ocrExtract: (payload: { base64: string }) => ipcRenderer.invoke('ocr:extract', payload),
   companyIntel: (payload: { companyName: string; jdText?: string; companyUrl?: string }) =>
     ipcRenderer.invoke('company:intel', payload),
@@ -30,6 +31,9 @@ const api = {
     ipcRenderer.invoke('file:extract-text', payload),
   captureSystemAudio: (payload?: { durationMs?: number; device?: string }) =>
     ipcRenderer.invoke('system:audio', payload || {}),
+  listAudioDevices: () => ipcRenderer.invoke('audio:list-devices'),
+  captureMicAudio: (payload?: { durationMs?: number; device?: string }) =>
+    ipcRenderer.invoke('audio:capture-mic', payload || {}),
   listHistory: () => ipcRenderer.invoke('history:list'),
   saveHistory: (session: {
     id: string;
@@ -99,6 +103,13 @@ const api = {
     };
     ipcRenderer.on('overlay', handler);
     return () => ipcRenderer.removeListener('overlay', handler);
+  },
+  onShortcut: (listener: (action: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, action: string) => {
+      listener(action);
+    };
+    ipcRenderer.on('shortcut', handler);
+    return () => ipcRenderer.removeListener('shortcut', handler);
   },
   onSettingsChanged: (listener: (settings: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: unknown) => {

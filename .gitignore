@@ -28,6 +28,12 @@ whisper-cache/
 .transformers-cache/
 onnx-cache/
 
+# OCR language data (downloaded at runtime by tesseract.js; must not be committed)
+*.traineddata
+
+# Stray root bundles (esbuild/vite scratch output)
+/index.js
+
 # Logs
 logs/
 *.log

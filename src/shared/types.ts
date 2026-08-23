@@ -229,6 +229,20 @@ export type SystemAudioResponse = {
   error?: string;
 };
 
+export type AudioDeviceInfo = {
+  id: string;
+  name: string;
+};
+
+export type AudioDevicesResponse = {
+  ok: boolean;
+  inputs?: AudioDeviceInfo[];
+  monitors?: AudioDeviceInfo[];
+  preferredInputId?: string;
+  preferredMonitorId?: string;
+  error?: string;
+};
+
 export type CompanyIntelRequest = {
   companyName: string;
   companyUrl?: string;

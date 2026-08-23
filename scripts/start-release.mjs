@@ -2,6 +2,11 @@
 /**
  * Launch the packaged Linux build without FUSE (AppImage).
  * Prefer release/linux-unpacked — works on Ubuntu with only fuse3.
+ *
+ * Linux note: Electron/Chromium + GTK under Wayland can fatal on a GNOME
+ * schema mismatch (`org.gnome.settings-daemon.plugins.xsettings` /
+ * `antialiasing`). Force X11 for the child process — same workaround used
+ * by many AppImages / Tauri builds.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -42,19 +47,24 @@ if (!bin) {
 console.log(`[start:release] ${bin}`);
 const launchArgs =
   process.platform === 'linux'
-    ? ['--no-sandbox', '--disable-dev-shm-usage', '--ozone-platform-hint=auto', ...process.argv.slice(2)]
+    ? [
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        // Prefer X11: Wayland + GTK schema mismatch fatal-aborts Electron on some Ubuntu/GNOME hosts.
+        '--ozone-platform=x11',
+        ...process.argv.slice(2),
+      ]
     : process.argv.slice(2);
 
-// On Linux, a snap-launched Code editor exports GSETTINGS_SCHEMA_DIR and an
-// XDG_DATA_DIRS that lead with snap paths. GPK's schema lookup reads
-// $GSETTINGS_SCHEMA_DIR AND $XDG_DATA_DIRS/glib-2.0/schemas, so a snap schema
-// dir lacking org.gnome.settings-daemon.plugins.xsettings makes GTK fatal on
-// the missing 'antialiasing' key at startup. Sanitize both for the child.
 const env = { ...process.env };
 if (process.platform === 'linux') {
+  // Snap/Flatpak schema dirs + Wayland GDK backend cause:
+  //   GLib-GIO-ERROR: Settings schema '...xsettings' does not contain key 'antialiasing'
   delete env.GSETTINGS_SCHEMA_DIR;
   delete env.GSETTINGS_BACKEND;
-  // Drop snap/container role + user-local code dirs; keep system share dirs.
+  env.GDK_BACKEND = 'x11';
+  env.ELECTRON_OZONE_PLATFORM_HINT = 'x11';
+  // Drop snap/flatpak share dirs; keep system schemas.
   const kept = (process.env.XDG_DATA_DIRS || '')
     .split(':')
     .filter((p) => p && !/\/snap\//.test(p) && !/flatpak/.test(p));
@@ -66,4 +76,7 @@ const child = spawn(bin, launchArgs, {
   stdio: 'inherit',
   env,
 });
-child.on('exit', (code) => process.exit(code ?? 1));
+child.on('exit', (code, signal) => {
+  if (signal) process.exit(1);
+  process.exit(code ?? 1);
+});

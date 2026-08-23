@@ -111,6 +111,22 @@ export function useMicStt(
             engine: 'openai',
           });
         },
+        async (base64, mimeType) => {
+          if (provider === 'local-whisper') {
+            setPartial('Transcribing locally (first run may download the model)…');
+            return window.osmos.transcribeAudio({
+              base64,
+              mimeType,
+              fileName: 'speech.wav',
+              engine: 'local',
+            });
+          }
+          return window.osmos.transcribeAudio({
+            base64,
+            mimeType,
+            engine: 'openai',
+          });
+        },
       );
       sessionRef.current = session;
       await session.start(opts);

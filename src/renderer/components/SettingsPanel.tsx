@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FeatureDef } from '@shared/features';
-import type { AppSettings, UpdateStatus, WebSearchProvider } from '@shared/types';
+import type { AppSettings, AudioDeviceInfo, UpdateStatus, WebSearchProvider } from '@shared/types';
 
 type Info = {
   name: string;
@@ -54,6 +54,28 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved }: Props)
   const [error, setError] = useState('');
   const [models, setModels] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [nativeMonitors, setNativeMonitors] = useState<AudioDeviceInfo[]>([]);
+  const [preferredMonitorId, setPreferredMonitorId] = useState('');
+
+  useEffect(() => {
+    if (info?.platform !== 'linux') return;
+    void (async () => {
+      try {
+        const res = await window.osmos.listAudioDevices?.();
+        if (!res?.ok) return;
+        setNativeMonitors(res.monitors || []);
+        if (res.preferredMonitorId) setPreferredMonitorId(res.preferredMonitorId);
+        if (!settings.systemAudioDevice && res.preferredMonitorId) {
+          onChange({ ...settings, systemAudioDevice: res.preferredMonitorId });
+        }
+        if (!settings.micDeviceId && res.preferredInputId) {
+          onChange({ ...settings, micDeviceId: res.preferredInputId });
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, [info?.platform]);
 
   const set = (patch: Partial<AppSettings>) => onChange({ ...settings, ...patch });
 
@@ -446,24 +468,38 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved }: Props)
                 </select>
               </div>
               <p className="meta" style={{ marginBottom: 14 }}>
-                Overlay Smart mode captures the next audio chunk while the previous one is still
-                transcribing, then suggests answers. System audio needs PipeWire (Linux), ffmpeg WASAPI
-                (Windows), or ffmpeg + BlackHole (macOS).
+                Overlay Smart mode listens to <strong>meeting/system audio</strong> (what your
+                speakers play) via PipeWire — it does <strong>not</strong> use your Zoom/Meet screen
+                share. Screen OCR is on-demand only (📷 / hotkey) so OSMOS never steals the meeting
+                share portal.
               </p>
 
               <div className="field">
                 <label>Loopback device (optional)</label>
-                <input
-                  value={settings.systemAudioDevice || ''}
-                  onChange={(e) => set({ systemAudioDevice: e.target.value })}
-                  placeholder={
-                    info?.platform === 'darwin'
-                      ? 'BlackHole 2ch'
-                      : info?.platform === 'win32'
-                        ? 'WASAPI device name (blank = loopback)'
-                        : 'PipeWire / Pulse source (blank = default monitor)'
-                  }
-                />
+                {info?.platform === 'linux' && nativeMonitors.length > 0 ? (
+                  <select
+                    value={settings.systemAudioDevice || preferredMonitorId || ''}
+                    onChange={(e) => set({ systemAudioDevice: e.target.value })}
+                  >
+                    {nativeMonitors.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={settings.systemAudioDevice || ''}
+                    onChange={(e) => set({ systemAudioDevice: e.target.value })}
+                    placeholder={
+                      info?.platform === 'darwin'
+                        ? 'BlackHole 2ch'
+                        : info?.platform === 'win32'
+                          ? 'WASAPI device name (blank = loopback)'
+                          : 'PipeWire / Pulse source (blank = default monitor)'
+                    }
+                  />
+                )}
               </div>
               {info?.platform === 'darwin' ? (
                 <p className="meta" style={{ marginBottom: 14 }}>
