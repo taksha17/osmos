@@ -57,26 +57,35 @@ export function applyOsCaptureExclusion(win: BrowserWindow, enabled: boolean, pl
   }
 }
 
-async function commandExists(command: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const child = spawn('which', [command], { stdio: 'ignore' });
-    child.on('close', (code) => resolve(code === 0));
-    child.on('error', () => resolve(false));
-  });
+async function hasOnPath(command: string): Promise<boolean> {
+  // Portable lookup that doesn't depend on `which` (which can throw ENOTDIR
+  // synchronously in some environments). We check PATH ourselves.
+  const exts = process.platform === 'win32' ? ['', '.exe', '.cmd'] : [''];
+  const dirs = (process.env.PATH || '').split(process.platform === 'win32' ? ';' : ':');
+  for (const dir of dirs) {
+    if (!dir) continue;
+    for (const ext of exts) {
+      const full = require('node:path').join(dir, command + ext);
+      try {
+        if (fs.existsSync(full) && fs.statSync(full).isFile()) return true;
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return false;
 }
 
 async function tryCapture(command: string, args: string[], tmp: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { stdio: 'ignore' });
-    const missing = new Set(['ENOENT', 'EACCES', 'EPERM']);
-    child.on('error', (err: any) => {
-      const code = String(err?.code || '');
-      if (missing.has(code)) {
-        resolve(false);
-        return;
-      }
+    let child;
+    try {
+      child = spawn(command, args, { stdio: 'ignore' });
+    } catch {
       resolve(false);
-    });
+      return;
+    }
+    child.on('error', () => resolve(false));
     child.on('close', (code) => {
       if (code === 0 && fs.existsSync(tmp)) {
         const stat = fs.statSync(tmp);
@@ -107,7 +116,15 @@ async function tryCaptureTimed(
       resolve(false);
       return;
     }
-    const child = spawn(command, args, { stdio: ['ignore', out, 'ignore'] });
+    let child;
+    try {
+      child = spawn(command, args, { stdio: ['ignore', out, 'ignore'] });
+    } catch {
+      try { if (out !== undefined) fs.closeSync(out); } catch { /* ignore */ }
+      try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+      resolve(false);
+      return;
+    }
     let settled = false;
     const finish = (ok: boolean) => {
       if (settled) return;
@@ -187,7 +204,13 @@ function listAvfoundationAudioDevices(): Promise<Array<{ index: number; name: st
     return Promise.resolve(avAudioCache.devices);
   }
   return new Promise((resolve) => {
-    const child = spawn('ffmpeg', ['-hide_banner', '-f', 'avfoundation', '-list_devices', 'true', '-i', '']);
+    let child;
+    try {
+      child = spawn('ffmpeg', ['-hide_banner', '-f', 'avfoundation', '-list_devices', 'true', '-i', '']);
+    } catch {
+      resolve([]);
+      return;
+    }
     let stderr = '';
     const timer = setTimeout(() => {
       try {
@@ -427,7 +450,7 @@ $bmp.Dispose();
           tmp,
         ];
         if (await tryCapture('ffmpeg', ffmpegDefault, tmp)) return readAudioFile(tmp);
-        const hasFfmpeg = await commandExists('ffmpeg');
+        const hasFfmpeg = await hasOnPath('ffmpeg');
         if (!hasFfmpeg) {
           return {
             ok: false,
@@ -559,8 +582,8 @@ $bmp.Dispose();
           }
         }
       }
-      const hasPw = await commandExists('pw-record');
-      const hasParec = await commandExists('parec');
+      const hasPw = await hasOnPath('pw-record');
+      const hasParec = await hasOnPath('parec');
       if (!hasPw && !hasParec) {
         return {
           ok: false,

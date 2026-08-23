@@ -433,7 +433,14 @@ function registerIpc() {
   });
 
   ipcMain.handle('system:audio', async (_e, req: SystemAudioRequest): Promise<SystemAudioResponse> => {
-    return platform.captureSystemAudio(req?.durationMs, req?.device);
+    try {
+      return await platform.captureSystemAudio(req?.durationMs, req?.device);
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'System audio capture failed',
+      };
+    }
   });
 
   ipcMain.handle('company:intel', async (_e, req: CompanyIntelRequest): Promise<CompanyIntelResponse> => {
