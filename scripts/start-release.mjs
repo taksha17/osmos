@@ -40,7 +40,11 @@ if (!bin) {
 }
 
 console.log(`[start:release] ${bin}`);
-const child = spawn(bin, process.argv.slice(2), {
+const launchArgs =
+  process.platform === 'linux'
+    ? ['--no-sandbox', '--disable-dev-shm-usage', '--ozone-platform=auto', ...process.argv.slice(2)]
+    : process.argv.slice(2);
+const child = spawn(bin, launchArgs, {
   cwd: path.dirname(bin),
   stdio: 'inherit',
   env: process.env,

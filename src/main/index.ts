@@ -424,8 +424,15 @@ function registerIpc() {
     const engine =
       req.engine ||
       (getSettings().sttProvider === 'local-whisper' ? 'local' : 'openai');
-    if (engine === 'local') return transcribeLocalWhisper(req);
-    return transcribeWithWhisper(req);
+    try {
+      if (engine === 'local') return await transcribeLocalWhisper(req);
+      return await transcribeWithWhisper(req);
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
   });
 
   ipcMain.handle('screen:capture', async (): Promise<CaptureResult> => {

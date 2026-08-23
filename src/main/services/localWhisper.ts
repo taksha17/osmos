@@ -76,15 +76,21 @@ function ensureServe(): Promise<void> {
     const nodeBin = resolveNodeBinary();
     const cacheDir = cacheDirPath();
 
-    const child = spawn(nodeBin, [worker, '--serve', cacheDir], {
-      cwd: root,
-      env: {
-        ...process.env,
-        OSMOS_ROOT: root,
-        UNCON_ROOT: root,
-      },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    let child;
+    try {
+      child = spawn(nodeBin, [worker, '--serve', cacheDir], {
+        cwd: root,
+        env: {
+          ...process.env,
+          OSMOS_ROOT: root,
+          UNCON_ROOT: root,
+        },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch (e) {
+      reject(new Error(`Could not start local Whisper (${resolveNodeBinary()}): ${e instanceof Error ? e.message : String(e)}`));
+      return;
+    }
     serveProc = child;
 
     let settled = false;
@@ -185,15 +191,21 @@ function runOneShot(
   const nodeBin = resolveNodeBinary();
 
   return new Promise((resolve) => {
-    const child = spawn(nodeBin, [worker, audioPath, cacheDir], {
-      cwd: root,
-      env: {
-        ...process.env,
-        OSMOS_ROOT: root,
-        UNCON_ROOT: root,
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    let child;
+    try {
+      child = spawn(nodeBin, [worker, audioPath, cacheDir], {
+        cwd: root,
+        env: {
+          ...process.env,
+          OSMOS_ROOT: root,
+          UNCON_ROOT: root,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (e) {
+      resolve({ ok: false, error: `Could not start local Whisper (${resolveNodeBinary()}): ${e instanceof Error ? e.message : String(e)}` });
+      return;
+    }
 
     let stdout = '';
     let stderr = '';
