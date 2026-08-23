@@ -9,7 +9,7 @@
 - Path: `/media/taksha/New Volume/OSMOS` (repo folder; product name is **OSMOS**)
 - **Not** a fork or rebrand of Natively. Natively at `/media/taksha/New Volume/natively` is **personal reference only** — study ideas, never copy proprietary/source-available code.
 - License: MIT (`LICENSE`)
-- Current version: **0.5.x** (`package.json`)
+- Current version: **0.5.1** (`package.json`)
 - Reference product: Cluely (real-time interview/meeting copilot). We match core UX: desktop overlay, live transcription, screen context, answer suggestions. We do **not** copy proprietary code or data.
 
 ## Stack
@@ -35,12 +35,18 @@ npm run dev          # Vite :5179 + Electron (OSMOS_DEV=1)
 npm run build        # renderer + electron bundles
 npm run typecheck
 npm run pack         # package for **current OS only** → release/
-npm run pack:linux   # AppImage + deb (Linux host)
+npm run pack:linux   # AppImage + deb + tar.gz (Linux host)
+npm run pack:mac     # dmg (must run on macOS host)
+npm run pack:win     # NSIS installer (must run on Windows host)
 ```
 
 **Do not run `npm run pack:all` on a single machine.** It tries to build mac+win+linux together and fails on Linux with `Cannot find module 'dmg-license'` (mac dmg tooling). Use `npm run pack` or OS-specific scripts / CI.
 
 Dev entry: `scripts/dev.mjs` → builds electron → Vite → `electron . --no-sandbox`.
+
+**Cross-platform release workflow:**
+- Push a `v*` tag to trigger GitHub Actions matrix builds on `ubuntu-latest`, `macos-latest`, and `windows-latest`.
+- CI caches electron-builder artifacts, retries on network failure, and uploads all platform installers to the GitHub Release.
 
 ## Architecture map
 
@@ -69,7 +75,7 @@ docs/
 7. Heavy native/WASM work (Whisper, Tesseract) stays in **main or a system Node worker** — not the Electron renderer.
 8. Provider abstraction: chat routes through `chatWithProvider` / `streamWithProvider` in `src/main/services/providers.ts`, not direct Ollama calls.
 
-## What is live (v0.4)
+## What is live (v0.5.1)
 
 - Launcher + frameless overlay (`#/overlay`) — always-on-top, translucent, draggable
 - Streaming LLM chat + cancel (Ollama + cloud providers)
@@ -91,23 +97,31 @@ docs/
 - Auto-update checker scaffold (update feed URL input)
 - Branding: app icon placeholder, name lock in package metadata
 - Linux packaging metadata fixed (`homepage`, author email, deb `maintainer`)
+- Cross-platform CI: GitHub Actions matrix builds all three platforms from `v*` tags
+- Auto-dependency installers: Linux installer pulls `pipewire`/`pulseaudio-utils` for Smart assist; Windows NSIS installer extracts `ffmpeg` automatically
 
 ## Recent fixes (do not regress)
 
 Documented so the next agent does not reintroduce these bugs:
 
-### Packaging (`npm run pack` / `pack:linux`)
+### Packaging (`npm run pack` / `pack:linux` / CI)
 
 - **Symptom A:** `.deb` failed with missing homepage / author email / maintainer.
   - **Fix:** Keep `homepage`, `author.email`, and `build.linux.maintainer` in `package.json`.
 - **Symptom B:** `npm run pack:all` fails on Linux with `Cannot find module 'dmg-license'`.
   - **Cause:** That script tried to build mac+win targets from Linux.
-  - **Fix:** Use `npm run pack` (current OS) or `npm run pack:linux`. `pack:all` now exits with a clear error instead of a cryptic module miss.
+  - **Fix:** Use `npm run pack` (current OS) or OS-specific scripts / CI. `pack:all` now exits with a clear error instead of a cryptic module miss.
 - **Symptom C:** Packaged `.AppImage` “doesn't run” with `dlopen(): error loading libfuse.so.2`.
   - **Cause:** AppImage runtime needs FUSE 2; Ubuntu often only has fuse3.
   - **Fix:** `npm run start:release` (uses `release/linux-unpacked/`), or install the `.deb`, or `sudo apt install libfuse2t64`.
 - Packaged `files` / `asarUnpack` must include `tesseract.js` (and existing Whisper/ORT deps).
 - Linux main process always appends `no-sandbox` + ozone auto (packaged and unpackaged).
+- **CI packaging failures:** electron-builder on tag push tried to auto-publish releases from packaging jobs and failed with 403 / auth errors.
+  - **Fix:** Set `publish: []` in `package.json` `build` config; keep `GH_TOKEN` only in the dedicated `create-release` job; added `--publish never` to `pack:linux`, `pack:mac`, `pack:win` scripts.
+- **Windows build flakes:** GitHub-hosted Windows runners intermittently fail downloading Electron release assets.
+  - **Fix:** Added `ELECTRON_MIRROR` mirror, per-platform `electron-builder` cache, and `nick-fields/retry` wrapper around packaging jobs in `.github/workflows/ci.yml`.
+- **Linux installer missing audio deps:** fresh Ubuntu installs failed system audio because `pw-record`/`parec` were absent.
+  - **Fix:** `linux-install.sh` now installs `pipewire` and `pulseaudio-utils`; error messages mention exact `apt` packages.
 
 ### Screen OCR
 
@@ -148,17 +162,18 @@ Documented so the next agent does not reintroduce these bugs:
 - Question bank + STAR templates: file-backed via `question:list/add/delete` and `star:list/add/delete` IPC; injected into interview system prompts; overlay **STAR story** action.
 - Meeting history uses file-backed `chat-history.json` via `history:list/save/delete` IPC. ChatPanel auto-saves sessions.
 
-### Overlay polish
+### Overlay polish / audio retry loop / Ubuntu home layout
 
-- Overlay now uses `setAlwaysOnTop(true, 'screen-saver')` for better always-on-top behavior.
-- Overlay auto-hides after 5s of inactivity via `overlay:reset-idle` IPC; dims to 35% opacity when idle (2.5s when stealth is on).
-- Compact CSS added for overlay mode (`chat--compact`).
-- Continuous / Smart mode: auto-starts **system audio** (default) or mic/both per `assistAudioSource`; auto-sends on final transcript when enabled.
-- Overlay pause (❚❚ / ▶): stops mic + system listen, cancels in-flight answer, blocks auto-assist; resume re-enables Smart listen.
-- Local Whisper uses a warm `--serve` worker so continuous chunks reuse the loaded model.
-- System-audio Smart listen overlaps capture with transcription (next 6s chunk starts while Whisper is still working).
-- macOS loopback auto-picks BlackHole / Loopback / Soundflower via ffmpeg device list; override with Settings `systemAudioDevice` or `OSMOS_AUDIO_DEVICE`.
-- Cluely-like UI polish: smoother transitions, compact answer cards, refined typography, and glassmorphism overlay card.
+- **Symptom:** overlay “buffering” / vibration on Ubuntu/Windows when no audio device or missing `ffmpeg`.
+  - **Fix:** `ChatPanel.tsx` now guards mic/system auto-start with 5s error backoff so failed capture does not thrash start/stop.
+- **Symptom:** Windows installer `ffmpeg` section was a stub and NSIS had compile/runtime issues.
+  - **Fix:** Real PowerShell-based ffmpeg extraction in `windows-installer.nsi`; removed duplicate `.onInit`, `Var TEMP` shadowing, invalid `MB_ICONERROR`, and added `WinVer.nsh`.
+- **Symptom:** Ubuntu home dashboard layout collapsed / overflowed.
+  - **Fix:** Use `minmax(0, ...)` and `auto-fit` for hero/profile/status/mode grids; added responsive breakpoints.
+- **Symptom:** Overlay live mic button caused visible vibration.
+  - **Fix:** Removed aggressive `pulse` animation from `.mic-btn--live`; stabilized idle transitions.
+- **Symptom:** Linux system audio showed generic missing-tool error.
+  - **Fix:** `linux-install.sh` installs `pipewire` and `pulseaudio-utils`; `src/main/platform/index.ts` checks `pw-record`/`parec` availability and returns actionable `apt` instructions.
 
 ### Stealth / screen-share exclusion
 
@@ -234,11 +249,11 @@ Chat stream events: `meta` | `status` | `delta` | `done` | `error`.
 
 ## Suggested next work (roadmap)
 
-Core Cluely-style loop is largely live. Priority candidates:
+Core Cluely-style loop is largely live. Public GitHub + CI pack artifacts + GitHub Releases for all three platforms are now working. Priority candidates:
 
-1. Public GitHub + CI pack artifacts + signed/notarized builds
-2. Real-device stealth + BlackHole validation on Windows / macOS with Zoom / Teams / Meet
-3. Faster default model path / tighter overlay answer cards
+1. Signed / notarized builds (EV/OV cert on Windows, Apple Developer ID + notarization on macOS) so installers don't trigger SmartScreen / Gatekeeper.
+2. Real-device stealth + BlackHole validation on Windows / macOS with Zoom / Teams / Meet.
+3. Faster default model path / tighter overlay answer cards.
 
 See `docs/ROADMAP.md` and `src/shared/features.ts`.
 
@@ -247,6 +262,7 @@ See `docs/ROADMAP.md` and `src/shared/features.ts`.
 - [ ] `npm run typecheck`
 - [ ] `npm run build`
 - [ ] If packaging touched: `npm run pack:linux` (needs homepage + author email + maintainer)
+- [ ] To ship installers: push a `v*` tag → triggers CI matrix on ubuntu/macos/windows → releases all platform assets
 - [ ] Consider Linux + note macOS/Windows impact for platform-sensitive changes
 - [ ] Update `features.ts` / `ROADMAP.md` if capability status changed
 - [ ] Restart Electron after main/preload edits
