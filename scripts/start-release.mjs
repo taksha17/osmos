@@ -45,13 +45,20 @@ const launchArgs =
     ? ['--no-sandbox', '--disable-dev-shm-usage', '--ozone-platform-hint=auto', ...process.argv.slice(2)]
     : process.argv.slice(2);
 
-// On Linux, a snap-launched Code editor can export GSETTINGS_SCHEMA_DIR to a
-// snap schema dir that lacks org.gnome.settings-daemon.plugins.xsettings.
-// GTK then fatals on the missing 'antialiasing' key at startup. Neutralize it.
+// On Linux, a snap-launched Code editor exports GSETTINGS_SCHEMA_DIR and an
+// XDG_DATA_DIRS that lead with snap paths. GPK's schema lookup reads
+// $GSETTINGS_SCHEMA_DIR AND $XDG_DATA_DIRS/glib-2.0/schemas, so a snap schema
+// dir lacking org.gnome.settings-daemon.plugins.xsettings makes GTK fatal on
+// the missing 'antialiasing' key at startup. Sanitize both for the child.
 const env = { ...process.env };
 if (process.platform === 'linux') {
   delete env.GSETTINGS_SCHEMA_DIR;
   delete env.GSETTINGS_BACKEND;
+  // Drop snap/container role + user-local code dirs; keep system share dirs.
+  const kept = (process.env.XDG_DATA_DIRS || '')
+    .split(':')
+    .filter((p) => p && !/\/snap\//.test(p) && !/flatpak/.test(p));
+  env.XDG_DATA_DIRS = kept.length ? kept.join(':') : '/usr/local/share:/usr/share';
 }
 
 const child = spawn(bin, launchArgs, {
