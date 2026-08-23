@@ -44,9 +44,19 @@ const launchArgs =
   process.platform === 'linux'
     ? ['--no-sandbox', '--disable-dev-shm-usage', '--ozone-platform-hint=auto', ...process.argv.slice(2)]
     : process.argv.slice(2);
+
+// On Linux, a snap-launched Code editor can export GSETTINGS_SCHEMA_DIR to a
+// snap schema dir that lacks org.gnome.settings-daemon.plugins.xsettings.
+// GTK then fatals on the missing 'antialiasing' key at startup. Neutralize it.
+const env = { ...process.env };
+if (process.platform === 'linux') {
+  delete env.GSETTINGS_SCHEMA_DIR;
+  delete env.GSETTINGS_BACKEND;
+}
+
 const child = spawn(bin, launchArgs, {
   cwd: path.dirname(bin),
   stdio: 'inherit',
-  env: process.env,
+  env,
 });
 child.on('exit', (code) => process.exit(code ?? 1));
