@@ -42,7 +42,7 @@ if (!bin) {
 console.log(`[start:release] ${bin}`);
 const launchArgs =
   process.platform === 'linux'
-    ? ['--no-sandbox', '--disable-dev-shm-usage', '--ozone-platform=auto', ...process.argv.slice(2)]
+    ? ['--no-sandbox', '--disable-dev-shm-usage', '--ozone-platform-hint=auto', ...process.argv.slice(2)]
     : process.argv.slice(2);
 const child = spawn(bin, launchArgs, {
   cwd: path.dirname(bin),
