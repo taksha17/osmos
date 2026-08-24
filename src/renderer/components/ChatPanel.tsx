@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppSettings, ChatStreamEvent, StarTemplate } from '../../shared/types';
 import {
-  continuousAssistPrompt,
-  continuousScreenPrompt,
+  fusedAssistPrompt,
+  SCREEN_CONTEXT_FRESH_MS,
   shouldAutoAssist,
 } from '@shared/continuousAssist';
 import { useMicStt } from '../stt/useMicStt';
@@ -103,6 +103,7 @@ export function ChatPanel({
   systemStopRef.current = system.stop;
   systemStartRef.current = system.start;
   const lastAssistRef = useRef({ key: '', at: 0 });
+  const lastScreenRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
   const micFailRef = useRef(0);
   const systemFailRef = useRef(0);
 
@@ -359,7 +360,18 @@ export function ChatPanel({
       if (key && key === lastAssistRef.current.key && now - lastAssistRef.current.at < 5000) return;
       lastAssistRef.current = { key, at: now };
 
-      const prompt = smart && overlay ? continuousAssistPrompt(cleaned, mode) : cleaned;
+      const screenFresh =
+        lastScreenRef.current.text && now - lastScreenRef.current.at < SCREEN_CONTEXT_FRESH_MS
+          ? lastScreenRef.current.text
+          : '';
+      const prompt =
+        smart && overlay
+          ? fusedAssistPrompt({
+              transcript: cleaned,
+              screenText: screenFresh || undefined,
+              activeMode: mode,
+            })
+          : cleaned;
       void sendRef.current(prompt);
     },
     [overlay, settings?.activeMode, settings?.autoAskOnFinal],
@@ -437,11 +449,17 @@ export function ChatPanel({
       setOcrStatus('OCR…');
       const ocr = await extractTextFromBase64(result.dataUrl);
       if (ocr.text) {
+        lastScreenRef.current = { text: ocr.text, at: Date.now() };
         setInput((prev) => (prev ? `${prev}\n\n[Screen]\n${ocr.text}` : `[Screen]\n${ocr.text}`));
         // In Smart overlay, immediately assist from this one-shot screen read.
         if (overlay && continuousRef.current && !pausedRef.current) {
           const mode = settings?.activeMode || 'general';
-          void sendRef.current(continuousScreenPrompt(ocr.text, mode));
+          void sendRef.current(
+            fusedAssistPrompt({
+              screenText: ocr.text,
+              activeMode: mode,
+            }),
+          );
         }
       } else {
         setError(ocr.error || 'OCR returned no text');

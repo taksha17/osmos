@@ -20,37 +20,49 @@ export function shouldAutoAssist(text: string, smartMode: boolean): boolean {
 
 /** Build the LLM prompt for a live audio chunk in continuous assist mode. */
 export function continuousAssistPrompt(transcript: string, activeMode: CopilotMode): string {
-  const ctx =
-    activeMode === 'interview'
-      ? 'Live interview audio'
-      : activeMode === 'meeting'
-        ? 'Live meeting audio'
-        : 'Live conversation audio';
-
-  if (looksLikeQuestion(transcript)) {
-    return `${ctx} picked up:\n"${transcript}"\n\nWhat should I say in response? Give a concise, natural, speakable answer.`;
-  }
-
-  return `${ctx} picked up:\n"${transcript}"\n\nBriefly assist — suggest a response or key points if the speaker seems to expect one.`;
+  return fusedAssistPrompt({ transcript, activeMode });
 }
 
-/** Prompt when continuous screen OCR finds new on-screen text. */
+/** Prompt when continuous / on-demand screen OCR finds new on-screen text. */
 export function continuousScreenPrompt(screenText: string, activeMode: CopilotMode): string {
-  const clipped = screenText.trim().slice(0, 3500);
-  const ctx =
-    activeMode === 'interview'
-      ? 'interview'
-      : activeMode === 'meeting'
-        ? 'meeting'
-        : 'session';
+  return fusedAssistPrompt({ screenText, activeMode });
+}
 
-  return [
-    `Live screen OCR from the current ${ctx} (text visible on screen):`,
-    '---',
-    clipped,
-    '---',
-    'Help me respond based on what is on screen. Be concise and speakable. If this looks like a coding/problem question, outline the approach and a short answer I can say aloud.',
-  ].join('\n');
+/**
+ * Fuse live transcript + optional fresh screen OCR into one assist prompt
+ * (Natively-style context packet idea — original OSMOS wording).
+ */
+export function fusedAssistPrompt(opts: {
+  transcript?: string;
+  screenText?: string;
+  activeMode: CopilotMode;
+}): string {
+  const mode = opts.activeMode;
+  const ctx =
+    mode === 'interview' ? 'interview' : mode === 'meeting' ? 'meeting' : 'session';
+  const transcript = (opts.transcript || '').trim();
+  const screen = (opts.screenText || '').trim().slice(0, 3500);
+  const parts: string[] = [`Live ${ctx} assist. Be concise and speakable.`];
+
+  if (transcript) {
+    parts.push('', 'Audio transcript:', `"${transcript}"`);
+  }
+  if (screen) {
+    parts.push('', 'On-screen text (OCR):', '---', screen, '---');
+  }
+
+  if (transcript && looksLikeQuestion(transcript)) {
+    parts.push('', 'What should I say in response?');
+  } else if (screen && looksLikeQuestion(screen)) {
+    parts.push(
+      '',
+      'The screen looks like a question or problem. Outline a short spoken answer or approach.',
+    );
+  } else {
+    parts.push('', 'Suggest a response or key points if a reply seems expected.');
+  }
+
+  return parts.join('\n');
 }
 
 /** Simple stable fingerprint so unchanged screen text does not re-trigger assist. */
@@ -63,10 +75,13 @@ export function screenTextFingerprint(text: string): string {
   return `${normalized.length}:${h}`;
 }
 
+/** How long on-demand screen OCR stays "fresh" for fusion with audio assists. */
+export const SCREEN_CONTEXT_FRESH_MS = 45_000;
+
 export const CONTINUOUS_CHUNK_MS = 6000;
 
-/** How often Smart mode silently re-reads the screen (OCR). */
-export const CONTINUOUS_SCREEN_MS = 10_000;
+/** How often optional CLI-only screen OCR may run (never via desktopCapturer loop). */
+export const CONTINUOUS_SCREEN_MS = 12_000;
 
 /** Allow one extra capture to start while a prior chunk is still transcribing. */
 export const CONTINUOUS_MAX_IN_FLIGHT = 2;

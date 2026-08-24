@@ -31,6 +31,41 @@ const api = {
     ipcRenderer.invoke('file:extract-text', payload),
   captureSystemAudio: (payload?: { durationMs?: number; device?: string }) =>
     ipcRenderer.invoke('system:audio', payload || {}),
+  startSystemAudioListen: (payload?: { durationMs?: number; device?: string; chunkMs?: number }) =>
+    ipcRenderer.invoke('system:listen-start', {
+      device: payload?.device,
+      chunkMs: payload?.chunkMs ?? payload?.durationMs,
+    }),
+  stopSystemAudioListen: () => ipcRenderer.invoke('system:listen-stop'),
+  onSystemAudioChunk: (
+    listener: (chunk: {
+      ok: boolean;
+      base64?: string;
+      mimeType?: string;
+      error?: string;
+      silent?: boolean;
+      rms?: number;
+    }) => void,
+  ) => {
+    const handler = (
+      _e: Electron.IpcRendererEvent,
+      chunk: {
+        ok: boolean;
+        base64?: string;
+        mimeType?: string;
+        error?: string;
+        silent?: boolean;
+        rms?: number;
+      },
+    ) => listener(chunk);
+    ipcRenderer.on('system:audio-chunk', handler);
+    return () => ipcRenderer.removeListener('system:audio-chunk', handler);
+  },
+  onSystemAudioStatus: (listener: (ev: { text: string }) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, ev: { text: string }) => listener(ev);
+    ipcRenderer.on('system:audio-status', handler);
+    return () => ipcRenderer.removeListener('system:audio-status', handler);
+  },
   listAudioDevices: () => ipcRenderer.invoke('audio:list-devices'),
   captureMicAudio: (payload?: { durationMs?: number; device?: string }) =>
     ipcRenderer.invoke('audio:capture-mic', payload || {}),

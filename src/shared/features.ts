@@ -74,7 +74,7 @@ export const FEATURES: FeatureDef[] = [
     id: 'system-audio',
     name: 'System / speaker capture',
     description:
-      'Continuous meeting loopback → STT → Smart assist (overlap capture while transcribing; pw-record/parec, ffmpeg WASAPI, ffmpeg/BlackHole).',
+      'Continuous meeting loopback → STT → Smart assist (ffmpeg pulse / pw-record on Linux; ffmpeg WASAPI / BlackHole elsewhere).',
     status: 'live',
     platforms: ['linux', 'darwin', 'win32'],
   },

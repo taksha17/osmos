@@ -5,33 +5,37 @@ import { createSavedProfile, guessCompanyFromUrl } from '../../shared/profiles';
 import { DocumentsTab } from './DocumentsTab';
 import { QuestionBankTab } from './QuestionBankTab';
 
-type ProfileSection = 'basics' | 'company' | 'documents' | 'questions';
+type ProfileSection = 'identity' | 'profile' | 'company' | 'documents' | 'questions' | 'web';
 
 type Props = {
   settings: AppSettings;
   onChange: (patch: Partial<AppSettings>) => void;
   onSave: () => void;
   status?: string;
+  onClose?: () => void;
 };
 
-const SECTIONS: Array<{ id: ProfileSection; label: string }> = [
-  { id: 'basics', label: 'Basics' },
-  { id: 'company', label: 'Company' },
-  { id: 'documents', label: 'Documents' },
-  { id: 'questions', label: 'Questions' },
+const NAV: Array<{ id: ProfileSection; label: string; icon: string }> = [
+  { id: 'identity', label: 'Identity', icon: '◎' },
+  { id: 'profile', label: 'Profile', icon: '◉' },
+  { id: 'company', label: 'Company Intel', icon: '▣' },
+  { id: 'documents', label: 'Role Insight', icon: '▤' },
+  { id: 'questions', label: 'Cover Letter', icon: '✎' },
+  { id: 'web', label: 'Web Search', icon: '⌕' },
 ];
 
 function readInitialSection(): ProfileSection {
   try {
     const raw = sessionStorage.getItem('osmos-profile-section');
     sessionStorage.removeItem('osmos-profile-section');
-    if (raw === 'basics' || raw === 'company' || raw === 'documents' || raw === 'questions') {
-      return raw;
-    }
+    if (raw === 'basics' || raw === 'identity') return 'identity';
+    if (raw === 'company') return 'company';
+    if (raw === 'documents') return 'documents';
+    if (raw === 'questions') return 'questions';
   } catch {
     /* ignore */
   }
-  return 'basics';
+  return 'identity';
 }
 
 async function fileToBase64(file: File): Promise<string> {
@@ -42,7 +46,7 @@ async function fileToBase64(file: File): Promise<string> {
   return btoa(binary);
 }
 
-export function ProfilePanel({ settings, onChange, onSave, status }: Props) {
+export function ProfilePanel({ settings, onChange, onSave, status, onClose }: Props) {
   const profiles = settings.profiles?.length
     ? settings.profiles
     : [
@@ -249,223 +253,260 @@ export function ProfilePanel({ settings, onChange, onSave, status }: Props) {
   };
 
   return (
-    <section className="panel">
-      <h2>Profile</h2>
-      <p>
-        One place for everything about this interview context: identity, company research, documents,
-        and question bank.
-      </p>
-
-      <div className="profile-switcher">
-        {profiles.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            className={`profile-chip${p.id === activeId ? ' profile-chip--active' : ''}`}
-            onClick={() => switchProfile(p.id)}
-          >
-            {p.label || p.displayName || 'Untitled'}
-          </button>
-        ))}
-        <button type="button" className="profile-chip profile-chip--add" onClick={addProfile}>
-          + New
-        </button>
-      </div>
-
-      <div className="profile-sections">
-        {SECTIONS.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            className={`profile-section-tab${section === s.id ? ' profile-section-tab--active' : ''}`}
-            onClick={() => setSection(s.id)}
-          >
-            {s.label}
-            {s.id === 'documents' && (active.documents?.length || 0) > 0
-              ? ` (${active.documents!.length})`
-              : ''}
-            {s.id === 'questions' &&
-            (active.questions?.length || 0) + (active.starTemplates?.length || 0) > 0
-              ? ` (${(active.questions?.length || 0) + (active.starTemplates?.length || 0)})`
-              : ''}
-          </button>
-        ))}
-      </div>
-
-      {section === 'basics' ? (
-        <>
-          <div className="field">
-            <label>Profile label</label>
-            <input
-              value={active.label}
-              onChange={(e) => setActiveFields({ label: e.target.value })}
-              placeholder="e.g. Interview @ Acme"
-            />
-          </div>
-
-          <h3>Mode</h3>
-          <div className="mode-grid">
-            {MODE_DEFS.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                className={`mode-card ${settings.activeMode === m.id ? 'mode-card--active' : ''}`}
-                onClick={() => setPreferredMode(m.id as CopilotMode)}
-              >
-                <strong>{m.name}</strong>
-                <span className="meta">{m.blurb}</span>
-              </button>
-            ))}
-          </div>
-
-          <h3>Identity</h3>
-          <div className="field">
-            <label>Display name</label>
-            <input
-              value={profile.displayName}
-              onChange={(e) => setActiveFields({ displayName: e.target.value })}
-              placeholder="Your name"
-            />
-          </div>
-
-          <div className="field">
-            <div className="field-label-row">
-              <label>Résumé / experience</label>
-              <button type="button" className="dash-link" onClick={() => resumeInputRef.current?.click()}>
-                Upload PDF / DOCX
-              </button>
-              <input
-                ref={resumeInputRef}
-                type="file"
-                accept=".pdf,.docx,.doc,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
-                hidden
-                onChange={(e) => {
-                  void uploadInto('resume', e.target.files?.[0] || null);
-                  e.target.value = '';
-                }}
-              />
-            </div>
-            <textarea
-              rows={10}
-              value={profile.resumeText}
-              onChange={(e) => setActiveFields({ resumeText: e.target.value })}
-              placeholder="Paste résumé or upload PDF/DOCX…"
-            />
-          </div>
-
-          <div className="field">
-            <div className="field-label-row">
-              <label>Target job description</label>
-              <button type="button" className="dash-link" onClick={() => jdInputRef.current?.click()}>
-                Upload PDF / DOCX
-              </button>
-              <input
-                ref={jdInputRef}
-                type="file"
-                accept=".pdf,.docx,.doc,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
-                hidden
-                onChange={(e) => {
-                  void uploadInto('jd', e.target.files?.[0] || null);
-                  e.target.value = '';
-                }}
-              />
-            </div>
-            <textarea
-              rows={8}
-              value={profile.jdText}
-              onChange={(e) => setActiveFields({ jdText: e.target.value })}
-              placeholder="Paste the JD or upload PDF/DOCX…"
-            />
-          </div>
-
-          <div className="field">
-            <label>Extra notes</label>
-            <textarea
-              rows={4}
-              value={profile.notes}
-              onChange={(e) => setActiveFields({ notes: e.target.value })}
-              placeholder="Talking points, constraints, stories to prefer…"
-            />
-          </div>
-        </>
-      ) : null}
-
-      {section === 'company' ? (
-        <>
-          <p className="meta">
-            Add a name and/or careers URL. Research pulls live web results into this profile; Assemble
-            also seeds likely interview questions.
-          </p>
-          <div className="field">
-            <label>Company name</label>
-            <input
-              value={active.companyName || ''}
-              onChange={(e) => patchActive({ companyName: e.target.value })}
-              placeholder="e.g. Acme Corp"
-            />
-          </div>
-          <div className="field">
-            <label>Company / careers URL</label>
-            <input
-              value={active.companyUrl || ''}
-              onChange={(e) => {
-                const companyUrl = e.target.value;
-                const guessed =
-                  !active.companyName.trim() && companyUrl.trim()
-                    ? guessCompanyFromUrl(companyUrl)
-                    : active.companyName;
-                patchActive({ companyUrl, companyName: guessed });
-              }}
-              placeholder="https://acme.com/careers"
-            />
-          </div>
-          <div className="row" style={{ marginBottom: 12 }}>
-            <button type="button" style={{ height: 40 }} onClick={() => void researchCompany()} disabled={Boolean(busy)}>
-              Research company
-            </button>
-            <button
-              type="button"
-              className="primary"
-              style={{ height: 40 }}
-              onClick={() => void assemblePrep()}
-              disabled={Boolean(busy)}
-            >
-              Assemble interview prep
-            </button>
-          </div>
-          <div className="field">
-            <label>Company intel (saved on this profile)</label>
-            <textarea
-              rows={10}
-              value={active.companyIntel || ''}
-              onChange={(e) => patchActive({ companyIntel: e.target.value })}
-              placeholder="Research results appear here…"
-            />
-          </div>
-        </>
-      ) : null}
-
-      {section === 'documents' ? (
-        <DocumentsTab settings={settings} onSettingsChange={applySettings} embedded />
-      ) : null}
-
-      {section === 'questions' ? (
-        <QuestionBankTab settings={settings} embedded onSettingsChange={applySettings} />
-      ) : null}
-
-      <div className="row" style={{ marginTop: 18 }}>
-        <button className="primary" style={{ height: 40 }} type="button" onClick={onSave}>
-          Save profile
-        </button>
-        {profiles.length > 1 ? (
-          <button type="button" style={{ height: 40 }} onClick={removeProfile}>
-            Delete this profile
+    <div className="hub-modal" role="dialog" aria-label="Profile Intelligence">
+      <aside className="hub-modal__nav">
+        {onClose ? (
+          <button type="button" className="hub-modal__close" onClick={onClose} aria-label="Close">
+            ×
           </button>
         ) : null}
-        {busy ? <span className="meta">{busy}</span> : null}
-        {status ? <span className="meta">{status}</span> : null}
+        <div className="hub-modal__nav-label">Profile Intelligence</div>
+        <nav className="hub-modal__nav-list">
+          {NAV.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`hub-nav-item${section === item.id ? ' hub-nav-item--active' : ''}`}
+              onClick={() => setSection(item.id)}
+            >
+              <span aria-hidden>{item.icon}</span>
+              {item.label}
+            </button>
+          ))}
+        </nav>
+        <button type="button" className="hub-modal__manage" onClick={onSave}>
+          Save profile <span aria-hidden>✓</span>
+        </button>
+      </aside>
+
+      <div className="hub-modal__body">
+        <div className="profile-switcher hub-modal__profiles">
+          {profiles.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={`profile-chip${p.id === activeId ? ' profile-chip--active' : ''}`}
+              onClick={() => switchProfile(p.id)}
+            >
+              {p.label || p.displayName || 'Untitled'}
+            </button>
+          ))}
+          <button type="button" className="profile-chip profile-chip--add" onClick={addProfile}>
+            + New
+          </button>
+        </div>
+
+        {section === 'identity' ? (
+          <div className="hub-identity">
+            <div className="hub-block">
+              <h2>Resume</h2>
+              <p className="hub-block__desc">
+                Grounds every answer in what you&apos;ve actually done, instead of generic advice.
+              </p>
+              <div className="hub-upload">
+                <span>Add your resume as real-time context</span>
+                <button type="button" className="hub-upload__btn" onClick={() => resumeInputRef.current?.click()}>
+                  📎 Upload file
+                </button>
+                <input
+                  ref={resumeInputRef}
+                  type="file"
+                  accept=".pdf,.docx,.doc,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                  hidden
+                  onChange={(e) => {
+                    void uploadInto('resume', e.target.files?.[0] || null);
+                    e.target.value = '';
+                  }}
+                />
+              </div>
+              {profile.resumeText?.trim() ? (
+                <textarea
+                  className="hub-upload__preview"
+                  rows={6}
+                  value={profile.resumeText}
+                  onChange={(e) => setActiveFields({ resumeText: e.target.value })}
+                />
+              ) : null}
+            </div>
+
+            <div className="hub-block">
+              <h2>Job Description</h2>
+              <p className="hub-block__desc">
+                Frames answers around what this specific role asks for, and powers Company Intel.
+              </p>
+              <div className="hub-upload">
+                <span>Add a job description as real-time context</span>
+                <button type="button" className="hub-upload__btn" onClick={() => jdInputRef.current?.click()}>
+                  📎 Upload file
+                </button>
+                <input
+                  ref={jdInputRef}
+                  type="file"
+                  accept=".pdf,.docx,.doc,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                  hidden
+                  onChange={(e) => {
+                    void uploadInto('jd', e.target.files?.[0] || null);
+                    e.target.value = '';
+                  }}
+                />
+              </div>
+              {profile.jdText?.trim() ? (
+                <textarea
+                  className="hub-upload__preview"
+                  rows={6}
+                  value={profile.jdText}
+                  onChange={(e) => setActiveFields({ jdText: e.target.value })}
+                />
+              ) : null}
+            </div>
+
+            <p className="hub-footnote meta">
+              ℹ Used only in Looking for work and Technical Interview modes. Other modes never receive them.
+            </p>
+          </div>
+        ) : null}
+
+        {section === 'profile' ? (
+          <div className="hub-identity">
+            <div className="field">
+              <label>Profile label</label>
+              <input
+                value={active.label}
+                onChange={(e) => setActiveFields({ label: e.target.value })}
+                placeholder="e.g. Interview @ Acme"
+              />
+            </div>
+            <div className="field">
+              <label>Display name</label>
+              <input
+                value={profile.displayName}
+                onChange={(e) => setActiveFields({ displayName: e.target.value })}
+                placeholder="Your name"
+              />
+            </div>
+            <h3>Mode</h3>
+            <div className="mode-grid">
+              {MODE_DEFS.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  className={`mode-card ${settings.activeMode === m.id ? 'mode-card--active' : ''}`}
+                  onClick={() => setPreferredMode(m.id as CopilotMode)}
+                >
+                  <strong>{m.name}</strong>
+                  <span className="meta">{m.blurb}</span>
+                </button>
+              ))}
+            </div>
+            <div className="field">
+              <label>Extra notes</label>
+              <textarea
+                rows={5}
+                value={profile.notes}
+                onChange={(e) => setActiveFields({ notes: e.target.value })}
+                placeholder="Talking points, constraints, stories…"
+              />
+            </div>
+            {profiles.length > 1 ? (
+              <button type="button" onClick={removeProfile}>
+                Delete this profile
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {section === 'company' ? (
+          <div className="hub-identity">
+            <h2>Company Intel</h2>
+            <p className="hub-block__desc">
+              Add a name and/or careers URL. Research pulls live web results into this profile.
+            </p>
+            <div className="field">
+              <label>Company name</label>
+              <input
+                value={active.companyName || ''}
+                onChange={(e) => patchActive({ companyName: e.target.value })}
+                placeholder="e.g. Acme Corp"
+              />
+            </div>
+            <div className="field">
+              <label>Company / careers URL</label>
+              <input
+                value={active.companyUrl || ''}
+                onChange={(e) => {
+                  const companyUrl = e.target.value;
+                  const guessed =
+                    !active.companyName.trim() && companyUrl.trim()
+                      ? guessCompanyFromUrl(companyUrl)
+                      : active.companyName;
+                  patchActive({ companyUrl, companyName: guessed });
+                }}
+                placeholder="https://acme.com/careers"
+              />
+            </div>
+            <div className="row" style={{ marginBottom: 12 }}>
+              <button type="button" style={{ height: 40 }} onClick={() => void researchCompany()} disabled={Boolean(busy)}>
+                Research company
+              </button>
+              <button
+                type="button"
+                className="primary"
+                style={{ height: 40 }}
+                onClick={() => void assemblePrep()}
+                disabled={Boolean(busy)}
+              >
+                Assemble interview prep
+              </button>
+            </div>
+            <div className="field">
+              <label>Company intel</label>
+              <textarea
+                rows={10}
+                value={active.companyIntel || ''}
+                onChange={(e) => patchActive({ companyIntel: e.target.value })}
+                placeholder="Research results appear here…"
+              />
+            </div>
+          </div>
+        ) : null}
+
+        {section === 'documents' ? (
+          <div className="hub-identity">
+            <h2>Role Insight</h2>
+            <p className="hub-block__desc">Attach reference docs for retrieval during interviews.</p>
+            <DocumentsTab settings={settings} onSettingsChange={applySettings} embedded />
+          </div>
+        ) : null}
+
+        {section === 'questions' ? (
+          <div className="hub-identity">
+            <h2>Cover Letter / STAR</h2>
+            <p className="hub-block__desc">Question bank and STAR stories for speakable answers.</p>
+            <QuestionBankTab settings={settings} embedded onSettingsChange={applySettings} />
+          </div>
+        ) : null}
+
+        {section === 'web' ? (
+          <div className="hub-identity">
+            <h2>Web Search</h2>
+            <p className="hub-block__desc">
+              Live grounding is configured in Settings → Web. Provider:{' '}
+              <strong>{settings.webSearchProvider || 'duckduckgo'}</strong>
+              {settings.useWebSearch === false ? ' (disabled)' : ''}.
+            </p>
+            <button type="button" className="primary" onClick={onSave}>
+              Save &amp; continue
+            </button>
+          </div>
+        ) : null}
+
+        {(busy || status) && (
+          <p className="meta" style={{ marginTop: 12 }}>
+            {busy || status}
+          </p>
+        )}
+        {error ? <div className="error" style={{ marginTop: 10 }}>{error}</div> : null}
       </div>
-      {error ? <div className="error" style={{ marginTop: 10 }}>{error}</div> : null}
-    </section>
+    </div>
   );
 }

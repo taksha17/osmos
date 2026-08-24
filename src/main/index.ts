@@ -27,6 +27,8 @@ import { retrieveChunks } from './services/retrieval.js';
 import { extractTextFromUpload } from './services/documentExtract.js';
 import { assembleInterviewPrep } from './services/profilePrep.js';
 import { listAudioDevices } from './services/audioDevices.js';
+import { getLinuxLoopbackStream } from './services/linuxLoopbackStream.js';
+import { CONTINUOUS_CHUNK_MS } from '../shared/continuousAssist.js';
 import {
   addQuestionBankItem,
   deleteQuestionBankItem,
@@ -462,6 +464,65 @@ function registerIpc() {
     }
   });
 
+  /** Continuous Linux loopback (ffmpeg pulse / pw-record) — preferred Smart path. */
+  ipcMain.handle(
+    'system:listen-start',
+    async (
+      e,
+      req?: { device?: string; chunkMs?: number },
+    ): Promise<{
+      ok: boolean;
+      error?: string;
+      monitor?: string;
+      mode?: 'stream' | 'fallback';
+      backend?: string;
+    }> => {
+      if (process.platform !== 'linux') {
+        return { ok: true, mode: 'fallback' };
+      }
+      try {
+        const stream = getLinuxLoopbackStream();
+        const sender = e.sender;
+        stream.removeAllListeners('chunk');
+        stream.removeAllListeners('error');
+        stream.removeAllListeners('status');
+        stream.on('chunk', (chunk) => {
+          if (!sender.isDestroyed()) sender.send('system:audio-chunk', chunk);
+        });
+        stream.on('error', (error: string) => {
+          if (!sender.isDestroyed()) sender.send('system:audio-chunk', { ok: false, error });
+        });
+        stream.on('status', (text: string) => {
+          if (!sender.isDestroyed()) sender.send('system:audio-status', { text });
+        });
+        const res = await stream.start({
+          device: req?.device,
+          chunkMs: req?.chunkMs || CONTINUOUS_CHUNK_MS,
+        });
+        if (!res.ok) return { ok: false, error: res.error, mode: 'fallback' };
+        return {
+          ok: true,
+          monitor: res.monitor,
+          mode: 'stream',
+          backend: res.backend,
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : 'Listen start failed',
+          mode: 'fallback',
+        };
+      }
+    },
+  );
+
+  ipcMain.handle('system:listen-stop', async (): Promise<{ ok: boolean }> => {
+    if (process.platform === 'linux') {
+      await getLinuxLoopbackStream().stop();
+    }
+    return { ok: true };
+  });
+
   ipcMain.handle('audio:list-devices', async (): Promise<AudioDevicesResponse> => {
     try {
       const list = await listAudioDevices();
@@ -777,6 +838,7 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  void getLinuxLoopbackStream().stop().catch(() => undefined);
   stopLocalWhisperWorker();
 });
 

@@ -93,7 +93,10 @@ export function resolveLinuxMicSource(requested: string | undefined, list: Audio
 export function resolveLinuxMonitor(requested: string | undefined, list: AudioDeviceList): string {
   const id = (requested || '').trim();
   if (id) {
-    const hit = list.monitors.find((m) => m.id === id || m.id.includes(id));
+    const normalize = (s: string) => s.replace(/_/g, '.');
+    const hit = list.monitors.find(
+      (m) => normalize(m.id) === normalize(id) || normalize(m.id).includes(normalize(id)),
+    );
     if (hit) return hit.id;
     if (id.endsWith('.monitor')) return id;
   }

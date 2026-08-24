@@ -24,7 +24,7 @@
 | Web search | DuckDuckGo (default) / Tavily / SearXNG |
 | Offline STT | System Node worker + `@xenova/transformers` Whisper tiny |
 | Screen OCR | Main-process `tesseract.js` via `ocr:extract` IPC |
-| Audio loopback | Platform adapters: Linux `pw-record`/`parec` (sink `*.monitor`), Windows `ffmpeg` WASAPI, macOS `ffmpeg`/`rec` + BlackHole |
+| Audio loopback | Platform adapters: Linux `ffmpeg` pulse / `pw-record` on sink `*.monitor` (not `parec`), Windows `ffmpeg` WASAPI, macOS `ffmpeg`/`rec` + BlackHole |
 | Settings | `electron-store` → `~/.config/OSMOS/osmos-settings.json` (Linux); migrates from legacy `Unconventionally/` |
 | Packaging | electron-builder (AppImage + deb on Linux) |
 
@@ -58,17 +58,31 @@ src/
   shared/          # types, features, modes, continuousAssist, linuxAudioDevices
   main/
     platform/      # Linux / macOS / Windows adapters (capture, audio loopback, stealth)
-    services/      # ollama, whisper, localWhisper, ocr, audioDevices, screenCapture,
-                   # resolveBin, providers, retrieval, history, …
+    services/      # ollama, whisper, localWhisper, ocr, imageHash, audioDevices,
+                   # linuxLoopbackStream, screenCapture, resolveBin, providers, …
   preload/         # contextBridge → window.osmos
   renderer/
-    stt/           # micStt, useMicStt, useSystemAudioStt, ocr (no Transformers.js)
-    components/    # ChatPanel (Smart overlay), Settings, Profile, …
+    stt/           # micStt, useMicStt, useSystemAudioStt, useScreenAssist, ocr
+    components/    # ChatPanel, HomeDashboard, ProfilePanel, SettingsPanel, …
 scripts/
   whisper-worker.mjs   # system Node Whisper (NOT Electron) — required for local STT
 docs/
   ROADMAP.md
 ```
+
+### Linux audio pipeline (Smart listen)
+
+```
+pactl → audioDevices.ts + linuxAudioDevices.ts  (resolve *.monitor, prefer laptop speaker)
+         ↓
+linuxLoopbackStream.ts  (continuous)  OR  captureLinuxMonitorOnce()  (one-shot)
+  1. ffmpeg -f pulse -i <monitor>  →  s16le PCM  →  WAV chunks (RMS / silent flag)
+  2. pw-record --target=<monitor>  (timed file loop fallback)
+         ↓
+IPC system:audio-chunk  →  useSystemAudioStt  →  stt:transcribe  →  shouldAutoAssist  →  chat
+```
+
+**Never use `parec` for sink monitors on PipeWire** — it often writes 0 bytes while the UI shows “listening”. Mic + one-shot loopback go through `platform/index.ts` → same ffmpeg / pw-record order.
 
 ### Critical conventions
 
@@ -88,26 +102,44 @@ docs/
 
 | Capability | Mechanism | Notes |
 |---|---|---|
-| Meeting audio | PipeWire/Pulse **sink monitor** (`default-sink.monitor`) via `pw-record` / `parec` | Independent of screen-share portal |
-| Mic STT | Linux: native `pw-record` on preferred input; else MediaRecorder | Device list from `pactl` via `audio:list-devices` |
-| Screen OCR | **On-demand only** (📷 / Alt+Shift+C / `screen:capture-full`) | Never loop `desktopCapturer` on Wayland |
-| Assist trigger | Transcript finals → `shouldAutoAssist` → LLM | Ctrl+Enter / Assist button also works |
+| Meeting audio (Linux) | Long-lived `ffmpeg -f pulse` on sink `*.monitor` (`linuxLoopbackStream.ts`) → WAV chunks; remounts on default-sink change | Falls back to timed `pw-record` if ffmpeg unavailable. **Do not use `parec`** — often records 0 bytes on PipeWire |
+| Meeting audio (Win/mac) | Chunked `ffmpeg` WASAPI / BlackHole | Same Smart UI |
+| Mic STT | Linux: native `ffmpeg` pulse / `pw-record` on preferred input; else MediaRecorder | Device list from `pactl` via `audio:list-devices` |
+| Screen OCR | **On-demand** (📷 / Alt+Shift+C); image-hash cache skips identical frames | Never loop `desktopCapturer` on Wayland |
+| Assist fusion | `fusedAssistPrompt(transcript + fresh screen OCR)` | Screen text stays “fresh” ~45s after 📷 |
 
-**Why:** On Ubuntu Wayland, Electron `desktopCapturer` opens the xdg-desktop-portal picker. Looping it every few seconds spam-popups, breaks PipeWire (`thread-loop` errors), and fights real meeting shares. Do **not** reintroduce continuous portal capture.
+**Why:** On Ubuntu Wayland, Electron `desktopCapturer` opens the xdg-desktop-portal picker. Looping it spam-popups, breaks PipeWire, and fights real meeting shares. Do **not** reintroduce continuous portal capture.
 
-Optional CLI tools for quieter on-demand screenshots: `gnome-screenshot`, `grim`, `spectacle`.
+**Natively reference:** Study continuous Pulse monitor + on-demand screen context ideas only — **reimplement original MIT code**. Never paste Natively source (`Personal Use Source License`).
+
+Optional CLI tools for quieter on-demand screenshots: `gnome-screenshot`, `grim`, `spectacle`. Smart listen needs **`ffmpeg`** (pulse input) and/or **`pw-record`** (PipeWire).
+
+### Preload: system-audio API (`window.osmos`)
+
+| Method | Purpose |
+|---|---|
+| `startSystemAudioListen({ device?, chunkMs? })` | Linux: start `linuxLoopbackStream`; returns `{ ok, mode: 'stream' \| 'fallback', monitor?, backend? }` |
+| `stopSystemAudioListen()` | Stop continuous stream |
+| `onSystemAudioChunk(cb)` | `{ ok, base64?, mimeType?, silent?, rms?, error? }` — unsubscribe fn returned |
+| `onSystemAudioStatus(cb)` | `{ text }` e.g. “Listening via ffmpeg on …” |
+| `captureSystemAudio({ durationMs?, device? })` | One-shot loopback (Settings test, fallback on non-Linux) |
+
+Renderer hook: `src/renderer/stt/useSystemAudioStt.ts` — prefers stream on Linux, else chunked `captureSystemAudio`.
 
 ## What is live (v0.5.1)
 
-- Launcher + frameless overlay (`#/overlay`) — always-on-top, translucent, draggable
+- **Launcher hub** (`launcher-shell`): full-bleed home dashboard — search, Undetectable toggle, Start Osmos, sessions; Profile + Settings open as **modals** (`hub-modal`), not a permanent sidebar
+- Frameless overlay (`#/overlay`) — always-on-top, translucent, draggable
 - Streaming LLM chat + cancel (Ollama + cloud providers)
 - SearXNG / DuckDuckGo / Tavily grounding (skipped in **interview** mode unless query looks like research)
 - Profile + **named multi-profiles** + modes (interview / meeting / general) → injected into system prompt
+- **Profile Intelligence** modal (left nav: Identity, Resume/JD upload, company intel, docs, question bank)
 - First-run onboarding wizard; overlay quick menu (profile / mode / mic)
-- Mic STT: `local-whisper` (Node worker), `webspeech`, `openai-whisper`
-- On-demand screen OCR (`captureFullScreen` → Tesseract); region tools when installed
-- System audio: continuous loopback → STT → Smart assist (Linux monitor, Windows WASAPI, macOS BlackHole/`ffmpeg`)
-- Linux audio device sanitization (`src/shared/linuxAudioDevices.ts` + `audioDevices.ts`) — prefer laptop mic / speaker monitor
+- Mic STT: `local-whisper` (Node worker), `webspeech`, `openai-whisper`; Linux native mic via ffmpeg / pw-record
+- On-demand screen OCR (`captureFullScreen` → Tesseract + image-hash cache); region tools when installed
+- System audio: **ffmpeg pulse stream** → STT → Smart assist (Linux); chunked WASAPI / BlackHole elsewhere
+- Assist fusion: transcript + optional fresh screen OCR (`fusedAssistPrompt`, ~45s screen freshness in ChatPanel)
+- Linux audio device sanitization (`linuxAudioDevices.ts` + `audioDevices.ts`) — prefer laptop mic / speaker monitor
 - Settings persistence, mic + loopback pickers, stealth (OS capture exclusion on Win/macOS)
 - Shortcuts: Ctrl/Cmd+Enter Assist; Alt+Shift+Space overlay; Alt+Shift+A ask; Alt+Shift+C capture (Wayland globals often fail — in-app still works)
 - Company intel, document RAG, question bank + STAR, meeting history
@@ -138,7 +170,7 @@ Documented so the next agent does not reintroduce these bugs:
 - Linux main process always appends `no-sandbox` + ozone auto (packaged and unpackaged).
 - **CI packaging:** `publish: []` in electron-builder; `--publish never` on pack scripts; `GH_TOKEN` only in `create-release` job.
 - **Windows build flakes:** `ELECTRON_MIRROR`, electron-builder cache, retry wrapper in `.github/workflows/ci.yml`.
-- **Linux installer missing audio deps:** `linux-install.sh` installs `pipewire` + `pulseaudio-utils`.
+- **Linux installer missing audio deps:** `linux-install.sh` installs `pipewire`, `pulseaudio-utils`, and expects **`ffmpeg`** on PATH for loopback.
 
 ### Screen OCR + Wayland portal
 
@@ -157,11 +189,16 @@ Documented so the next agent does not reintroduce these bugs:
 ### Linux system audio (PipeWire)
 
 - **Symptom H:** `pw-record` without `--target` records the default *mic*, not the sink monitor; many builds reject `--duration`.
-  - **Fix:** Always resolve a real `*.monitor` via `pactl` (`audioDevices.ts` + `linuxAudioDevices.ts`); `tryPwRecordTimed` writes a file and SIGTERM after duration (no `--duration` flag); serialize captures with `withLinuxAudioLock`; soft-retry in `useSystemAudioStt`.
-- Working smoke test on Zenbook-class machines:
+  - **Fix:** Always resolve a real `*.monitor` via `pactl` (`audioDevices.ts` + `linuxAudioDevices.ts`); `tryPwRecordTimed` writes a file and SIGTERM after duration (no `--duration` flag); serialize captures with `withLinuxAudioLock`.
+- **Symptom I:** Smart “listening” forever with no transcripts; Settings test returns empty/silent WAV.
+  - **Cause:** Continuous path preferred `parec` on sink monitors; on many PipeWire hosts `parec` writes **0 bytes** while `ffmpeg -f pulse` and `pw-record --target=…monitor` work.
+  - **Fix:** `linuxLoopbackStream.ts` uses **ffmpeg pulse → stdout PCM** as primary continuous backend, timed **pw-record** as fallback. One-shot `captureSystemAudio` / `captureLinuxMonitorOnce` same order. Never rely on `parec` for monitors.
+- Working smoke tests on Zenbook-class machines:
   ```bash
-  timeout 2 pw-record --target="$(pactl get-default-sink).monitor" \
-    --rate=16000 --channels=1 --format=s16 /tmp/osmos-test.wav
+  MONITOR="$(pactl get-default-sink).monitor"
+  ffmpeg -nostdin -f pulse -i "$MONITOR" -t 2 -ac 1 -ar 16000 -y /tmp/osmos-test.wav
+  # or:
+  timeout 2 pw-record --target="$MONITOR" --rate=16000 --channels=1 --format=s16 /tmp/osmos-test.wav
   ```
 - Device heuristics live in `src/shared/linuxAudioDevices.ts` (inspired by personal Natively logic — **reimplemented**, not copied wholesale). Prefer laptop digital mic (`DEV=6` / `_6__source`) and speaker sink monitor over HDMI.
 
@@ -206,7 +243,9 @@ Documented so the next agent does not reintroduce these bugs:
 
 - Local Whisper = system Node worker only.
 - Web Speech on Linux often fails with `network` — prefer `local-whisper`.
-- Concurrent `pw-record` without the audio lock causes PipeWire errors — keep `withLinuxAudioLock`.
+- **Linux loopback:** ffmpeg pulse primary, pw-record fallback — **not parec** (see Symptom I).
+- Concurrent capture without `withLinuxAudioLock` causes PipeWire errors — serialize mic, one-shot, and stream mount.
+- Stream chunks carry `silent: true` when RMS < ~0.006; UI should not spam Whisper on silence.
 - Harmless Chromium log: `GetVSyncParametersIfAvailable` failed.
 
 ### Electron / Vite / packaging
@@ -229,9 +268,11 @@ Documented so the next agent does not reintroduce these bugs:
 | `screen:capture` | Interactive region (when tools exist) → `{ dataUrl, cancelled }` |
 | `screen:capture-full` | Silent fullscreen for OCR (CLI first, portal last) |
 | `ocr:extract` | Tesseract OCR |
-| `system:audio` | System/loopback capture → WAV base64 |
+| `system:audio` | One-shot system/loopback capture → WAV base64 |
+| `system:listen-start` / `system:listen-stop` | Continuous Linux loopback (`linuxLoopbackStream.ts`) |
+| event `system:audio-chunk` / `system:audio-status` | Streamed WAV chunks + status (`silent`, `rms`, `backend`) |
 | `audio:list-devices` | Linux pactl inputs/monitors + preferred ids |
-| `audio:capture-mic` | Native Linux mic via `pw-record`/`parec` |
+| `audio:capture-mic` | Native Linux mic via `ffmpeg` pulse / `pw-record` |
 | `company:intel` | Company research |
 | `history:*` / `question:*` / `star:*` | CRUD |
 | `app:check-updates` | Update feed |
@@ -246,8 +287,8 @@ Chat stream events: `meta` | `status` | `delta` | `done` | `error`.
 
 - Types: `UserProfile`, `SavedProfile`, `CopilotMode`, `activeMode`, `profile`, `profiles`, `activeProfileId` on `AppSettings`
 - Helpers: `src/shared/profiles.ts`; mode prompts: `src/shared/modes.ts`
-- Continuous assist helpers: `src/shared/continuousAssist.ts` (`shouldAutoAssist`, `continuousAssistPrompt`, `continuousScreenPrompt`)
-- UI: Profile tab; Home hub; overlay `OverlayQuickMenu`
+- Continuous assist helpers: `src/shared/continuousAssist.ts` (`shouldAutoAssist`, `continuousAssistPrompt`, `fusedAssistPrompt`, `CONTINUOUS_CHUNK_MS`)
+- UI: Home hub (`HomeDashboard`); Profile / Settings modals; overlay `ChatPanel` + quick menu
 - First-run: `OnboardingWizard` when `onboardingCompleted` is false
 - Each `SavedProfile` owns résumé/JD, company intel, documents, questions, STAR templates
 - PDF/DOCX via `file:extract-text`; `profile:assemble-prep` seeds prep from web + JD/résumé
@@ -264,8 +305,9 @@ Chat stream events: `meta` | `status` | `delta` | `done` | `error`.
 1. Signed / notarized builds (Windows EV/OV, macOS Developer ID + notarization).
 2. Real-device stealth + BlackHole validation on Windows / macOS with Zoom / Teams / Meet.
 3. Faster default model path / tighter overlay answer cards.
-4. Optional long-lived PipeWire stream (vs chunked spawn/kill) for lower Smart-listen latency.
+4. Lower Smart-listen latency tuning (chunk size, overlap transcribe while capturing).
 5. Optional opt-in continuous screen OCR **only** where a non-portal path exists (not Wayland `desktopCapturer` loop).
+6. Linux packaged build: bundle or declare `ffmpeg` dependency explicitly in `.deb` / AppImage metadata.
 
 See `docs/ROADMAP.md` and `src/shared/features.ts`.
 
@@ -278,13 +320,21 @@ See `docs/ROADMAP.md` and `src/shared/features.ts`.
 - [ ] Note Linux + macOS/Windows impact for platform-sensitive changes
 - [ ] Update `features.ts` / `ROADMAP.md` if capability status changed
 - [ ] Restart Electron after main/preload edits
-- [ ] On Linux audio changes: smoke-test `pw-record --target="$(pactl get-default-sink).monitor" …`
+- [ ] On Linux audio changes: smoke-test **ffmpeg pulse** first:
+  ```bash
+  MONITOR="$(pactl get-default-sink).monitor"
+  ffmpeg -nostdin -f pulse -i "$MONITOR" -t 2 -ac 1 -ar 16000 -y /tmp/osmos-test.wav
+  ls -la /tmp/osmos-test.wav   # expect tens of KB if speakers active
+  ```
+  Do **not** use `parec` as the acceptance test on PipeWire.
 - [ ] Never leave continuous `desktopCapturer` / portal capture enabled on Wayland
 
 ## Session notes (human machine)
 
 - Dev machine: Linux Zenbook (PipeWire / GNOME Wayland); Ollama often on LAN `192.168.4.31:11434`
-- Default mic often `…_6__source` (laptop digital); default monitor `…sofhdadsp__sink.monitor`
+- Default sink monitor: `alsa_output.pci-…HiFi__hw_sofhdadsp__sink.monitor`; mic often `…_6__source` (laptop digital)
+- **Verified:** `ffmpeg -f pulse` + `pw-record --target=…monitor` capture ~64KB/2s; **`parec` records 0 bytes** on this host
 - SearXNG often at `http://127.0.0.1/searxng` with limiter disabled for private JSON
 - User profile may already be populated in local settings — treat as private
 - If builds hang, kill stale `npm run dev` / `vite` / `electron` / `tsc` processes before retrying
+- After main/preload audio changes: `npm run build:electron` then restart `npm run dev` (not HMR alone)

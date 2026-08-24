@@ -8,9 +8,9 @@ import { findOnPath, resolveCaptureTool, resolveFfmpeg, safeSpawnCwd } from '../
 import {
   listLinuxAudioDevices,
   resolveLinuxMicSource,
-  resolveLinuxMonitor,
 } from '../services/audioDevices.js';
 import { capturePrimaryScreen } from '../services/screenCapture.js';
+import { captureLinuxMonitorOnce } from '../services/linuxLoopbackStream.js';
 
 export type PlatformId = 'linux' | 'darwin' | 'win32';
 
@@ -556,7 +556,7 @@ $bmp.Dispose();
     capabilityNotes: () => [
       'Wayland global shortcuts are often unavailable — use in-app controls.',
       'Stealth: skip taskbar + always-on-top. Linux has no OS capture-exclusion flag — share a browser tab/window, not the full desktop.',
-      'System audio: pw-record/parec on the default sink *.monitor (meeting audio). Not screen-share.',
+      'System audio: ffmpeg pulse or pw-record on the default sink *.monitor (meeting audio). Not screen-share.',
       'Screen OCR is on-demand only (📷). Continuous portal capture is disabled so Zoom/Meet screen share still works.',
     ],
     applyStealth(enabled, windows) {
@@ -600,67 +600,8 @@ $bmp.Dispose();
     },
     captureFullScreen: () => capturePrimaryScreen(),
     captureSystemAudio: async (durationMs = 5_000, device?: string) => {
-      return withLinuxAudioLock(async () => {
-      const tmp = path.join(os.tmpdir(), `osmos-audio-${Date.now()}.wav`);
-      const list = await listLinuxAudioDevices();
-      // Always pass a real sink.monitor id — bare pw-record (no --target) records the
-      // default *source* (mic), not meeting loopback.
-      let monitor = resolveLinuxMonitor(device, list);
-      if (!monitor || monitor === '@DEFAULT_MONITOR@') {
-        monitor =
-          list.preferredMonitorId !== '@DEFAULT_MONITOR@'
-            ? list.preferredMonitorId
-            : list.monitors.find((m) => m.id.endsWith('.monitor'))?.id || '';
-      }
-      if (!monitor) {
-        return {
-          ok: false,
-          error:
-            'No PipeWire/Pulse sink monitor found. Play audio through speakers, then Settings → Speech → Refresh.',
-        };
-      }
-
-      if (await tryPwRecordTimed(monitor, tmp, durationMs)) {
-        return readAudioFile(tmp);
-      }
-
-      const pcmTmp = path.join(os.tmpdir(), `osmos-audio-${Date.now()}.pcm`);
-      const parecOk = await tryCaptureTimed(
-        'parec',
-        ['--format=s16le', '--rate=16000', '--channels=1', '-d', monitor],
-        pcmTmp,
-        durationMs,
-      );
-      if (parecOk) {
-        try {
-          const pcm = fs.readFileSync(pcmTmp);
-          fs.unlinkSync(pcmTmp);
-          const wav = wrapPcmS16leAsWav(pcm, 16000, 1);
-          fs.writeFileSync(tmp, wav);
-          return readAudioFile(tmp);
-        } catch {
-          try {
-            fs.unlinkSync(pcmTmp);
-          } catch {
-            /* ignore */
-          }
-        }
-      }
-
-      const hasPw = await hasOnPath('pw-record');
-      const hasParec = await hasOnPath('parec');
-      if (!hasPw && !hasParec) {
-        return {
-          ok: false,
-          error:
-            'System audio needs PipeWire (pw-record) or PulseAudio (parec). On Ubuntu: sudo apt install pipewire pulseaudio-utils',
-        };
-      }
-      return {
-        ok: false,
-        error: `System audio capture failed (monitor: ${monitor}). Play audio on your speakers and retry.`,
-      };
-      });
+      // parec is broken empty on many PipeWire hosts — use ffmpeg pulse / pw-record.
+      return withLinuxAudioLock(() => captureLinuxMonitorOnce(durationMs, device));
     },
     captureMicAudio: async (durationMs = 5_000, device?: string) => {
       return withLinuxAudioLock(async () => {
@@ -677,31 +618,39 @@ $bmp.Dispose();
         };
       }
 
-      if (await tryPwRecordTimed(target, tmp, durationMs)) {
-        return readAudioFile(tmp);
+      const durationSec = Math.max(1, Math.round(durationMs / 1000));
+      const ffmpeg = resolveFfmpeg();
+      if (ffmpeg) {
+        if (
+          await tryCapture(
+            'ffmpeg',
+            [
+              '-nostdin',
+              '-hide_banner',
+              '-loglevel',
+              'error',
+              '-f',
+              'pulse',
+              '-i',
+              target,
+              '-t',
+              String(durationSec),
+              '-ac',
+              '1',
+              '-ar',
+              '16000',
+              '-y',
+              tmp,
+            ],
+            tmp,
+          )
+        ) {
+          return readAudioFile(tmp);
+        }
       }
 
-      const pcmTmp = path.join(os.tmpdir(), `osmos-mic-${Date.now()}.pcm`);
-      const parecOk = await tryCaptureTimed(
-        'parec',
-        ['--format=s16le', '--rate=16000', '--channels=1', '-d', target],
-        pcmTmp,
-        durationMs,
-      );
-      if (parecOk) {
-        try {
-          const pcm = fs.readFileSync(pcmTmp);
-          fs.unlinkSync(pcmTmp);
-          const wav = wrapPcmS16leAsWav(pcm, 16000, 1);
-          fs.writeFileSync(tmp, wav);
-          return readAudioFile(tmp);
-        } catch {
-          try {
-            fs.unlinkSync(pcmTmp);
-          } catch {
-            /* ignore */
-          }
-        }
+      if (await tryPwRecordTimed(target, tmp, durationMs)) {
+        return readAudioFile(tmp);
       }
 
       return {

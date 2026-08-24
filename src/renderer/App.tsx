@@ -11,7 +11,8 @@ import { OnboardingWizard } from './components/OnboardingWizard';
 import { BrandLogo } from './components/BrandLogo';
 import { useMicStt } from './stt/useMicStt';
 
-type Tab = 'home' | 'chat' | 'history' | 'profile' | 'settings' | 'roadmap';
+type Tab = 'home' | 'chat' | 'history' | 'roadmap';
+type Modal = null | 'profile' | 'settings';
 
 type Info = {
   name: string;
@@ -55,6 +56,20 @@ declare global {
       captureFullScreen: () => Promise<{ dataUrl: string; cancelled: boolean }>;
       captureSystemAudio: (payload?: { durationMs?: number; device?: string }) =>
         Promise<{ ok: boolean; base64?: string; mimeType?: string; error?: string }>;
+      startSystemAudioListen: (payload?: { device?: string; chunkMs?: number }) =>
+        Promise<{ ok: boolean; error?: string; monitor?: string; mode?: 'stream' | 'fallback' }>;
+      stopSystemAudioListen: () => Promise<{ ok: boolean }>;
+      onSystemAudioChunk: (
+        listener: (chunk: {
+          ok: boolean;
+          base64?: string;
+          mimeType?: string;
+          error?: string;
+          silent?: boolean;
+          rms?: number;
+        }) => void,
+      ) => () => void;
+      onSystemAudioStatus: (listener: (ev: { text: string }) => void) => () => void;
       listAudioDevices: () => Promise<import('@shared/types').AudioDevicesResponse>;
       captureMicAudio: (payload?: { durationMs?: number; device?: string }) =>
         Promise<{ ok: boolean; base64?: string; mimeType?: string; error?: string }>;
@@ -191,18 +206,11 @@ function OverlayApp() {
 
 function LauncherApp() {
   const [tab, setTab] = useState<Tab>('home');
+  const [modal, setModal] = useState<Modal>(null);
   const [info, setInfo] = useState<Info | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [status, setStatus] = useState('');
   const mic = useMicStt(settings);
-  const [animKey, setAnimKey] = useState(0);
-
-  const switchTab = (next: Tab) => {
-    if (tab !== next) {
-      setAnimKey((k) => k + 1);
-      setTab(next);
-    }
-  };
 
   useEffect(() => {
     void (async () => {
@@ -213,6 +221,15 @@ function LauncherApp() {
     const unsub = window.osmos.onSettingsChanged(setSettings);
     return unsub;
   }, []);
+
+  useEffect(() => {
+    if (!modal) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setModal(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [modal]);
 
   const liveCount = useMemo(
     () => info?.features.filter((f) => f.status === 'live').length ?? 0,
@@ -239,114 +256,115 @@ function LauncherApp() {
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <BrandLogo />
-        <div className="meta" style={{ padding: '0 6px 8px', fontSize: '0.72rem' }}>
-          {info?.platformName ?? '…'} · open source
-        </div>
-        <nav className="nav">
-          {([
-            ['home', 'Home', '⌂'],
-            ['chat', 'Chat', '◉'],
-            ['history', 'Sessions', '↺'],
-            ['profile', 'Profile', '◈'],
-            ['settings', 'Settings', '⚙'],
-            ['roadmap', 'Roadmap', '→'],
-          ] as const).map(([id, label, icon]) => (
-            <button key={id} className={tab === id ? 'active' : ''} onClick={() => switchTab(id)}>
-              <span className="nav-icon" aria-hidden>{icon}</span>
-              {label}
-            </button>
-          ))}
-        </nav>
-        <button className="sidebar-cta" onClick={() => void window.osmos.toggleOverlay()}>
-          Start Osmos
-        </button>
-      </aside>
-
-      <main className="main">
-        <div className="tab-content" key={animKey}>
+    <div className="launcher-shell">
+      <main className="launcher-main">
         {tab === 'home' && (
           <HomeDashboard
             settings={settings}
             info={info}
             liveCount={liveCount}
             onStartOsmos={() => void window.osmos.toggleOverlay()}
-            onSwitchTab={switchTab}
+            onSwitchTab={(t) => {
+              if (t === 'profile') setModal('profile');
+              else if (t === 'settings') setModal('settings');
+              else setTab(t as Tab);
+            }}
             onSettingsChange={setSettings}
+            onOpenProfile={() => setModal('profile')}
+            onOpenSettings={() => setModal('settings')}
           />
         )}
 
         {tab === 'chat' && (
-          <ErrorBoundary>
-            <ChatPanel
-              settings={settings}
-              onSettingsChange={setSettings}
-              onPreferSttProvider={(provider) => {
-                void window.osmos.updateSettings({ sttProvider: provider }).then(setSettings);
-              }}
-            />
-          </ErrorBoundary>
+          <div className="launcher-page">
+            <button type="button" className="launcher-back" onClick={() => setTab('home')}>
+              ← Home
+            </button>
+            <ErrorBoundary>
+              <ChatPanel
+                settings={settings}
+                onSettingsChange={setSettings}
+                onPreferSttProvider={(provider) => {
+                  void window.osmos.updateSettings({ sttProvider: provider }).then(setSettings);
+                }}
+              />
+            </ErrorBoundary>
+          </div>
         )}
 
         {tab === 'history' && (
-          <HistoryTab />
-        )}
-
-        {tab === 'profile' && settings && (
-          <ProfilePanel
-            settings={settings}
-            onChange={(patch) =>
-              setSettings({
-                ...settings,
-                ...patch,
-                profile: patch.profile ? { ...settings.profile, ...patch.profile } : settings.profile,
-                profiles: patch.profiles ?? settings.profiles,
-              })
-            }
-            onSave={() =>
-              void saveSettings({
-                activeMode: settings.activeMode,
-                activeProfileId: settings.activeProfileId,
-                profiles: settings.profiles,
-                profile: settings.profile,
-              })
-            }
-            status={status}
-          />
-        )}
-
-        {tab === 'settings' && settings && (
-          <SettingsPanel
-            settings={settings}
-            info={info}
-            mic={mic}
-            onChange={setSettings}
-            onSaved={setSettings}
-          />
+          <div className="launcher-page">
+            <button type="button" className="launcher-back" onClick={() => setTab('home')}>
+              ← Home
+            </button>
+            <HistoryTab />
+          </div>
         )}
 
         {tab === 'roadmap' && (
-          <section className="panel">
-            <h2>Feature roadmap</h2>
-            <p>
-              Target: full interview & meeting-copilot surface on Linux, macOS, and Windows —
-              original MIT code in this repo.
-            </p>
-            <div className="grid">
-              {(info?.features ?? []).map((f) => (
-                <div className="card" key={f.id}>
-                  <span className={`badge ${f.status}`}>{f.status}</span>
-                  <strong>{f.name}</strong>
-                  <div className="meta">{f.description}</div>
-                </div>
-              ))}
-            </div>
-          </section>
+          <div className="launcher-page">
+            <button type="button" className="launcher-back" onClick={() => setTab('home')}>
+              ← Home
+            </button>
+            <section className="panel">
+              <h2>Feature roadmap</h2>
+              <p>Target capabilities on Linux, macOS, and Windows — original MIT code.</p>
+              <div className="grid">
+                {(info?.features ?? []).map((f) => (
+                  <div className="card" key={f.id}>
+                    <span className={`badge ${f.status}`}>{f.status}</span>
+                    <strong>{f.name}</strong>
+                    <div className="meta">{f.description}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
         )}
-        </div>
       </main>
+
+      {modal && settings ? (
+        <div
+          className="hub-backdrop"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setModal(null);
+          }}
+        >
+          {modal === 'profile' ? (
+            <ProfilePanel
+              settings={settings}
+              onClose={() => setModal(null)}
+              onChange={(patch) =>
+                setSettings({
+                  ...settings,
+                  ...patch,
+                  profile: patch.profile ? { ...settings.profile, ...patch.profile } : settings.profile,
+                  profiles: patch.profiles ?? settings.profiles,
+                })
+              }
+              onSave={() =>
+                void saveSettings({
+                  activeMode: settings.activeMode,
+                  activeProfileId: settings.activeProfileId,
+                  profiles: settings.profiles,
+                  profile: settings.profile,
+                })
+              }
+              status={status}
+            />
+          ) : null}
+          {modal === 'settings' ? (
+            <SettingsPanel
+              settings={settings}
+              info={info}
+              mic={mic}
+              onChange={setSettings}
+              onSaved={setSettings}
+              onClose={() => setModal(null)}
+            />
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

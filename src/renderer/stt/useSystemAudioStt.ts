@@ -4,15 +4,14 @@ import { CONTINUOUS_CHUNK_MS, CONTINUOUS_MAX_IN_FLIGHT } from '@shared/continuou
 
 function engineForSettings(settings: AppSettings | null): 'local' | 'openai' {
   if (!settings) return 'local';
-  // System audio cannot use Web Speech — prefer local Whisper, else OpenAI Whisper API.
   if (settings.sttProvider === 'openai-whisper') return 'openai';
   return 'local';
 }
 
 /**
- * Continuous system-audio (loopback) → STT loop for Smart / meeting assist.
- * Captures the next chunk while the previous one is still transcribing so meeting
- * audio is not dropped during Whisper latency.
+ * Continuous system-audio → STT for Smart assist.
+ * Linux: long-lived ffmpeg pulse / pw-record stream via startSystemAudioListen.
+ * Elsewhere / fallback: repeated captureSystemAudio chunks.
  */
 export function useSystemAudioStt(settings: AppSettings | null) {
   const [listening, setListening] = useState(false);
@@ -23,17 +22,39 @@ export function useSystemAudioStt(settings: AppSettings | null) {
   settingsRef.current = settings;
   const finalHandlerRef = useRef<((text: string) => void) | null>(null);
   const generationRef = useRef(0);
+  const unsubsRef = useRef<Array<() => void>>([]);
 
   const onFinal = useCallback((handler: (text: string) => void) => {
     finalHandlerRef.current = handler;
   }, []);
 
+  const cleanupListen = useCallback(() => {
+    for (const u of unsubsRef.current) {
+      try {
+        u();
+      } catch {
+        /* ignore */
+      }
+    }
+    unsubsRef.current = [];
+    void window.osmos.stopSystemAudioListen?.().catch(() => undefined);
+  }, []);
+
   const stop = useCallback(() => {
     activeRef.current = false;
     generationRef.current += 1;
+    cleanupListen();
     setListening(false);
     setPartial('');
-  }, []);
+  }, [cleanupListen]);
+
+  const transcribeBase64 = async (base64: string, mimeType: string) =>
+    window.osmos.transcribeAudio({
+      base64,
+      mimeType: mimeType || 'audio/wav',
+      fileName: 'system-audio.wav',
+      engine: engineForSettings(settingsRef.current),
+    });
 
   const start = useCallback(async () => {
     if (activeRef.current) return;
@@ -44,14 +65,13 @@ export function useSystemAudioStt(settings: AppSettings | null) {
     const gen = ++generationRef.current;
     setListening(true);
     setError('');
-    setPartial('Listening to system audio…');
+    setPartial('Starting meeting audio…');
 
-    const chunkMs = CONTINUOUS_CHUNK_MS;
-    const maxInFlight = CONTINUOUS_MAX_IN_FLIGHT;
     const pending = new Set<Promise<void>>();
     let nextEmit = 1;
     let nextSeq = 0;
     const held = new Map<number, string | null>();
+    let silentStreak = 0;
 
     const emitReady = () => {
       while (held.has(nextEmit)) {
@@ -62,85 +82,123 @@ export function useSystemAudioStt(settings: AppSettings | null) {
       }
     };
 
-    const transcribeChunk = async (
-      seq: number,
-      capture: { base64: string; mimeType?: string },
-    ) => {
-      try {
-        const transcription = await window.osmos.transcribeAudio({
-          base64: capture.base64,
-          mimeType: capture.mimeType || 'audio/wav',
-          fileName: 'system-audio.wav',
-          engine: engineForSettings(settingsRef.current),
-        });
-        if (generationRef.current !== gen) return;
-        if (transcription.ok && transcription.text?.trim()) {
-          held.set(seq, transcription.text.trim());
-          emitReady();
-          return;
-        }
-        if (!transcription.ok && transcription.error && !/too short|empty/i.test(transcription.error)) {
-          setError(transcription.error);
-          // Keep listening — Whisper blips should not stop Smart mode.
-        }
-        held.set(seq, null);
-        emitReady();
-      } catch (e) {
-        if (generationRef.current !== gen) return;
-        setError(e instanceof Error ? e.message : String(e));
-        held.set(seq, null);
-        emitReady();
+    const handleWav = async (base64: string, mimeType: string, silent?: boolean) => {
+      if (generationRef.current !== gen || !activeRef.current) return;
+      if (silent) {
+        silentStreak += 1;
+        setPartial(
+          silentStreak > 2
+            ? 'Listening… (no audio yet — play something on speakers)'
+            : 'Listening to system audio…',
+        );
+        return;
       }
-    };
-
-    while (activeRef.current && generationRef.current === gen) {
-      while (pending.size >= maxInFlight && activeRef.current && generationRef.current === gen) {
-        setPartial('Transcribing (next capture waiting)…');
+      silentStreak = 0;
+      while (pending.size >= CONTINUOUS_MAX_IN_FLIGHT) {
+        setPartial('Transcribing (queue)…');
         await Promise.race(pending);
+        if (generationRef.current !== gen) return;
       }
-      if (!activeRef.current || generationRef.current !== gen) break;
-
-      setPartial(pending.size ? 'Listening + transcribing…' : 'Listening to system audio…');
-      let capture;
-      try {
-        capture = await window.osmos.captureSystemAudio({
-          durationMs: chunkMs,
-          device: settingsRef.current?.systemAudioDevice || undefined,
-        });
-      } catch (e) {
-        if (generationRef.current !== gen) break;
-        setError(e instanceof Error ? e.message : String(e));
-        setPartial('Retrying system audio…');
-        await new Promise((r) => setTimeout(r, 2000));
-        if (generationRef.current === gen) setError('');
-        continue;
-      }
-      if (!activeRef.current || generationRef.current !== gen) break;
-
-      if (!capture.ok || !capture.base64) {
-        const msg = capture.error || 'System audio capture failed';
-        setError(msg);
-        setPartial('Retrying system audio…');
-        await new Promise((r) => setTimeout(r, 2000));
-        if (generationRef.current === gen) setError('');
-        continue;
-      }
-
       setPartial('Transcribing meeting audio…');
       const seq = ++nextSeq;
-      const job = transcribeChunk(seq, { base64: capture.base64, mimeType: capture.mimeType });
+      const job = (async () => {
+        try {
+          const transcription = await transcribeBase64(base64, mimeType);
+          if (generationRef.current !== gen) return;
+          if (transcription.ok && transcription.text?.trim()) {
+            held.set(seq, transcription.text.trim());
+            setError('');
+          } else {
+            if (transcription.error && !/too short|empty|silent/i.test(transcription.error || '')) {
+              setError(transcription.error);
+            }
+            held.set(seq, null);
+          }
+          emitReady();
+        } catch (e) {
+          held.set(seq, null);
+          emitReady();
+          setError(e instanceof Error ? e.message : String(e));
+        }
+      })();
       pending.add(job);
       void job.finally(() => pending.delete(job));
+    };
+
+    let useStream = false;
+    if (typeof window.osmos.startSystemAudioListen === 'function') {
+      try {
+        const res = await window.osmos.startSystemAudioListen({
+          device: s.systemAudioDevice || undefined,
+          chunkMs: CONTINUOUS_CHUNK_MS,
+        });
+        if (res.ok && res.mode === 'stream') {
+          useStream = true;
+          setPartial(
+            res.monitor
+              ? `Listening (${res.monitor.split('.').pop() || 'monitor'})…`
+              : 'Listening to system audio…',
+          );
+          const unsubChunk = window.osmos.onSystemAudioChunk?.(async (chunk) => {
+            if (generationRef.current !== gen || !activeRef.current) return;
+            if (!chunk.ok) {
+              setError(chunk.error || 'System audio stream error');
+              return;
+            }
+            if (!chunk.base64) return;
+            await handleWav(chunk.base64, chunk.mimeType || 'audio/wav', chunk.silent);
+          });
+          const unsubStatus = window.osmos.onSystemAudioStatus?.((ev) => {
+            if (generationRef.current === gen && ev.text) setPartial(ev.text);
+          });
+          if (unsubChunk) unsubsRef.current.push(unsubChunk);
+          if (unsubStatus) unsubsRef.current.push(unsubStatus);
+
+          while (activeRef.current && generationRef.current === gen) {
+            await new Promise((r) => setTimeout(r, 400));
+          }
+        } else if (!res.ok && res.error) {
+          setError(res.error);
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    }
+
+    if (!useStream && activeRef.current && generationRef.current === gen) {
+      setPartial('Listening (chunked capture)…');
+      while (activeRef.current && generationRef.current === gen) {
+        while (pending.size >= CONTINUOUS_MAX_IN_FLIGHT && activeRef.current) {
+          await Promise.race(pending);
+        }
+        if (!activeRef.current || generationRef.current !== gen) break;
+        try {
+          const capture = await window.osmos.captureSystemAudio({
+            durationMs: CONTINUOUS_CHUNK_MS,
+            device: settingsRef.current?.systemAudioDevice || undefined,
+          });
+          if (!activeRef.current || generationRef.current !== gen) break;
+          if (!capture.ok || !capture.base64) {
+            setError(capture.error || 'System audio capture failed');
+            await new Promise((r) => setTimeout(r, 2000));
+            continue;
+          }
+          await handleWav(capture.base64, capture.mimeType || 'audio/wav', false);
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e));
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      }
     }
 
     if (pending.size) await Promise.allSettled([...pending]);
-
+    cleanupListen();
     if (generationRef.current === gen) {
       activeRef.current = false;
       setListening(false);
       setPartial('');
     }
-  }, []);
+  }, [cleanupListen]);
 
   const toggle = useCallback(async () => {
     if (activeRef.current) stop();
@@ -149,13 +207,5 @@ export function useSystemAudioStt(settings: AppSettings | null) {
 
   useEffect(() => () => stop(), [stop]);
 
-  return {
-    listening,
-    partial,
-    error,
-    start,
-    stop,
-    toggle,
-    onFinal,
-  };
+  return { listening, partial, error, start, stop, toggle, onFinal };
 }

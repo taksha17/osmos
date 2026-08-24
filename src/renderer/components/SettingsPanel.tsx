@@ -24,16 +24,28 @@ type Props = {
   };
   onChange: (next: AppSettings) => void;
   onSaved: (next: AppSettings) => void;
+  onClose?: () => void;
 };
 
-type Section = 'ai' | 'web' | 'speech' | 'stealth' | 'updates';
+type Section =
+  | 'general'
+  | 'ai'
+  | 'web'
+  | 'speech'
+  | 'stealth'
+  | 'keybinds'
+  | 'updates'
+  | 'about';
 
-const SECTIONS: Array<{ id: Section; label: string; blurb: string }> = [
-  { id: 'ai', label: 'AI', blurb: 'Language model provider' },
-  { id: 'web', label: 'Web', blurb: 'Live search grounding' },
-  { id: 'speech', label: 'Speech', blurb: 'Microphone & transcription' },
-  { id: 'stealth', label: 'Stealth', blurb: 'Screen-share safety' },
-  { id: 'updates', label: 'Updates', blurb: 'Release feed' },
+const SECTIONS: Array<{ id: Section; label: string; icon: string }> = [
+  { id: 'general', label: 'General', icon: '☰' },
+  { id: 'ai', label: 'AI Providers', icon: '✦' },
+  { id: 'web', label: 'Intelligence', icon: '◈' },
+  { id: 'speech', label: 'Audio', icon: '♫' },
+  { id: 'stealth', label: 'Undetectable', icon: '◌' },
+  { id: 'keybinds', label: 'Keybinds', icon: '⌨' },
+  { id: 'updates', label: 'Setup & Help', icon: '?' },
+  { id: 'about', label: 'About', icon: 'ⓘ' },
 ];
 
 function providerDefaults(id: AppSettings['activeProvider'], current?: AppSettings['providers'][AppSettings['activeProvider']]) {
@@ -48,8 +60,8 @@ function providerDefaults(id: AppSettings['activeProvider'], current?: AppSettin
   );
 }
 
-export function SettingsPanel({ settings, info, mic, onChange, onSaved }: Props) {
-  const [section, setSection] = useState<Section>('ai');
+export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose }: Props) {
+  const [section, setSection] = useState<Section>('general');
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [models, setModels] = useState<string[]>([]);
@@ -111,29 +123,215 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved }: Props)
   };
 
   return (
-    <section className="panel settings-panel">
-      <div className="settings-panel__intro">
-        <h2>Settings</h2>
-        <p>Configure OSMOS like a product — AI, web, speech, and privacy in separate places.</p>
-      </div>
-
-      <div className="settings-layout">
-        <nav className="settings-nav" aria-label="Settings sections">
+    <div className="hub-modal hub-modal--settings" role="dialog" aria-label="Settings">
+      <aside className="hub-modal__nav">
+        {onClose ? (
+          <button type="button" className="hub-modal__close" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        ) : null}
+        <div className="hub-modal__nav-label">Settings</div>
+        <nav className="hub-modal__nav-list">
           {SECTIONS.map((s) => (
             <button
               key={s.id}
               type="button"
-              className={section === s.id ? 'active' : ''}
+              className={`hub-nav-item${section === s.id ? ' hub-nav-item--active' : ''}`}
               onClick={() => setSection(s.id)}
             >
-              <strong>{s.label}</strong>
-              <span>{s.blurb}</span>
+              <span aria-hidden>{s.icon}</span>
+              {s.label}
             </button>
           ))}
         </nav>
+        <button
+          type="button"
+          className="hub-modal__quit"
+          onClick={onClose}
+        >
+          Close settings
+        </button>
+      </aside>
 
-        <div className="settings-body">
-          {section === 'ai' && (
+      <div className="hub-modal__body">
+        {(error || status) && (
+          <div className={`hub-toast${error ? ' hub-toast--err' : ''}`}>{error || status}</div>
+        )}
+
+        {section === 'general' && (
+          <div className="settings-section">
+            <header className="settings-section__head">
+              <h3>General settings</h3>
+              <p className="meta">Customize how Osmos works for you</p>
+            </header>
+
+            <div className="settings-rows">
+              <div className="settings-row">
+                <div className="settings-row__icon" aria-hidden>
+                  ◌
+                </div>
+                <div className="settings-row__copy">
+                  <strong>Undetectable</strong>
+                  <p>
+                    {info?.platform === 'linux'
+                      ? 'On Linux this only hides Osmos from the taskbar/Alt-Tab. Entire-screen Meet/Zoom shares still include the overlay — share a Chrome tab (or a single window) so others do not see it while you keep using Osmos.'
+                      : 'Hide the overlay from screen shares where the OS supports capture exclusion (best on Windows / macOS).'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className={`home-switch${settings.stealthEnabled ? ' home-switch--on' : ''}`}
+                  aria-label="Toggle undetectable"
+                  onClick={() => void save({ stealthEnabled: !settings.stealthEnabled })}
+                >
+                  <span className="home-switch__knob" />
+                </button>
+              </div>
+
+              <div className="settings-row">
+                <div className="settings-row__icon" aria-hidden>
+                  ▶
+                </div>
+                <div className="settings-row__copy">
+                  <strong>Smart assist audio</strong>
+                  <p>Meetings start capturing system / meeting audio when Smart is on</p>
+                </div>
+                <select
+                  value={settings.assistAudioSource || 'system'}
+                  onChange={(e) =>
+                    set({
+                      assistAudioSource: e.target.value as AppSettings['assistAudioSource'],
+                    })
+                  }
+                >
+                  <option value="system">System audio</option>
+                  <option value="mic">Mic only</option>
+                  <option value="both">Both</option>
+                </select>
+              </div>
+
+              <div className="settings-row">
+                <div className="settings-row__icon" aria-hidden>
+                  ✎
+                </div>
+                <div className="settings-row__copy">
+                  <strong>Auto-ask on final speech</strong>
+                  <p>When transcription finishes, automatically request an assist</p>
+                </div>
+                <button
+                  type="button"
+                  className={`home-switch${settings.autoAskOnFinal ? ' home-switch--on' : ''}`}
+                  aria-label="Toggle auto-ask"
+                  onClick={() => set({ autoAskOnFinal: !settings.autoAskOnFinal })}
+                >
+                  <span className="home-switch__knob" />
+                </button>
+              </div>
+
+              <div className="settings-row">
+                <div className="settings-row__icon" aria-hidden>
+                  ◈
+                </div>
+                <div className="settings-row__copy">
+                  <strong>Active mode</strong>
+                  <p>Default overlay appearance / prompt style</p>
+                </div>
+                <select
+                  value={settings.activeMode}
+                  onChange={(e) =>
+                    set({ activeMode: e.target.value as AppSettings['activeMode'] })
+                  }
+                >
+                  <option value="interview">Interview</option>
+                  <option value="meeting">Meeting</option>
+                  <option value="general">General</option>
+                </select>
+              </div>
+
+              <div className="settings-row">
+                <div className="settings-row__icon" aria-hidden>
+                  ↻
+                </div>
+                <div className="settings-row__copy">
+                  <strong>Version</strong>
+                  <p>You are currently using Osmos version {info?.version || '…'}</p>
+                </div>
+                <button
+                  type="button"
+                  className="hub-upload__btn"
+                  onClick={async () => {
+                    const res = await window.osmos.checkUpdates();
+                    if (res.error) setError(res.error);
+                    else if (res.available) setStatus(`Update available: v${res.version}`);
+                    else setStatus(`Up to date (v${res.version || info?.version || ''})`);
+                  }}
+                >
+                  Check
+                </button>
+              </div>
+            </div>
+
+            <div className="row" style={{ marginTop: 18 }}>
+              <button className="primary" type="button" disabled={saving} onClick={() => void save()}>
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {section === 'about' && (
+          <div className="settings-section">
+            <header className="settings-section__head">
+              <h3>About Osmos</h3>
+              <p className="meta">MIT open-source interview &amp; meeting copilot</p>
+            </header>
+            <p className="meta">
+              {info?.name} {info?.version} · {info?.platformName}
+            </p>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => void window.osmos.openExternal('https://github.com/taksha17/osmos')}
+            >
+              Open GitHub
+            </button>
+          </div>
+        )}
+
+        {section === 'keybinds' && (
+          <div className="settings-section">
+            <header className="settings-section__head">
+              <h3>Keybinds</h3>
+              <p className="meta">
+                {info?.shortcutsRegistered === false
+                  ? 'Global hotkeys often fail on Wayland — use in-app controls.'
+                  : 'Registered global shortcuts for this session.'}
+              </p>
+            </header>
+            <div className="settings-rows">
+              <div className="settings-row">
+                <div className="settings-row__copy">
+                  <strong>Toggle overlay</strong>
+                  <p>Alt+Shift+Space (Linux) / Cmd+Shift+Space (macOS)</p>
+                </div>
+              </div>
+              <div className="settings-row">
+                <div className="settings-row__copy">
+                  <strong>Assist</strong>
+                  <p>Ctrl/Cmd+Enter in overlay · Alt+Shift+A</p>
+                </div>
+              </div>
+              <div className="settings-row">
+                <div className="settings-row__copy">
+                  <strong>Screen OCR</strong>
+                  <p>Alt+Shift+C</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {section === 'ai' && (
             <div className="settings-section">
               <header className="settings-section__head">
                 <h3>AI provider</h3>
@@ -550,6 +748,31 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved }: Props)
                   >
                     Refresh
                   </button>
+                  <button
+                    className="primary"
+                    style={{ height: 38, marginLeft: 8 }}
+                    type="button"
+                    onClick={async () => {
+                      setStatus('Testing microphone…');
+                      setError('');
+                      try {
+                        const devices = await navigator.mediaDevices.enumerateDevices();
+                        const inputs = devices.filter((d) => d.kind === 'audioinput');
+                        if (inputs.length === 0) {
+                          setError('No audio input devices found');
+                          return;
+                        }
+                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                        stream.getTracks().forEach((t) => t.stop());
+                        setStatus('Microphone capturing audio');
+                        setTimeout(() => setStatus(''), 2000);
+                      } catch (e) {
+                        setError(e instanceof Error ? e.message : String(e));
+                      }
+                    }}
+                  >
+                    Test
+                  </button>
                 </div>
               </div>
 
@@ -734,11 +957,8 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved }: Props)
             >
               {saving ? 'Saving…' : 'Save settings'}
             </button>
-            {status && <span className="meta">{status}</span>}
-            {error && <span className="error">{error}</span>}
           </div>
-        </div>
       </div>
-    </section>
+    </div>
   );
 }
