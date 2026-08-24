@@ -10,6 +10,7 @@ import { useSystemAudioStt } from '../stt/useSystemAudioStt';
 import { extractTextFromBase64 } from '../stt/ocr';
 import { TranscriptTimeline } from './TranscriptTimeline';
 import type { TranscriptEntry } from './TranscriptTimeline';
+import { EvidencePanel } from './EvidencePanel';
 import { MarkdownText } from './MarkdownText';
 import { OverlayQuickMenu } from './OverlayQuickMenu';
 
@@ -807,7 +808,13 @@ export function ChatPanel({
       <div className="messages">
         {messages.map((m, i) => (
           <div key={i} className={`bubble ${m.role}`} style={{ position: 'relative' }}>
-            {m.content || (busy && i === messages.length - 1 && m.role === 'assistant' ? '▍' : '')}
+            {m.role === 'assistant' ? (
+              <MarkdownText
+                text={m.content || (busy && i === messages.length - 1 ? '…' : '')}
+              />
+            ) : (
+              m.content
+            )}
             {m.role === 'assistant' && m.content && !busy && (
               <button
                 className="copy-btn"
