@@ -10,7 +10,7 @@ import { useSystemAudioStt } from '../stt/useSystemAudioStt';
 import { extractTextFromBase64 } from '../stt/ocr';
 import { TranscriptTimeline } from './TranscriptTimeline';
 import type { TranscriptEntry } from './TranscriptTimeline';
-import { EvidencePanel } from './EvidencePanel';
+import { MarkdownText } from './MarkdownText';
 import { OverlayQuickMenu } from './OverlayQuickMenu';
 
 function sttEngine(settings: AppSettings | null): 'local' | 'openai' {
@@ -563,7 +563,9 @@ export function ChatPanel({
         <div className="overlay-answer" aria-live="polite">
           {answerText ? (
             <>
-              <p className="overlay-answer__text">{answerText || '▍'}</p>
+              <p className="overlay-answer__text">
+                <MarkdownText text={answerText || '▍'} />
+              </p>
               {latestAssistant?.evidence ? (
                 <EvidencePanel
                   usedWebSearch={latestAssistant.evidence.usedWebSearch}
