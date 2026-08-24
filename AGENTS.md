@@ -293,6 +293,16 @@ Chat stream events: `meta` | `status` | `delta` | `done` | `error`.
 - Each `SavedProfile` owns résumé/JD, company intel, documents, questions, STAR templates
 - PDF/DOCX via `file:extract-text`; `profile:assemble-prep` seeds prep from web + JD/résumé
 
+## Agentic branch (`Agentic`)
+
+- Work in the `Agentic` branch for profile-as-agent work.
+- New shared types: `AgentConfig`, `AgentSkill`, `AgentMcp` in `src/shared/types.ts`
+- Agent resolver: `src/shared/agents.ts` (`resolveAgent`, `effectiveProvider`)
+- Chat wiring: `src/main/index.ts` `buildChatContext()` injects agent block and honors provider/model override
+- MCP client stub: `src/main/services/agentMcp.ts`; start with GitHub search, then expand
+- Profile UI: `src/renderer/components/ProfilePanel.tsx` has an **Agent** section for skills/MCP/provider override
+- Keep changes scoped to the agent layer; do not disturb global chat routing unless necessary
+
 ## Legal / ethics for agents
 
 1. Original code only — no pasting from Natively or other proprietary copilots.

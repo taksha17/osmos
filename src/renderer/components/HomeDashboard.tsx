@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AppSettings } from '@shared/types';
 import { activeSavedProfile, profileSummary } from '@shared/profiles';
+import { resolveAgent } from '@shared/agents';
 import { DEFAULT_SAVED_PROFILE } from '@shared/types';
 
 type Session = {
@@ -211,6 +212,20 @@ export function HomeDashboard({
         <div className="home-head__left">
           <div className="home-head__title-row">
             <h1 className="home-title">My Osmos</h1>
+            {(() => {
+              const agent = resolveAgent(activeProfile, settings);
+              const agentName = agent.displayName?.trim();
+              const profileLabel = activeProfile.label?.trim();
+              if (agentName && agentName !== profileLabel) {
+                return (
+                  <span className="home-agent-badge" title={`Agent: ${agentName}`}>
+                    <span aria-hidden>◈</span>
+                    {agentName}
+                  </span>
+                );
+              }
+              return null;
+            })()}
             <button
               type="button"
               className="home-icon-btn home-icon-btn--soft"
@@ -246,7 +261,13 @@ export function HomeDashboard({
         </div>
         <button type="button" className="home-start" onClick={onStartOsmos}>
           <span className="home-start__mark" aria-hidden>
-            ⌀
+            <img
+              src="@resources/logo-ui.png"
+              alt="OSMOS"
+              width={28}
+              height={28}
+              style={{ display: 'block', margin: 'auto' }}
+            />
           </span>
           Start Osmos
         </button>

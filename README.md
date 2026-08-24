@@ -14,6 +14,7 @@ MIT licensed. Built from scratch — not a fork or rebrand of any proprietary in
 |---|---|  
 | **Overlay** | Frameless, always-on-top assistant with auto-hide, pause/resume, and compact answer cards | 
 | **Profiles** | Named profiles (résumé, JD, company, docs, questions, STAR stories) — switch from Home or the overlay menu | 
+| **Agents** | Per-profile agent config: custom identity, system prompt, skills, MCP connectors, and optional provider/model override | 
 | **Chat** | Streaming LLM replies with cancel; Ollama local or OpenAI / Anthropic / Groq / OpenRouter / LiteLLM | 
 | **Web search** | DuckDuckGo by default (no key); optional Tavily or self-hosted SearXNG | 
 | **Speech** | Local Whisper (offline), Web Speech, or OpenAI Whisper API | 

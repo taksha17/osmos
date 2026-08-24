@@ -42,6 +42,8 @@ import { migrateLegacyUserData } from './services/migrateLegacy.js';
 import { APP_NAME } from '../shared/brand.js';
 import { FEATURES } from '../shared/features.js';
 import { modeDef } from '../shared/modes.js';
+import { resolveAgent, effectiveProvider } from '../shared/agents.js';
+import { executeAgentTools } from './services/agentMcp.js';
 import { activeSavedProfile } from '../shared/profiles.js';
 import {
   DEFAULT_PROFILE,
@@ -115,7 +117,10 @@ async function buildChatContext(message: string) {
   const mode = modeDef(s.activeMode || 'general');
   const active = activeSavedProfile(s.profiles, s.activeProfileId);
   const profile = s.profile || DEFAULT_PROFILE;
-  const provider = s.providers?.[s.activeProvider || 'ollama'] || s.providers?.ollama;
+  const agent = resolveAgent(active, s);
+  const { provider: effective, model: effectiveModel } = effectiveProvider(agent, s);
+  const provider = s.providers?.[effective] || s.providers?.ollama;
+  const providerModel = effectiveModel || provider?.model;
 
   // Interview answers should ground in the saved profile — not random web hits.
   // Web search still runs for meeting/general, or when the user clearly asks for research.
@@ -175,6 +180,36 @@ async function buildChatContext(message: string) {
       ? `\n\n# User profile\n${profileParts.join('\n\n')}`
       : '\n\n# User profile\n(No résumé/JD saved yet — do not invent personal facts.)';
 
+  const agentParts: string[] = [];
+  if (agent.displayName && agent.displayName !== active.label) {
+    agentParts.push(`Active agent: ${agent.displayName}`);
+  }
+  if (agent.systemPrompt?.trim()) {
+    agentParts.push(`Agent behavior:\n${clip(agent.systemPrompt, 2_000)}`);
+  }
+  if (agent.skills?.length) {
+    agentParts.push(`Available skills: ${agent.skills.join(', ')}`);
+  }
+  if (agent.mcp?.some((m) => m.enabled)) {
+    const connectors = agent.mcp.filter((m) => m.enabled).map((m) => m.id).join(', ');
+    agentParts.push(`Connected services: ${connectors}`);
+  }
+  const agentBlock =
+    agentParts.length > 0 ? `\n\n# Agent\n${agentParts.join('\n\n')}` : '';
+
+  const toolResults = await executeAgentTools(agent.skills, agent.mcp, message);
+  const toolBlock =
+    toolResults.length > 0
+      ? `\n\n# Tool results\n${toolResults
+          .map(
+            (r, i) =>
+              `[${i + 1}] ${r.name}: ${r.ok ? 'ok' : 'failed'}${r.error ? ` - ${r.error}` : ''}${
+                r.data ? `\n${JSON.stringify(r.data).slice(0, 1200)}` : ''
+              }`,
+          )
+          .join('\n\n')}`
+      : '';
+
   const docs = active.documents?.length ? active.documents : s.documents || [];
   const docChunks = retrieveChunks(docs, message, 4);
   const docBlock =
@@ -223,12 +258,25 @@ async function buildChatContext(message: string) {
     '',
     mode.systemAddon,
     profileBlock,
+    agentBlock,
+    toolBlock,
     prepBlock,
     docBlock,
     webBlock ? `\n\n# Live web research\n${webBlock}` : '',
   ].join('\n');
 
-  return { s, system, usedWebSearch, searchHits, provider: provider as ProviderConfig };
+  return {
+    s,
+    system,
+    usedWebSearch,
+    searchHits,
+    provider: {
+      ...provider,
+      model: providerModel || provider?.model || '',
+    } as ProviderConfig,
+    agent,
+    model: providerModel || '',
+  };
 }
 
 function preloadPath() {

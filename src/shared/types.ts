@@ -57,6 +57,8 @@ export type SavedProfile = UserProfile & {
   questions: QuestionBankItem[];
   /** STAR stories for this profile */
   starTemplates: StarTemplate[];
+  /** Optional agent wiring for this profile */
+  agent?: AgentConfig;
 };
 
 export type LlmProvider = 'ollama' | 'openai' | 'anthropic' | 'groq' | 'openrouter' | 'litellm';
@@ -69,6 +71,34 @@ export type ProviderConfig = {
   apiKey: string;
   baseUrl: string;
   model: string;
+};
+
+export type AgentSkill =
+  | 'resume-review'
+  | 'jd-parse'
+  | 'company-research'
+  | 'behavioral-answers'
+  | 'technical-answers'
+  | 'document-qa'
+  | 'meeting-notes';
+
+export type AgentMcp = {
+  id: 'github' | 'linkedin' | 'calendar';
+  enabled: boolean;
+  config?: Record<string, string>;
+};
+
+export type AgentConfig = {
+  id: string;
+  profileId: string;
+  displayName?: string;
+  systemPrompt?: string;
+  skills?: AgentSkill[];
+  mcp?: AgentMcp[];
+  preferredProvider?: LlmProvider;
+  preferredModel?: string;
+  temperature?: number;
+  maxTokens?: number;
 };
 
 export type AppSettings = {

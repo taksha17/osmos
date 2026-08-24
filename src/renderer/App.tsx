@@ -10,6 +10,9 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { BrandLogo } from './components/BrandLogo';
 import { useMicStt } from './stt/useMicStt';
+import { activeSavedProfile } from '@shared/profiles';
+import { resolveAgent } from '@shared/agents';
+import { DEFAULT_SAVED_PROFILE } from '@shared/types';
 
 type Tab = 'home' | 'chat' | 'history' | 'roadmap';
 type Modal = null | 'profile' | 'settings';
@@ -166,6 +169,26 @@ function OverlayApp() {
       <div className="overlay-stack">
         <div className="overlay-pill">
           <BrandLogo variant="mark" />
+          {settings && (() => {
+            const profiles = settings.profiles?.length
+              ? settings.profiles
+              : settings
+                ? [{ ...DEFAULT_SAVED_PROFILE, ...settings.profile, id: 'default', label: 'Default' }]
+                : [];
+            const activeProfile = activeSavedProfile(profiles, settings.activeProfileId);
+            const agent = resolveAgent(activeProfile, settings);
+            const agentName = agent.displayName?.trim();
+            const profileLabel = activeProfile.label?.trim();
+            if (agentName && agentName !== profileLabel) {
+              return (
+                <span className="overlay-pill__agent" title={`Agent: ${agentName}`}>
+                  <span aria-hidden>◈</span>
+                  {agentName}
+                </span>
+              );
+            }
+            return null;
+          })()}
           <button
             type="button"
             className="overlay-pill__btn"

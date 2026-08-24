@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react';
-import type { AppSettings, CopilotMode, SavedProfile, UserProfile } from '../../shared/types';
+import type { AppSettings, CopilotMode, SavedProfile, UserProfile, AgentSkill, AgentMcp, LlmProvider } from '../../shared/types';
 import { MODE_DEFS } from '../../shared/modes';
 import { createSavedProfile, guessCompanyFromUrl } from '../../shared/profiles';
+import { resolveAgent, effectiveProvider, allSupportedSkills, allSupportedMcps, renderSkillLabel, renderMcpLabel } from '../../shared/agents';
 import { DocumentsTab } from './DocumentsTab';
 import { QuestionBankTab } from './QuestionBankTab';
 
-type ProfileSection = 'identity' | 'profile' | 'company' | 'documents' | 'questions' | 'web';
+type ProfileSection = 'identity' | 'profile' | 'company' | 'documents' | 'questions' | 'web' | 'agent';
 
 type Props = {
   settings: AppSettings;
@@ -22,6 +23,7 @@ const NAV: Array<{ id: ProfileSection; label: string; icon: string }> = [
   { id: 'documents', label: 'Role Insight', icon: '▤' },
   { id: 'questions', label: 'Cover Letter', icon: '✎' },
   { id: 'web', label: 'Web Search', icon: '⌕' },
+  { id: 'agent', label: 'Agent', icon: '◈' },
 ];
 
 function readInitialSection(): ProfileSection {
@@ -497,6 +499,152 @@ export function ProfilePanel({ settings, onChange, onSave, status, onClose }: Pr
             <button type="button" className="primary" onClick={onSave}>
               Save &amp; continue
             </button>
+          </div>
+        ) : null}
+
+        {section === 'agent' ? (
+          <div className="hub-identity">
+            <h2>Agent</h2>
+            <p className="hub-block__desc">
+              Give this profile its own agent identity, behavior, skills, and optional provider override.
+            </p>
+            {(() => {
+              const agent = resolveAgent(active, settings);
+              const { provider: effectiveProviderId, model: effectiveModel } = effectiveProvider(agent, settings);
+              const providerModel = effectiveModel || settings.providers?.[effectiveProviderId]?.model || '';
+              const skills = allSupportedSkills();
+              const mcpList = allSupportedMcps();
+              const currentSkills = agent.skills || [];
+              const currentMcp = agent.mcp || [];
+
+              const updateAgent = (patch: Partial<SavedProfile['agent']>) => {
+                patchActive({
+                  agent: { ...(active.agent || {}), id: active.id, profileId: active.id, ...patch },
+                });
+              };
+
+              const toggleSkill = (skill: AgentSkill) => {
+                const next = currentSkills.includes(skill)
+                  ? currentSkills.filter((s) => s !== skill)
+                  : [...currentSkills, skill];
+                updateAgent({ skills: next });
+              };
+
+              const toggleMcp = (id: AgentMcp['id']) => {
+                const next = currentMcp.map((m) => (m.id === id ? { ...m, enabled: !m.enabled } : m));
+                const existing = next.find((m) => m.id === id);
+                if (!existing) {
+                  next.push({ id, enabled: true, config: {} });
+                }
+                updateAgent({ mcp: next });
+              };
+
+              const updateMcpConfig = (id: AgentMcp['id'], config: Record<string, string>) => {
+                const next = currentMcp.map((m) => (m.id === id ? { ...m, config } : m));
+                updateAgent({ mcp: next });
+              };
+
+              return (
+                <div className="hub-identity">
+                  <div className="field">
+                    <label>Agent display name</label>
+                    <input
+                      value={agent.displayName || ''}
+                      onChange={(e) => updateAgent({ displayName: e.target.value })}
+                      placeholder="e.g. Interview assistant"
+                    />
+                  </div>
+
+                  <div className="field">
+                    <label>System prompt</label>
+                    <textarea
+                      rows={6}
+                      value={agent.systemPrompt || ''}
+                      onChange={(e) => updateAgent({ systemPrompt: e.target.value })}
+                      placeholder="Custom behavior for this agent..."
+                    />
+                  </div>
+
+                  <div className="field">
+                    <label>Provider override</label>
+                    <select
+                      value={agent.preferredProvider || settings.activeProvider || 'ollama'}
+                      onChange={(e) =>
+                        updateAgent({ preferredProvider: e.target.value as LlmProvider })
+                      }
+                    >
+                      {(['ollama', 'openai', 'anthropic', 'groq', 'openrouter', 'litellm'] as LlmProvider[]).map((p) => (
+                        <option key={p} value={p}>
+                          {settings.providers?.[p]?.label || p}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="field">
+                    <label>Model override</label>
+                    <input
+                      value={agent.preferredModel || ''}
+                      onChange={(e) => updateAgent({ preferredModel: e.target.value })}
+                      placeholder={`Default: ${providerModel}`}
+                    />
+                    <p className="meta">Leave blank to use the provider default.</p>
+                  </div>
+
+                  <div className="field">
+                    <label>Skills</label>
+                    <div className="mode-grid">
+                      {skills.map((skill) => (
+                        <button
+                          key={skill}
+                          type="button"
+                          className={`mode-card ${currentSkills.includes(skill) ? 'mode-card--active' : ''}`}
+                          onClick={() => toggleSkill(skill)}
+                        >
+                          <strong>{renderSkillLabel(skill)}</strong>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="field">
+                    <label>MCP connectors</label>
+                    <div className="mode-grid">
+                      {mcpList.map((mcp) => (
+                        <button
+                          key={mcp.id}
+                          type="button"
+                          className={`mode-card ${currentMcp.find((m) => m.id === mcp.id)?.enabled ? 'mode-card--active' : ''}`}
+                          onClick={() => toggleMcp(mcp.id)}
+                        >
+                          <strong>{renderMcpLabel(mcp)}</strong>
+                        </button>
+                      ))}
+                    </div>
+                    {currentMcp.find((m) => m.id === 'github')?.enabled ? (
+                      <div className="field" style={{ marginTop: 10 }}>
+                        <label>GitHub token</label>
+                        <input
+                          type="password"
+                          value={currentMcp.find((m) => m.id === 'github')?.config?.token || ''}
+                          onChange={(e) =>
+                            updateMcpConfig('github', {
+                              ...currentMcp.find((m) => m.id === 'github')?.config,
+                              token: e.target.value,
+                            })
+                          }
+                          placeholder="ghp_..."
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <button type="button" className="primary" onClick={onSave}>
+                    Save agent
+                  </button>
+                </div>
+              );
+            })()}
           </div>
         ) : null}
 
