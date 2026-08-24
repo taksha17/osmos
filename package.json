@@ -60,6 +60,7 @@
       "scripts/whisper-worker.mjs",
       "resources/icon.png",
       "resources/logo-ui.png",
+      "resources/Start_Osmos_64.png",
       "package.json",
       "node_modules/@xenova/transformers/**/*",
       "node_modules/onnxruntime-node/**/*",

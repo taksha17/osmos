@@ -262,7 +262,7 @@ export function HomeDashboard({
         <button type="button" className="home-start" onClick={onStartOsmos}>
           <span className="home-start__mark" aria-hidden>
             <img
-              src="@resources/logo-ui.png"
+              src="@resources/Start_Osmos_64.png"
               alt="OSMOS"
               width={28}
               height={28}

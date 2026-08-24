@@ -8,7 +8,6 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { HomeDashboard } from './components/HomeDashboard';
 import { SettingsPanel } from './components/SettingsPanel';
 import { OnboardingWizard } from './components/OnboardingWizard';
-import { BrandLogo } from './components/BrandLogo';
 import { useMicStt } from './stt/useMicStt';
 import { activeSavedProfile } from '@shared/profiles';
 import { resolveAgent } from '@shared/agents';
@@ -168,7 +167,13 @@ function OverlayApp() {
     >
       <div className="overlay-stack">
         <div className="overlay-pill">
-          <BrandLogo variant="mark" />
+          <img
+            src="@resources/Start_Osmos_64.png"
+            alt="OSMOS"
+            width={28}
+            height={28}
+            style={{ display: 'block', margin: 'auto' }}
+          />
           {settings && (() => {
             const profiles = settings.profiles?.length
               ? settings.profiles
