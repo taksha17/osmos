@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createPlatformAdapter } from './platform/index.js';
+import { canLoopSafeScreenCapture } from './services/screenCapture.js';
 import { getSettings, updateSettings } from './services/settingsStore.js';
 import { chatOllama, listOllamaModels, streamChatOllama } from './services/ollama.js';
 import { formatHitsForPrompt, searchSearxng } from './services/searxng.js';
@@ -380,6 +381,18 @@ function allWindows(): BrowserWindow[] {
 let shortcutsRegistered = false;
 
 function registerIpc() {
+  ipcMain.handle('app:log', (_e, level: 'log' | 'info' | 'warn' | 'error', ...args: any[]) => {
+    const prefix = `[Renderer:${level.toUpperCase()}]`;
+    if (level === 'error') {
+      console.error(prefix, ...args);
+    } else if (level === 'warn') {
+      console.warn(prefix, ...args);
+    } else {
+      console.log(prefix, ...args);
+    }
+    return { ok: true };
+  });
+
   ipcMain.handle('app:get-info', () => ({
     name: APP_NAME,
     version: app.getVersion(),
@@ -497,8 +510,35 @@ function registerIpc() {
     return platform.captureRegion();
   });
 
-  ipcMain.handle('screen:capture-full', async (): Promise<CaptureResult> => {
-    return platform.captureFullScreen();
+  ipcMain.handle(
+    'screen:capture-full',
+    async (_e, opts?: { loopSafe?: boolean }): Promise<CaptureResult> => {
+      return platform.captureFullScreen(opts);
+    },
+  );
+
+  ipcMain.handle('screen:can-loop', async (): Promise<{ ok: boolean }> => {
+    return { ok: canLoopSafeScreenCapture() };
+  });
+
+  ipcMain.handle('desktop:list-sources', async () => {
+    try {
+      const { desktopCapturer } = await import('electron');
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: 1, height: 1 },
+      });
+      return {
+        ok: true,
+        sources: sources.map((s) => ({ id: s.id, name: s.name })),
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        sources: [],
+        error: e instanceof Error ? e.message : 'Failed to list desktop sources',
+      };
+    }
   });
 
   ipcMain.handle('system:audio', async (_e, req: SystemAudioRequest): Promise<SystemAudioResponse> => {
@@ -583,6 +623,7 @@ function registerIpc() {
         monitors: list.monitors,
         preferredInputId: list.preferredInputId,
         preferredMonitorId: list.preferredMonitorId,
+        warning: list.warning,
       };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : 'Could not list audio devices' };
@@ -871,6 +912,49 @@ app.whenReady().then(() => {
       p === 'display-capture' ||
       p === 'desktopCapture'
     );
+  });
+
+  // Windows/Linux system audio for Smart listen: grant loopback when enabled.
+  // See docs/CAPTURE-STRATEGY.md and electron-audio-loopback pattern.
+  let loopbackAudioEnabled = false;
+  const installDisplayMediaHandler = () => {
+    session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
+      console.log('[setDisplayMediaRequestHandler] Request received:', request);
+      try {
+        const { desktopCapturer } = await import('electron');
+        const sources = await desktopCapturer.getSources({
+          types: ['screen'],
+          thumbnailSize: { width: 1, height: 1 },
+        });
+        const screen = sources[0];
+        console.log('[setDisplayMediaRequestHandler] Sources count:', sources.length, 'Selected screen:', screen?.name);
+        if (!screen) {
+          console.warn('[setDisplayMediaRequestHandler] No screen source found');
+          callback({});
+          return;
+        }
+        if (loopbackAudioEnabled) {
+          console.log('[setDisplayMediaRequestHandler] Granting video + audio loopback');
+          callback({ video: screen, audio: 'loopback' });
+        } else {
+          console.log('[setDisplayMediaRequestHandler] Granting video only (loopback disabled)');
+          callback({ video: screen });
+        }
+      } catch (err) {
+        console.error('[setDisplayMediaRequestHandler] Failed to resolve screen source:', err);
+        callback({});
+      }
+    });
+  };
+  installDisplayMediaHandler();
+
+  ipcMain.handle('loopback:enable', async () => {
+    loopbackAudioEnabled = true;
+    return { ok: true };
+  });
+  ipcMain.handle('loopback:disable', async () => {
+    loopbackAudioEnabled = false;
+    return { ok: true };
   });
 
   registerIpc();

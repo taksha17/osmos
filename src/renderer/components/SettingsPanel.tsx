@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { FeatureDef } from '@shared/features';
 import type { AppSettings, AudioDeviceInfo, UpdateStatus, WebSearchProvider } from '@shared/types';
+import { describeAudioCaptureProfile, getAudioCaptureProfile } from '@shared/audioCaptureProfile';
 
 type Info = {
   name: string;
@@ -68,6 +69,8 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose 
   const [saving, setSaving] = useState(false);
   const [nativeMonitors, setNativeMonitors] = useState<AudioDeviceInfo[]>([]);
   const [preferredMonitorId, setPreferredMonitorId] = useState('');
+  const [audioWarning, setAudioWarning] = useState('');
+  const audioProfile = getAudioCaptureProfile(info?.platform as NodeJS.Platform | undefined);
 
   useEffect(() => {
     if (info?.platform !== 'linux') return;
@@ -77,6 +80,7 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose 
         if (!res?.ok) return;
         setNativeMonitors(res.monitors || []);
         if (res.preferredMonitorId) setPreferredMonitorId(res.preferredMonitorId);
+        setAudioWarning(res.warning || '');
         if (!settings.systemAudioDevice && res.preferredMonitorId) {
           onChange({ ...settings, systemAudioDevice: res.preferredMonitorId });
         }
@@ -208,6 +212,42 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose 
                   <option value="mic">Mic only</option>
                   <option value="both">Both</option>
                 </select>
+              </div>
+
+              <div className="settings-row">
+                <div className="settings-row__icon" aria-hidden>
+                  ⌁
+                </div>
+                <div className="settings-row__copy">
+                  <strong>Audio profile</strong>
+                  <p>{audioProfile.summary}</p>
+                  <p className="meta" style={{ marginTop: 8 }}>
+                    {describeAudioCaptureProfile(audioProfile)[0]}
+                  </p>
+                </div>
+              </div>
+
+              <div className="settings-row">
+                <div className="settings-row__icon" aria-hidden>
+                  👁
+                </div>
+                <div className="settings-row__copy">
+                  <strong>Continuous screen assist</strong>
+                  <p>
+                    While Smart is on, keep OCR-reading the screen (loop-safe only — never
+                    loops the Wayland portal)
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className={`home-switch${settings.continuousScreenAssist !== false ? ' home-switch--on' : ''}`}
+                  aria-label="Toggle continuous screen assist"
+                  onClick={() =>
+                    set({ continuousScreenAssist: settings.continuousScreenAssist === false })
+                  }
+                >
+                  <span className="home-switch__knob" />
+                </button>
               </div>
 
               <div className="settings-row">
@@ -665,12 +705,37 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose 
                   <option value="both">Both mic + system</option>
                 </select>
               </div>
+
+              <div className="field" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <div>
+                  <label style={{ marginBottom: 4 }}>Continuous screen assist</label>
+                  <p className="meta" style={{ margin: 0 }}>
+                    While Smart is on, keep OCR-reading the screen. Uses loop-safe capture only
+                    (never loops the Wayland portal).
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className={`home-switch${settings.continuousScreenAssist !== false ? ' home-switch--on' : ''}`}
+                  aria-label="Toggle continuous screen assist"
+                  onClick={() =>
+                    set({ continuousScreenAssist: settings.continuousScreenAssist === false })
+                  }
+                >
+                  <span className="home-switch__knob" />
+                </button>
+              </div>
+
               <p className="meta" style={{ marginBottom: 14 }}>
                 Overlay Smart mode listens to <strong>meeting/system audio</strong> (what your
-                speakers play) via PipeWire — it does <strong>not</strong> use your Zoom/Meet screen
-                share. Screen OCR is on-demand only (📷 / hotkey) so OSMOS never steals the meeting
-                share portal.
+                speakers play). Continuous screen assist is optional and never steals the Zoom/Meet
+                share portal on Wayland.
               </p>
+              {audioWarning ? (
+                <p className="settings-callout" style={{ marginBottom: 14 }}>
+                  {audioWarning}
+                </p>
+              ) : null}
 
               <div className="field">
                 <label>Loopback device (optional)</label>
@@ -693,7 +758,7 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose 
                       info?.platform === 'darwin'
                         ? 'BlackHole 2ch'
                         : info?.platform === 'win32'
-                          ? 'WASAPI device name (blank = loopback)'
+                          ? 'Optional override (Windows uses Chromium loopback by default)'
                           : 'PipeWire / Pulse source (blank = default monitor)'
                     }
                   />
@@ -708,8 +773,9 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose 
                 </p>
               ) : (
                 <p className="meta" style={{ marginBottom: 14 }}>
-                  Leave blank to auto-detect the default monitor / WASAPI loopback. Override only if you
-                  have a named virtual cable.
+                  Leave blank to auto-detect. On Windows, Smart listen uses Chromium desktop
+                  loopback (no ffmpeg WASAPI). Override only if you need a named Linux/macOS
+                  virtual cable.
                 </p>
               )}
 
@@ -827,12 +893,19 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose 
                   setStatus('Capturing system audio…');
                   setError('');
                   try {
-                    const res = await window.osmos.captureSystemAudio({
-                      durationMs: 5000,
-                      device: settings.systemAudioDevice,
-                    });
+                    const { captureElectronLoopback, isWindowsPlatform } = await import(
+                      '../stt/electronLoopback'
+                    );
+                    const res = (await isWindowsPlatform())
+                      ? await captureElectronLoopback(5000)
+                      : await window.osmos.captureSystemAudio({
+                          durationMs: 5000,
+                          device: settings.systemAudioDevice,
+                        });
                     if (!res.ok) setError(res.error || 'System audio capture failed');
-                    else {
+                    else if ((res as { silent?: boolean }).silent) {
+                      setError('Captured silence — play audio on speakers and retry.');
+                    } else {
                       setStatus(
                         `Captured ${res.mimeType || 'audio'} (${(res.base64?.length || 0) / 1024 | 0} KB)`,
                       );

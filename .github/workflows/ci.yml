@@ -85,6 +85,8 @@ jobs:
           restore-keys: |
             electron-builder-windows-
       - run: npm ci
+      - name: Vendor Windows ffmpeg
+        run: npm run ensure:ffmpeg-win
       - name: Package Windows with retry
         uses: nick-fields/retry@v2
         with:

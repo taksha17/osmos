@@ -17,11 +17,23 @@ export type AudioDeviceList = {
   monitors: NamedAudioDevice[];
   preferredInputId: string;
   preferredMonitorId: string;
+  warning?: string;
 };
 
 async function pactl(args: string[]): Promise<string> {
   const { stdout } = await execFileAsync('pactl', args, { timeout: 5000 });
   return stdout;
+}
+
+async function pactlListShort(kind: 'sources' | 'sinks'): Promise<string> {
+  // `pactl list short <kind>` is the common PipeWire/Pulse spelling.
+  // Keep the older argument order as a fallback in case a distro wrapper
+  // happens to accept it.
+  try {
+    return await pactl(['list', 'short', kind]);
+  } catch {
+    return pactl(['list', kind, 'short']);
+  }
 }
 
 function parseShortList(out: string): NamedAudioDevice[] {
@@ -31,6 +43,7 @@ function parseShortList(out: string): NamedAudioDevice[] {
     if (!trimmed) continue;
     const parts = trimmed.split(/\s+/);
     if (parts.length < 2) continue;
+    if (!/^\d+$/.test(parts[0] || '')) continue;
     const name = parts[1];
     if (!name || name === 'auto_null') continue;
     devices.push({ id: name, name });
@@ -41,8 +54,8 @@ function parseShortList(out: string): NamedAudioDevice[] {
 export async function listLinuxAudioDevices(): Promise<AudioDeviceList> {
   try {
     const [sourcesOut, sinksOut, defaultSink, defaultSource] = await Promise.all([
-      pactl(['list', 'sources', 'short']),
-      pactl(['list', 'sinks', 'short']),
+      pactlListShort('sources'),
+      pactlListShort('sinks'),
       pactl(['get-default-sink']).catch(() => ''),
       pactl(['get-default-source']).catch(() => ''),
     ]);
@@ -56,6 +69,8 @@ export async function listLinuxAudioDevices(): Promise<AudioDeviceList> {
       rawSources.filter((s) => !s.id.endsWith('.monitor')),
     );
     const outputs = sanitizeLinuxOutputDevices(rawSinks);
+    const hasRealDevices =
+      inputs.some((d) => d.id !== 'default') || monitors.some((d) => d.id !== '@DEFAULT_MONITOR@');
 
     const preferredInputId = sanitizeLinuxInputId(defaultSource.trim(), inputs);
     const preferredMonitorId = preferredLinuxMonitorId(monitors, defaultSink.trim());
@@ -69,14 +84,18 @@ export async function listLinuxAudioDevices(): Promise<AudioDeviceList> {
       })),
       preferredInputId,
       preferredMonitorId,
+      warning: hasRealDevices
+        ? undefined
+        : 'No real PipeWire/Pulse devices were discovered, so Osmos is showing placeholder audio devices.',
     };
-  } catch {
+  } catch (err) {
     return {
       inputs: [{ id: 'default', name: 'System default microphone' }],
       outputs: [],
       monitors: [{ id: '@DEFAULT_MONITOR@', name: 'Meeting audio' }],
       preferredInputId: 'default',
       preferredMonitorId: '@DEFAULT_MONITOR@',
+      warning: `Could not query PipeWire/Pulse audio devices (${err instanceof Error ? err.message : String(err)}). Showing fallback devices.`,
     };
   }
 }

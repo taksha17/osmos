@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppSettings, ChatStreamEvent, StarTemplate } from '../../shared/types';
 import {
   fusedAssistPrompt,
+  looksLikeQuestion,
   SCREEN_CONTEXT_FRESH_MS,
   shouldAutoAssist,
 } from '@shared/continuousAssist';
 import { useMicStt } from '../stt/useMicStt';
 import { useSystemAudioStt } from '../stt/useSystemAudioStt';
+import { useScreenAssist } from '../stt/useScreenAssist';
 import { extractTextFromBase64 } from '../stt/ocr';
 import { TranscriptTimeline } from './TranscriptTimeline';
 import type { TranscriptEntry } from './TranscriptTimeline';
@@ -90,6 +92,24 @@ export function ChatPanel({
   pausedRef.current = paused;
   const mic = useMicStt(settings, { onPreferProvider: onPreferSttProvider });
   const system = useSystemAudioStt(settings);
+  const lastScreenRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
+  const screenSendRef = useRef<(text: string) => void>(() => {});
+  const assistSource = settings?.assistAudioSource || 'system';
+  const wantsSystem =
+    continuousEnabled && (assistSource === 'system' || assistSource === 'both');
+  const wantsMic = continuousEnabled && (assistSource === 'mic' || assistSource === 'both');
+  const wantsScreen =
+    Boolean(overlay) &&
+    continuousEnabled &&
+    !paused &&
+    settings?.continuousScreenAssist !== false;
+
+  const screen = useScreenAssist({
+    enabled: wantsScreen,
+    onScreenText: (text) => screenSendRef.current(text),
+    onStatus: (status) => setOcrStatus(status || ''),
+  });
+
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const cancelRef = useRef<null | (() => void)>(null);
@@ -104,18 +124,8 @@ export function ChatPanel({
   systemStopRef.current = system.stop;
   systemStartRef.current = system.start;
   const lastAssistRef = useRef({ key: '', at: 0 });
-  const lastScreenRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
   const micFailRef = useRef(0);
   const systemFailRef = useRef(0);
-
-  const assistSource = settings?.assistAudioSource || 'system';
-  const wantsSystem =
-    continuousEnabled && (assistSource === 'system' || assistSource === 'both');
-  const wantsMic = continuousEnabled && (assistSource === 'mic' || assistSource === 'both');
-
-  useEffect(() => {
-    if (overlay && !paused) setContinuousEnabled(true);
-  }, [overlay, paused]);
 
   useEffect(() => {
     if (!overlay) return;
@@ -188,7 +198,7 @@ export function ChatPanel({
     } else if (overlay) {
       micFailRef.current = 0;
       systemFailRef.current = 0;
-      setContinuousEnabled(true);
+      // Resume does not force Smart on — user toggles ⚡ (needed for loopback gesture).
     }
   }, [onPausedChange, overlay]);
 
@@ -314,6 +324,10 @@ export function ChatPanel({
 
   const sendRef = useRef(sendMessage);
   sendRef.current = sendMessage;
+  screenSendRef.current = (text: string) => {
+    // Context only — overlay answers fire on keybinds / Assist buttons, not automatically.
+    lastScreenRef.current = { text, at: Date.now() };
+  };
 
   useEffect(() => {
     if (!overlay) return;
@@ -351,10 +365,13 @@ export function ChatPanel({
       ]);
 
       const mode = settings?.activeMode || 'general';
-      const smart = continuousRef.current && overlay && !pausedRef.current;
-      const autoAsk = settings?.autoAskOnFinal || smart;
+      // Overlay Smart listens for context only. Answers generate on Ctrl/Cmd+Enter
+      // (and overlay Assist / What should I say? / hotkeys) — never auto-fire.
+      if (overlay) return;
+
+      const autoAsk = settings?.autoAskOnFinal;
       if (!autoAsk) return;
-      if (smart && !shouldAutoAssist(cleaned, true)) return;
+      if (!shouldAutoAssist(cleaned, true)) return;
 
       const key = cleaned.toLowerCase().slice(0, 80);
       const now = Date.now();
@@ -365,14 +382,11 @@ export function ChatPanel({
         lastScreenRef.current.text && now - lastScreenRef.current.at < SCREEN_CONTEXT_FRESH_MS
           ? lastScreenRef.current.text
           : '';
-      const prompt =
-        smart && overlay
-          ? fusedAssistPrompt({
-              transcript: cleaned,
-              screenText: screenFresh || undefined,
-              activeMode: mode,
-            })
-          : cleaned;
+      const prompt = fusedAssistPrompt({
+        transcript: cleaned,
+        screenText: screenFresh || undefined,
+        activeMode: mode,
+      });
       void sendRef.current(prompt);
     },
     [overlay, settings?.activeMode, settings?.autoAskOnFinal],
@@ -402,6 +416,26 @@ export function ChatPanel({
   }, [mic.partial]);
 
   useEffect(() => {
+    if (system.partial) {
+      setTranscript((prev) => {
+        const next = [...prev];
+        const last = next[next.length - 1];
+        if (last && !last.isFinal) {
+          next[next.length - 1] = { ...last, text: system.partial };
+        } else {
+          next.push({
+            id: `s-${Date.now()}`,
+            text: system.partial,
+            timestamp: Date.now(),
+            isFinal: false,
+          });
+        }
+        return next;
+      });
+    }
+  }, [system.partial]);
+
+  useEffect(() => {
     if (messages.length === 0) return;
     const last = messages[messages.length - 1];
     if (last.role !== 'assistant') return;
@@ -428,8 +462,11 @@ export function ChatPanel({
       ? messages[messages.length - 1].content
       : latestAssistant?.content || '';
       const answerPlaceholder =
-    system.listening || mic.listening
-      ? system.partial || mic.partial || (system.listening ? 'Listening to meeting audio…' : 'Listening…')
+    system.listening || mic.listening || screen.watching
+      ? system.partial ||
+        mic.partial ||
+        (screen.watching ? 'Reading screen…' : '') ||
+        (system.listening ? 'Listening to meeting audio…' : 'Listening…')
       : 'Answers appear here while you interview, meet, or share your screen.';
 
   const captureScreen = async () => {
@@ -452,16 +489,7 @@ export function ChatPanel({
       if (ocr.text) {
         lastScreenRef.current = { text: ocr.text, at: Date.now() };
         setInput((prev) => (prev ? `${prev}\n\n[Screen]\n${ocr.text}` : `[Screen]\n${ocr.text}`));
-        // In Smart overlay, immediately assist from this one-shot screen read.
-        if (overlay && continuousRef.current && !pausedRef.current) {
-          const mode = settings?.activeMode || 'general';
-          void sendRef.current(
-            fusedAssistPrompt({
-              screenText: ocr.text,
-              activeMode: mode,
-            }),
-          );
-        }
+        setOcrStatus('Screen context ready — press Ctrl+Enter to answer');
       } else {
         setError(ocr.error || 'OCR returned no text');
       }
@@ -474,13 +502,52 @@ export function ChatPanel({
   const captureScreenRef = useRef(captureScreen);
   captureScreenRef.current = captureScreen;
 
+  const assistFromKeybind = useCallback(
+    (hint?: string) => {
+      const mode = settings?.activeMode || 'general';
+      const now = Date.now();
+      const screenFresh =
+        lastScreenRef.current.text && now - lastScreenRef.current.at < SCREEN_CONTEXT_FRESH_MS
+          ? lastScreenRef.current.text
+          : '';
+      const finalLines = transcript.filter((t) => t.isFinal).map((t) => t.text.trim()).filter(Boolean);
+      // Longer window so meeting History stays useful for later reference.
+      const recentTranscript = finalLines.slice(-12).join('\n').trim();
+      const livePartial = (system.partial || mic.partial || '').trim();
+      const heardForSession = [recentTranscript, livePartial].filter(Boolean).join('\n').trim();
+      const typed = (hint ?? input).trim();
+
+      if (!heardForSession && !screenFresh) {
+        void sendRef.current(typed || OVERLAY_PROMPTS.assist);
+        return;
+      }
+
+      // Explicit "Heard in meeting" stays in chat History for later reference.
+      const ctx = mode === 'interview' ? 'interview' : mode === 'meeting' ? 'meeting' : 'session';
+      const parts: string[] = [];
+      if (typed) parts.push(typed);
+      if (heardForSession) parts.push('', 'Heard in meeting:', heardForSession);
+      if (screenFresh) parts.push('', 'On-screen:', screenFresh.slice(0, 1200));
+      parts.push('', `Live ${ctx} assist. Be concise and speakable.`);
+      if (looksLikeQuestion(heardForSession) || looksLikeQuestion(screenFresh)) {
+        parts.push('', 'What should I say in response?');
+      } else {
+        parts.push('', 'Suggest a response or key points if a reply seems expected.');
+      }
+      void sendRef.current(parts.join('\n'));
+    },
+    [settings?.activeMode, transcript, system.partial, mic.partial, input],
+  );
+  const assistFromKeybindRef = useRef(assistFromKeybind);
+  assistFromKeybindRef.current = assistFromKeybind;
+
   useEffect(() => {
     if (!overlay) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
         e.stopPropagation();
-        void sendRef.current(input.trim() || OVERLAY_PROMPTS.assist);
+        assistFromKeybindRef.current(input.trim() || OVERLAY_PROMPTS.assist);
       }
     };
     window.addEventListener('keydown', onKey, true);
@@ -490,7 +557,7 @@ export function ChatPanel({
   useEffect(() => {
     if (!overlay || !window.osmos.onShortcut) return;
     return window.osmos.onShortcut((action) => {
-      if (action === 'ask') void sendRef.current(OVERLAY_PROMPTS.assist);
+      if (action === 'ask') assistFromKeybindRef.current(OVERLAY_PROMPTS.assist);
       if (action === 'capture') void captureScreenRef.current();
     });
   }, [overlay]);
@@ -508,12 +575,19 @@ export function ChatPanel({
   const captureAudioOnce = async () => {
     setOcrStatus('Capturing audio…');
     try {
-      const capture = await window.osmos.captureSystemAudio({
-        durationMs: 5000,
-        device: settings?.systemAudioDevice,
-      });
+      const { captureElectronLoopback, isWindowsPlatform } = await import('../stt/electronLoopback');
+      const capture = (await isWindowsPlatform())
+        ? await captureElectronLoopback(5000)
+        : await window.osmos.captureSystemAudio({
+            durationMs: 5000,
+            device: settings?.systemAudioDevice,
+          });
       if (!capture.ok) {
         setError(capture.error || 'System audio capture failed');
+        return;
+      }
+      if ((capture as { silent?: boolean }).silent) {
+        setError('Captured silence — play audio on speakers and retry.');
         return;
       }
       setOcrStatus('Transcribing…');
@@ -555,13 +629,14 @@ export function ChatPanel({
             type="button"
             className="overlay-cta"
             disabled={busy}
-            onClick={() => void sendMessage(OVERLAY_PROMPTS.whatToSay)}
+            onClick={() => assistFromKeybind(OVERLAY_PROMPTS.whatToSay)}
           >
             What should I say?
           </button>
         </div>
 
-        <div className="overlay-answer" aria-live="polite">
+        <div className="overlay-main">
+          <div className="overlay-answer" aria-live="polite">
           {answerText ? (
             <>
               <p className="overlay-answer__text">
@@ -586,22 +661,59 @@ export function ChatPanel({
           ) : (
             <p className="overlay-answer__placeholder">{answerPlaceholder}</p>
           )}
+          </div>
+
+          <aside className="overlay-listen" aria-label="Live meeting transcript">
+            <div className="overlay-listen__head">
+              <strong>Heard</strong>
+              <span className="meta">
+                {system.listening || mic.listening
+                  ? 'listening…'
+                  : transcript.length
+                    ? 'idle'
+                    : 'off'}
+              </span>
+            </div>
+            <div className="overlay-listen__body">
+              {transcript.length === 0 && !(system.partial || mic.partial) ? (
+                <p className="overlay-listen__empty">
+                  Turn on ⚡ Smart to capture meeting audio. Press Ctrl+Enter to answer from what was
+                  heard.
+                </p>
+              ) : (
+                transcript.slice(-40).map((entry) => (
+                  <div
+                    key={entry.id}
+                    className={`overlay-listen__line${entry.isFinal ? '' : ' overlay-listen__line--live'}`}
+                  >
+                    <span className="overlay-listen__time">
+                      {new Date(entry.timestamp).toLocaleTimeString([], {
+                        minute: '2-digit',
+                        second: '2-digit',
+                      })}
+                    </span>
+                    <span className="overlay-listen__text">{entry.text}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </aside>
         </div>
 
         <div className="overlay-actions">
-          <button type="button" disabled={busy} onClick={() => void sendMessage(OVERLAY_PROMPTS.assist)}>
+          <button type="button" disabled={busy} onClick={() => assistFromKeybind(OVERLAY_PROMPTS.assist)}>
             ✦ Assist
           </button>
           <span className="overlay-actions__dot" aria-hidden>·</span>
-          <button type="button" disabled={busy} onClick={() => void sendMessage(OVERLAY_PROMPTS.whatToSay)}>
+          <button type="button" disabled={busy} onClick={() => assistFromKeybind(OVERLAY_PROMPTS.whatToSay)}>
             What should I say?
           </button>
           <span className="overlay-actions__dot" aria-hidden>·</span>
-          <button type="button" disabled={busy} onClick={() => void sendMessage(OVERLAY_PROMPTS.followUp)}>
+          <button type="button" disabled={busy} onClick={() => assistFromKeybind(OVERLAY_PROMPTS.followUp)}>
             Follow-up questions
           </button>
           <span className="overlay-actions__dot" aria-hidden>·</span>
-          <button type="button" disabled={busy} onClick={() => void sendMessage(OVERLAY_PROMPTS.recap)}>
+          <button type="button" disabled={busy} onClick={() => assistFromKeybind(OVERLAY_PROMPTS.recap)}>
             ↻ Recap
           </button>
           {starTemplates[0] ? (
@@ -663,17 +775,28 @@ export function ChatPanel({
           </span>
         </div>
 
-        {(error || mic.error || system.error) && (
-          <div className="overlay-error">{error || mic.error || system.error}</div>
+        {(error || mic.error || system.error || screen.error) && (
+          <div className="overlay-error">{error || mic.error || system.error || screen.error}</div>
         )}
 
         <div className="overlay-composer">
           <button
             type="button"
             className={`overlay-smart${continuousEnabled ? ' overlay-smart--on' : ''}`}
-            onClick={() => setContinuousEnabled((v) => !v)}
+            onClick={() => {
+              setContinuousEnabled((v) => {
+                const next = !v;
+                if (next) {
+                  // User gesture — start Windows loopback / listen pipelines.
+                  void systemStartRef.current().catch(() => undefined);
+                } else {
+                  systemStopRef.current();
+                }
+                return next;
+              });
+            }}
             disabled={busy}
-            title="Auto-listen and assist"
+            title="Listen to meeting audio + screen context (answers still need Ctrl+Enter)"
           >
             ⚡ Smart
           </button>
@@ -737,9 +860,16 @@ export function ChatPanel({
         <button
           type="button"
           className={`mic-btn ${continuousEnabled ? 'mic-btn--live' : ''}`}
-          onClick={() => setContinuousEnabled((v) => !v)}
+          onClick={() => {
+            setContinuousEnabled((v) => {
+              const next = !v;
+              if (next) void systemStartRef.current().catch(() => undefined);
+              else systemStopRef.current();
+              return next;
+            });
+          }}
           disabled={busy}
-          title="Toggle continuous assistant"
+          title="Toggle continuous listen (answers still need Ctrl+Enter)"
         >
           {continuousEnabled ? 'Continuous on' : 'Continuous'}
         </button>

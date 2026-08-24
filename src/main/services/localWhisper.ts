@@ -10,7 +10,7 @@
  * that path is the asar *file* and causes spawn ENOTDIR.
  */
 
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, execFileSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { app } from 'electron';
 import type { TranscribeRequest, TranscribeResponse } from '../../shared/types.js';
 import readline from 'node:readline';
-import { findOnPath, isExecutableFile, safeSpawnCwd } from './resolveBin.js';
+import { findOnPath, isExecutableFile, resolveFfmpeg, safeSpawnCwd } from './resolveBin.js';
 
 function isDir(p: string): boolean {
   try {
@@ -340,28 +340,81 @@ export async function transcribeLocalWhisper(
   }
 
   const mime = (req.mimeType || '').toLowerCase();
-  const ext = mime.includes('wav')
+  const looksWav =
+    bytes.length >= 12 &&
+    bytes.toString('ascii', 0, 4) === 'RIFF' &&
+    bytes.toString('ascii', 8, 12) === 'WAVE';
+
+  const ext = looksWav
     ? 'wav'
-    : mime.includes('mp3')
-      ? 'mp3'
-      : mime.includes('ogg')
-        ? 'ogg'
-        : 'webm';
+    : mime.includes('wav')
+      ? 'wav'
+      : mime.includes('mp3')
+        ? 'mp3'
+        : mime.includes('ogg')
+          ? 'ogg'
+          : 'webm';
 
   const tmpDir = app.getPath('temp');
-  const audioPath = path.join(tmpDir, `osmos-stt-${Date.now()}-${process.pid}.${ext}`);
+  const stamp = `${Date.now()}-${process.pid}`;
+  const audioPath = path.join(tmpDir, `osmos-stt-${stamp}.${ext}`);
+  const wavPath = path.join(tmpDir, `osmos-stt-${stamp}.wav`);
   const cacheDir = cacheDirPath();
+  let whisperInput = audioPath;
 
   try {
     await fs.mkdir(cacheDir, { recursive: true });
     await fs.writeFile(audioPath, bytes);
 
+    // Worker only accepts PCM WAV. Convert webm/ogg/mp3 via ffmpeg when needed.
+    if (!looksWav) {
+      const ffmpeg = resolveFfmpeg();
+      if (!ffmpeg) {
+        return {
+          ok: false,
+          error:
+            'Local Whisper needs WAV, and ffmpeg is missing to convert this recording. Reinstall OSMOS or run npm run ensure:ffmpeg-win.',
+        };
+      }
+      try {
+        execFileSync(
+          ffmpeg,
+          [
+            '-nostdin',
+            '-hide_banner',
+            '-loglevel',
+            'error',
+            '-y',
+            '-i',
+            audioPath,
+            '-ac',
+            '1',
+            '-ar',
+            '16000',
+            '-c:a',
+            'pcm_s16le',
+            wavPath,
+          ],
+          { windowsHide: true, timeout: 30_000 },
+        );
+        whisperInput = wavPath;
+      } catch (e) {
+        return {
+          ok: false,
+          error:
+            e instanceof Error
+              ? `Failed to convert audio to WAV: ${e.message}`
+              : 'Failed to convert audio to WAV for Local Whisper',
+        };
+      }
+    }
+
     let result: { ok: boolean; text?: string; error?: string };
     try {
-      result = await runViaServe(audioPath);
+      result = await runViaServe(whisperInput);
     } catch {
       killServe();
-      result = await runOneShot(audioPath, cacheDir);
+      result = await runOneShot(whisperInput, cacheDir);
     }
 
     if (!result.ok) return { ok: false, error: result.error || 'Local Whisper failed' };
@@ -372,6 +425,7 @@ export async function transcribeLocalWhisper(
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   } finally {
     await fs.unlink(audioPath).catch(() => undefined);
+    if (whisperInput !== audioPath) await fs.unlink(whisperInput).catch(() => undefined);
   }
 }
 

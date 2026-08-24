@@ -2,10 +2,13 @@
  * Resolve external CLI tools for spawn().
  * Bare names + broken PATH entries can throw spawn ENOTDIR (common on Windows
  * and when Electron packages set cwd to app.asar). Always prefer absolute paths.
+ *
+ * Hard rule: never rely on bare `ffmpeg` in packaged builds — use getFfmpegPath().
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { app } from 'electron';
 
 function isFile(p: string): boolean {
@@ -50,28 +53,101 @@ export function findOnPath(command: string): string | null {
   return null;
 }
 
-/** ffmpeg next to the packaged app (Windows NSIS may drop ffmpeg.exe in install dir). */
+function ffmpegBinaryName(): string {
+  return process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+}
+
+/** Known manual-install locations (Windows). */
+function knownInstallFfmpeg(): string[] {
+  if (process.platform !== 'win32') return [];
+  const local = process.env.LOCALAPPDATA || '';
+  const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+  const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+  return [
+    'C:\\ffmpeg\\bin\\ffmpeg.exe',
+    path.join(local, 'Programs', 'ffmpeg', 'bin', 'ffmpeg.exe'),
+    path.join(programFiles, 'ffmpeg', 'bin', 'ffmpeg.exe'),
+    path.join(programFilesX86, 'ffmpeg', 'bin', 'ffmpeg.exe'),
+    'C:\\ProgramData\\chocolatey\\bin\\ffmpeg.exe',
+  ];
+}
+
+/** ffmpeg next to the packaged app / extraResources / common installs. */
 export function findBundledFfmpeg(): string | null {
-  const name = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+  const name = ffmpegBinaryName();
   const candidates: string[] = [];
   try {
-    candidates.push(path.join(path.dirname(process.execPath), name));
-    candidates.push(path.join(process.resourcesPath, name));
+    // electron-builder extraResources → resources/bin/ffmpeg.exe
     candidates.push(path.join(process.resourcesPath, 'bin', name));
+    candidates.push(path.join(process.resourcesPath, name));
+    candidates.push(path.join(path.dirname(process.execPath), name));
+    candidates.push(path.join(path.dirname(process.execPath), 'bin', name));
     if (app.isPackaged) {
       candidates.push(path.join(path.dirname(app.getPath('exe')), name));
+      candidates.push(path.join(path.dirname(app.getPath('exe')), 'resources', 'bin', name));
+    } else {
+      // Dev: vendored pack binary checked into build/bin/<platform>
+      const platformDir = process.platform === 'win32' ? 'win32' : process.platform;
+      candidates.push(path.join(app.getAppPath(), 'build', 'bin', platformDir, name));
+      candidates.push(path.join(process.cwd(), 'build', 'bin', platformDir, name));
     }
   } catch {
     /* ignore */
   }
+  candidates.push(...knownInstallFfmpeg());
   for (const c of candidates) {
     if (isFile(c)) return c;
   }
   return null;
 }
 
+let cachedFfmpeg: string | null | undefined;
+
+function probeFfmpeg(bin: string): boolean {
+  try {
+    execFileSync(bin, ['-version'], {
+      stdio: 'ignore',
+      windowsHide: true,
+      timeout: 8_000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Absolute path to a working ffmpeg, or null if none found. */
 export function resolveFfmpeg(): string | null {
-  return findBundledFfmpeg() || findOnPath('ffmpeg');
+  if (cachedFfmpeg !== undefined) return cachedFfmpeg;
+
+  const candidates = [
+    findBundledFfmpeg(),
+    findOnPath('ffmpeg'),
+    ...knownInstallFfmpeg(),
+  ].filter((c): c is string => Boolean(c));
+
+  const seen = new Set<string>();
+  for (const c of candidates) {
+    const key = path.normalize(c).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (!isFile(c)) continue;
+    if (probeFfmpeg(c)) {
+      cachedFfmpeg = c;
+      return c;
+    }
+  }
+
+  cachedFfmpeg = null;
+  return null;
+}
+
+/**
+ * Always returns a path string for spawn.
+ * Prefer resolveFfmpeg(); bare name is last-resort PATH lookup only (dev).
+ */
+export function getFfmpegPath(): string {
+  return resolveFfmpeg() || ffmpegBinaryName();
 }
 
 export function resolveCaptureTool(command: string): string | null {

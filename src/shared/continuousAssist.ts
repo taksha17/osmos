@@ -80,8 +80,8 @@ export const SCREEN_CONTEXT_FRESH_MS = 45_000;
 
 export const CONTINUOUS_CHUNK_MS = 6000;
 
-/** How often optional CLI-only screen OCR may run (never via desktopCapturer loop). */
-export const CONTINUOUS_SCREEN_MS = 12_000;
+/** How often optional loop-safe screen OCR may run (never via Wayland portal loop). */
+export const CONTINUOUS_SCREEN_MS = 2_500;
 
 /** Allow one extra capture to start while a prior chunk is still transcribing. */
 export const CONTINUOUS_MAX_IN_FLIGHT = 2;

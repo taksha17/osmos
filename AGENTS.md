@@ -95,6 +95,10 @@ IPC system:audio-chunk  →  useSystemAudioStt  →  stt:transcribe  →  should
 7. Heavy native/WASM work (Whisper, Tesseract) stays in **main or a system Node worker** — not the Electron renderer.
 8. Provider abstraction: chat routes through `chatWithProvider` / `streamWithProvider` in `src/main/services/providers.ts`, not direct Ollama calls.
 9. After **main/preload** changes: `npm run build:electron` and restart `npm run dev` (Vite HMR is not enough).
+10. **Never rely on bare `ffmpeg` in packaged builds.** Always resolve through `getFfmpegPath()` / `resolveFfmpeg()` (bundled `resources/bin` first, then known installs, then PATH). See `FIXES.md` Symptom J.
+11. **Never await LLM inference inline inside a capture loop.** Fire-and-handle; keep capture running independently.
+12. **Always hash/diff frames before OCR+LLM** in continuous screen assist.
+13. **Ship third-party license notices** (`THIRD-PARTY-NOTICES.md`) when bundling GPL/LGPL binaries such as ffmpeg.
 
 ## Smart assist model (do not confuse with Cluely screen-share)
 
@@ -103,16 +107,18 @@ IPC system:audio-chunk  →  useSystemAudioStt  →  stt:transcribe  →  should
 | Capability | Mechanism | Notes |
 |---|---|---|
 | Meeting audio (Linux) | Long-lived `ffmpeg -f pulse` on sink `*.monitor` (`linuxLoopbackStream.ts`) → WAV chunks; remounts on default-sink change | Falls back to timed `pw-record` if ffmpeg unavailable. **Do not use `parec`** — often records 0 bytes on PipeWire |
-| Meeting audio (Win/mac) | Chunked `ffmpeg` WASAPI / BlackHole | Same Smart UI |
+| Meeting audio (Win/mac) | Chunked `ffmpeg` WASAPI / BlackHole | Windows packages **bundle** `ffmpeg.exe` via `extraResources` (`scripts/ensure-ffmpeg-win.mjs`) |
 | Mic STT | Linux: native `ffmpeg` pulse / `pw-record` on preferred input; else MediaRecorder | Device list from `pactl` via `audio:list-devices` |
-| Screen OCR | **On-demand** (📷 / Alt+Shift+C); image-hash cache skips identical frames | Never loop `desktopCapturer` on Wayland |
-| Assist fusion | `fusedAssistPrompt(transcript + fresh screen OCR)` | Screen text stays “fresh” ~45s after 📷 |
+| Screen OCR | On-demand 📷 **and** optional continuous loop (`useScreenAssist`, Settings → Continuous screen assist) | Loop uses **loopSafe** capture only (Win GDI / macOS `screencapture` / Linux CLI). **Never** loop `desktopCapturer` on Wayland |
+| Assist fusion | `fusedAssistPrompt(transcript + fresh screen OCR)` | Screen text stays “fresh” ~45s; continuous screen fires `continuousScreenPrompt` without blocking the poll |
 
 **Why:** On Ubuntu Wayland, Electron `desktopCapturer` opens the xdg-desktop-portal picker. Looping it spam-popups, breaks PipeWire, and fights real meeting shares. Do **not** reintroduce continuous portal capture.
 
 **Natively reference:** Study continuous Pulse monitor + on-demand screen context ideas only — **reimplement original MIT code**. Never paste Natively source (`Personal Use Source License`).
 
-Optional CLI tools for quieter on-demand screenshots: `gnome-screenshot`, `grim`, `spectacle`. Smart listen needs **`ffmpeg`** (pulse input) and/or **`pw-record`** (PipeWire).
+Optional CLI tools for quieter screenshots: `gnome-screenshot`, `grim`, `spectacle`. Smart listen needs **`ffmpeg`** (pulse input) and/or **`pw-record`** (PipeWire). Windows Smart audio uses **Electron display-media loopback** (not ffmpeg WASAPI).
+
+**Capture strategy reference:** [`docs/CAPTURE-STRATEGY.md`](./docs/CAPTURE-STRATEGY.md) and `src/shared/captureStrategy.ts` (`getCaptureStrategy()`).
 
 ### Preload: system-audio API (`window.osmos`)
 
@@ -202,6 +208,15 @@ Documented so the next agent does not reintroduce these bugs:
   ```
 - Device heuristics live in `src/shared/linuxAudioDevices.ts` (inspired by personal Natively logic — **reimplemented**, not copied wholesale). Prefer laptop digital mic (`DEV=6` / `_6__source`) and speaker sink monitor over HDMI.
 
+### Windows ffmpeg + continuous screen
+
+- **Symptom J:** Windows “system audio needs ffmpeg / WASAPI…” at overlay / Smart start.
+  - **Cause:** Mainline ffmpeg **has no WASAPI demuxer**; older OSMOS code assumed `-f wasapi -i loopback`.
+  - **Fix:** Windows Smart listen uses **Chromium desktop loopback** (`electronLoopback.ts` + `desktop:list-sources`). ffmpeg bundling remains optional for other tools.
+- **Symptom K:** Screen reader captures once then stops / auto-answers continuously.
+  - **Cause:** One-shot path or continuous OCR fired LLM on every frame change.
+  - **Fix:** Persistent poll loop + frame hash for context; **answers only on Ctrl/Cmd+Enter / Assist / hotkeys** (overlay never auto-sends).
+
 ### Ollama empty answers / “only (web: N hits)”
 
 - Stream parser yields `{ kind: 'thinking' | 'content' }`; UI “Model thinking…”.
@@ -266,7 +281,8 @@ Documented so the next agent does not reintroduce these bugs:
 | `searxng:test` / `websearch:test` | Probe search |
 | `stt:transcribe` | Whisper API or local worker (`engine: 'local' \| 'openai'`) |
 | `screen:capture` | Interactive region (when tools exist) → `{ dataUrl, cancelled }` |
-| `screen:capture-full` | Silent fullscreen for OCR (CLI first, portal last) |
+| `screen:capture-full` | Silent fullscreen for OCR; optional `{ loopSafe: true }` skips portal fallback |
+| `screen:can-loop` | Whether non-portal continuous screen capture is available |
 | `ocr:extract` | Tesseract OCR |
 | `system:audio` | One-shot system/loopback capture → WAV base64 |
 | `system:listen-start` / `system:listen-stop` | Continuous Linux loopback (`linuxLoopbackStream.ts`) |
@@ -348,3 +364,13 @@ See `docs/ROADMAP.md` and `src/shared/features.ts`.
 - User profile may already be populated in local settings — treat as private
 - If builds hang, kill stale `npm run dev` / `vite` / `electron` / `tsc` processes before retrying
 - After main/preload audio changes: `npm run build:electron` then restart `npm run dev` (not HMR alone)
+- Audio troubleshooting log (2026-08-24):
+  - Linux device discovery initially used the wrong `pactl` short-list ordering; fixed by trying `pactl list short sources|sinks` first, then the legacy order.
+  - Added a warning path so Settings shows when only fallback/placeholder audio devices are available.
+  - Windows system audio first used `setDisplayMediaRequestHandler(... audio: 'loopback')` but the renderer loopback stream was being torn down too early; fixed by keeping the stream alive until stop.
+  - Windows `MediaRecorder` start failed until the recorder was switched to an audio-only `MediaStream` built from the loopback audio tracks.
+  - Windows `getDisplayMedia` was asking for audio with a newer constraints object; normalized it back to plain `audio: true` so Electron's loopback handler can actually supply the track.
+  - Windows pack initially failed because `scripts/ensure-ffmpeg-win.mjs` referenced an undefined `force`; fixed that helper.
+  - Windows pack also needed a bundled Python path and workspace-local `node-gyp` cache to get past native rebuilds.
+  - Fresh Windows installer was produced at `release/OSMOS Setup 0.5.2.exe`, but the user still reports no audio after install, so runtime Windows audio capture still needs follow-up.
+  - Added `src/shared/audioCaptureProfile.ts` as a single original audio-strategy file: platform-specific system/mic backend order, 16 kHz mono runtime profile, and human-readable warnings for the settings UI.

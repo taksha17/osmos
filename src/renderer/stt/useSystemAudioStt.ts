@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppSettings } from '../../shared/types';
 import { CONTINUOUS_CHUNK_MS, CONTINUOUS_MAX_IN_FLIGHT } from '@shared/continuousAssist';
+import { captureElectronLoopback, isWindowsPlatform } from './electronLoopback';
 
 function engineForSettings(settings: AppSettings | null): 'local' | 'openai' {
   if (!settings) return 'local';
@@ -11,6 +12,7 @@ function engineForSettings(settings: AppSettings | null): 'local' | 'openai' {
 /**
  * Continuous system-audio → STT for Smart assist.
  * Linux: long-lived ffmpeg pulse / pw-record stream via startSystemAudioListen.
+ * Windows: Chromium desktop loopback (ffmpeg has no WASAPI input in modern builds).
  * Elsewhere / fallback: repeated captureSystemAudio chunks.
  */
 export function useSystemAudioStt(settings: AppSettings | null) {
@@ -44,6 +46,7 @@ export function useSystemAudioStt(settings: AppSettings | null) {
     activeRef.current = false;
     generationRef.current += 1;
     cleanupListen();
+    void import('./electronLoopback').then((m) => m.stopElectronLoopbackStream());
     setListening(false);
     setPartial('');
   }, [cleanupListen]);
@@ -86,6 +89,13 @@ export function useSystemAudioStt(settings: AppSettings | null) {
       if (generationRef.current !== gen || !activeRef.current) return;
       if (silent) {
         silentStreak += 1;
+        if (silentStreak >= 4) {
+          setError(
+            await isWindowsPlatform()
+              ? 'Windows loopback is active but still silent. Start Smart with a click once, then play audio on speakers and retry.'
+              : 'System audio is active but still silent. Play audio on speakers and retry.',
+          );
+        }
         setPartial(
           silentStreak > 2
             ? 'Listening… (no audio yet — play something on speakers)'
@@ -166,24 +176,35 @@ export function useSystemAudioStt(settings: AppSettings | null) {
     }
 
     if (!useStream && activeRef.current && generationRef.current === gen) {
-      setPartial('Listening (chunked capture)…');
+      const preferElectronLoopback = await isWindowsPlatform();
+      setPartial(
+        preferElectronLoopback
+          ? 'Listening (Windows loopback)…'
+          : 'Listening (chunked capture)…',
+      );
       while (activeRef.current && generationRef.current === gen) {
         while (pending.size >= CONTINUOUS_MAX_IN_FLIGHT && activeRef.current) {
           await Promise.race(pending);
         }
         if (!activeRef.current || generationRef.current !== gen) break;
         try {
-          const capture = await window.osmos.captureSystemAudio({
-            durationMs: CONTINUOUS_CHUNK_MS,
-            device: settingsRef.current?.systemAudioDevice || undefined,
-          });
+          const capture = preferElectronLoopback
+            ? await captureElectronLoopback(CONTINUOUS_CHUNK_MS)
+            : await window.osmos.captureSystemAudio({
+                durationMs: CONTINUOUS_CHUNK_MS,
+                device: settingsRef.current?.systemAudioDevice || undefined,
+              });
           if (!activeRef.current || generationRef.current !== gen) break;
           if (!capture.ok || !capture.base64) {
             setError(capture.error || 'System audio capture failed');
             await new Promise((r) => setTimeout(r, 2000));
             continue;
           }
-          await handleWav(capture.base64, capture.mimeType || 'audio/wav', false);
+          await handleWav(
+            capture.base64,
+            capture.mimeType || 'audio/wav',
+            Boolean((capture as { silent?: boolean }).silent),
+          );
         } catch (e) {
           setError(e instanceof Error ? e.message : String(e));
           await new Promise((r) => setTimeout(r, 2000));

@@ -9,7 +9,7 @@ import {
   listLinuxAudioDevices,
   resolveLinuxMicSource,
 } from '../services/audioDevices.js';
-import { capturePrimaryScreen } from '../services/screenCapture.js';
+import { capturePrimaryScreen, canLoopSafeScreenCapture, type CaptureScreenOptions } from '../services/screenCapture.js';
 import { captureLinuxMonitorOnce } from '../services/linuxLoopbackStream.js';
 
 export type PlatformId = 'linux' | 'darwin' | 'win32';
@@ -371,8 +371,8 @@ export interface PlatformAdapter {
   applyStealth(enabled: boolean, windows: Electron.BrowserWindow[]): void;
   defaultShortcutModifier(): 'Alt' | 'CommandOrControl';
   captureRegion(): Promise<CaptureResult>;
-  /** Silent full-screen capture (no interactive region picker). */
-  captureFullScreen(): Promise<CaptureResult>;
+  /** Silent full-screen capture (no interactive region picker). Pass loopSafe for continuous OCR. */
+  captureFullScreen(opts?: CaptureScreenOptions): Promise<CaptureResult>;
   captureSystemAudio(_durationMs?: number, _device?: string): Promise<SystemAudioResponse>;
   captureMicAudio?(_durationMs?: number, _device?: string): Promise<SystemAudioResponse>;
 }
@@ -414,7 +414,7 @@ export function createPlatformAdapter(): PlatformAdapter {
         }
         return capturePrimaryScreen();
       },
-      captureFullScreen: () => capturePrimaryScreen(),
+      captureFullScreen: (opts) => capturePrimaryScreen(opts),
       captureSystemAudio: async (durationMs = 5_000, device?: string) => {
         const tmp = path.join(os.tmpdir(), `osmos-audio-${Date.now()}.wav`);
         const durationSec = Math.max(1, Math.round(durationMs / 1000));
@@ -451,7 +451,7 @@ export function createPlatformAdapter(): PlatformAdapter {
       displayName: 'Windows',
       capabilityNotes: () => [
         'Stealth uses SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) via setContentProtection — hides Osmos from Zoom, Teams, Meet, Webex, OBS, and similar on Windows 10 2004+ / Windows 11.',
-        'System audio: ffmpeg WASAPI loopback (install ffmpeg on PATH). Without ffmpeg, loopback is unavailable.',
+        'System audio: Chromium desktop loopback (ffmpeg has no WASAPI input). Play audio on speakers while Smart is on.',
         'Region capture falls back to full-screen screenshot via PowerShell.',
       ],
       applyStealth(enabled, windows) {
@@ -484,7 +484,7 @@ $bmp.Dispose();
         }
         return capturePrimaryScreen();
       },
-      captureFullScreen: () => capturePrimaryScreen(),
+      captureFullScreen: (opts) => capturePrimaryScreen(opts),
       captureSystemAudio: async (durationMs = 5_000, device?: string) => {
         const tmp = path.join(os.tmpdir(), `osmos-audio-${Date.now()}.wav`);
         const durationSec = Math.max(1, Math.round(durationMs / 1000));
@@ -540,12 +540,35 @@ $bmp.Dispose();
         if (!hasFfmpeg) {
           return {
             ok: false,
-            error: 'Windows system audio needs ffmpeg on PATH with WASAPI loopback support. Install ffmpeg and retry.',
+            error:
+              'Audio engine missing: bundled ffmpeg was not found. Reinstall OSMOS, or install ffmpeg and restart the app.',
+          };
+        }
+        const ffmpegBin = resolveFfmpeg();
+        let demuxers = '';
+        try {
+          if (ffmpegBin) {
+            const { execFileSync } = await import('node:child_process');
+            demuxers = execFileSync(ffmpegBin, ['-hide_banner', '-demuxers'], {
+              encoding: 'utf8',
+              windowsHide: true,
+              timeout: 10_000,
+            });
+          }
+        } catch {
+          /* ignore probe errors */
+        }
+        if (demuxers && !/\bwasapi\b/i.test(demuxers)) {
+          return {
+            ok: false,
+            error:
+              'ffmpeg has no WASAPI input on modern Windows builds. OSMOS uses Chromium desktop loopback instead — enable Smart from the overlay (not this ffmpeg path).',
           };
         }
         return {
           ok: false,
-          error: 'Windows system audio needs ffmpeg on PATH with WASAPI loopback support (e.g. winget install ffmpeg).',
+          error:
+            'Windows system audio capture failed. Play audio on speakers and use Smart listen from the overlay.',
         };
       },
     };
@@ -557,7 +580,9 @@ $bmp.Dispose();
       'Wayland global shortcuts are often unavailable — use in-app controls.',
       'Stealth: skip taskbar + always-on-top. Linux has no OS capture-exclusion flag — share a browser tab/window, not the full desktop.',
       'System audio: ffmpeg pulse or pw-record on the default sink *.monitor (meeting audio). Not screen-share.',
-      'Screen OCR is on-demand only (📷). Continuous portal capture is disabled so Zoom/Meet screen share still works.',
+      canLoopSafeScreenCapture()
+        ? 'Continuous screen OCR uses CLI tools (grim / gnome-screenshot / spectacle / scrot) — never loops the Wayland portal.'
+        : 'Continuous screen OCR needs grim, gnome-screenshot, spectacle, or scrot. 📷 one-shot may still use the portal.',
     ],
     applyStealth(enabled, windows) {
       for (const win of windows) {
@@ -598,7 +623,7 @@ $bmp.Dispose();
       // pops the portal. Use captureFullScreen() for on-demand OCR instead.
       return { dataUrl: '', cancelled: true };
     },
-    captureFullScreen: () => capturePrimaryScreen(),
+    captureFullScreen: (opts) => capturePrimaryScreen(opts),
     captureSystemAudio: async (durationMs = 5_000, device?: string) => {
       // parec is broken empty on many PipeWire hosts — use ffmpeg pulse / pw-record.
       return withLinuxAudioLock(() => captureLinuxMonitorOnce(durationMs, device));

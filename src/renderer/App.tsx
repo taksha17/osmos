@@ -55,8 +55,17 @@ declare global {
         fileName?: string;
         engine?: 'local' | 'openai';
       }) => Promise<{ ok: boolean; text?: string; error?: string }>;
-      captureRegion: () => Promise<{ dataUrl: string; cancelled: boolean }>;
-      captureFullScreen: () => Promise<{ dataUrl: string; cancelled: boolean }>;
+      captureRegion: () => Promise<{ dataUrl: string; cancelled: boolean; error?: string }>;
+      captureFullScreen: (opts?: { loopSafe?: boolean }) =>
+        Promise<{ dataUrl: string; cancelled: boolean; error?: string }>;
+      canLoopSafeScreenCapture: () => Promise<{ ok: boolean }>;
+      listDesktopSources: () => Promise<{
+        ok: boolean;
+        sources?: Array<{ id: string; name: string }>;
+        error?: string;
+      }>;
+      enableLoopbackAudio: () => Promise<{ ok: boolean }>;
+      disableLoopbackAudio: () => Promise<{ ok: boolean }>;
       captureSystemAudio: (payload?: { durationMs?: number; device?: string }) =>
         Promise<{ ok: boolean; base64?: string; mimeType?: string; error?: string }>;
       startSystemAudioListen: (payload?: { device?: string; chunkMs?: number }) =>
@@ -123,6 +132,7 @@ declare global {
       onShortcut: (listener: (action: string) => void) => () => void;
       onSettingsChanged: (listener: (settings: AppSettings) => void) => () => void;
       resetOverlayIdle: () => Promise<{ ok: boolean }>;
+      log?: (level: 'log' | 'info' | 'warn' | 'error', ...args: any[]) => Promise<{ ok: boolean }>;
     };
   }
 }

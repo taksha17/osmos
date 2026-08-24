@@ -22,7 +22,12 @@ const api = {
     engine?: 'local' | 'openai';
   }) => ipcRenderer.invoke('stt:transcribe', payload),
   captureRegion: () => ipcRenderer.invoke('screen:capture'),
-  captureFullScreen: () => ipcRenderer.invoke('screen:capture-full'),
+  captureFullScreen: (opts?: { loopSafe?: boolean }) =>
+    ipcRenderer.invoke('screen:capture-full', opts),
+  canLoopSafeScreenCapture: () => ipcRenderer.invoke('screen:can-loop'),
+  listDesktopSources: () => ipcRenderer.invoke('desktop:list-sources'),
+  enableLoopbackAudio: () => ipcRenderer.invoke('loopback:enable'),
+  disableLoopbackAudio: () => ipcRenderer.invoke('loopback:disable'),
   ocrExtract: (payload: { base64: string }) => ipcRenderer.invoke('ocr:extract', payload),
   companyIntel: (payload: { companyName: string; jdText?: string; companyUrl?: string }) =>
     ipcRenderer.invoke('company:intel', payload),
@@ -154,6 +159,7 @@ const api = {
     return () => ipcRenderer.removeListener('settings:changed', handler);
   },
   resetOverlayIdle: () => ipcRenderer.invoke('overlay:reset-idle'),
+  log: (level: 'log' | 'info' | 'warn' | 'error', ...args: any[]) => ipcRenderer.invoke('app:log', level, ...args),
 };
 
 contextBridge.exposeInMainWorld('osmos', api);

@@ -116,6 +116,11 @@ export type AppSettings = {
   micDeviceId: string;
   /** Smart mode: system loopback (default), mic, or both */
   assistAudioSource: AssistAudioSource;
+  /**
+   * When Smart/continuous is on, keep reading the screen (OCR → assist).
+   * Uses loop-safe capture only (no Wayland portal loops).
+   */
+  continuousScreenAssist: boolean;
   /** Optional loopback device (BlackHole name, WASAPI device, PipeWire source). Empty = auto. */
   systemAudioDevice: string;
   autoAskOnFinal: boolean;
@@ -168,6 +173,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sttLanguage: 'en-US',
   micDeviceId: '',
   assistAudioSource: 'system',
+  continuousScreenAssist: true,
   systemAudioDevice: '',
   autoAskOnFinal: true,
   openaiApiKey: '',
@@ -234,6 +240,8 @@ export type TranscribeResponse = {
 export type CaptureResult = {
   dataUrl: string;
   cancelled: boolean;
+  /** Set when loop-safe capture has no non-portal backend. */
+  error?: string;
 };
 
 export type OcrRequest = {
@@ -270,6 +278,7 @@ export type AudioDevicesResponse = {
   monitors?: AudioDeviceInfo[];
   preferredInputId?: string;
   preferredMonitorId?: string;
+  warning?: string;
   error?: string;
 };
 

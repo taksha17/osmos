@@ -22,9 +22,23 @@ if (!args) {
   process.exit(1);
 }
 
+async function ensureWinFfmpeg() {
+  if (process.platform !== 'win32') return;
+  await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(root, 'scripts', 'ensure-ffmpeg-win.mjs')], {
+      cwd: root,
+      stdio: 'inherit',
+      shell: false,
+    });
+    child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`ensure-ffmpeg-win exited ${code}`))));
+  });
+}
+
+await ensureWinFfmpeg();
+
 console.log(`[pack] Host=${process.platform} → electron-builder ${args.join(' ')}`);
 
-const child = spawn('npx', ['electron-builder', ...args], {
+const child = spawn('npx', ['electron-builder', ...args, '--publish', 'never'], {
   cwd: root,
   stdio: 'inherit',
   shell: false,

@@ -23,7 +23,7 @@ MIT licensed. Built from scratch — not a fork or rebrand of any proprietary in
 | **Web search** | DuckDuckGo by default (no key); optional Tavily or self-hosted SearXNG |
 | **Speech** | Local Whisper (offline), Web Speech, or OpenAI Whisper API |
 | **Smart assist** | Continuous system/meeting audio → STT → auto-suggest (overlap capture while transcribing) |
-| **Screen** | Region / full-screen capture + Tesseract OCR into chat (on-demand) |
+| **Screen** | Region / full-screen capture + Tesseract OCR; optional continuous loop-safe screen assist while Smart is on |
 | **Low-profile** | OS capture exclusion on Windows / macOS; Linux share-tab guidance; overlay low-profile toggle |
 | **Prep** | Company intel, question bank, STAR templates, document RAG |
 | **Sessions** | Local meeting history with transcript timeline and evidence chips |
@@ -109,7 +109,7 @@ Do **not** use `npm run pack:all` on one machine — it cannot cross-build mac/w
 
 ```
 src/
-  shared/    # types, features, modes, agents, brand
+  shared/    # types, features, modes, agents, brand, captureStrategy
   main/      # Electron main: windows, IPC, services, platform adapters
   preload/   # contextBridge → window.osmos
   renderer/  # React UI (launcher + overlay)
@@ -117,6 +117,7 @@ scripts/
   whisper-worker.mjs  # system Node Whisper (not Electron renderer)
 docs/
   ROADMAP.md
+  CAPTURE-STRATEGY.md  # audio/screen capture best practices per OS
 ```
 
 **Conventions**
@@ -124,7 +125,7 @@ docs/
 - System prompts are built only in main via `buildChatContext()`
 - Profile agents / skills / MCP wiring live in `src/shared/agents.ts` + `src/main/services/agentMcp.ts`
 - OS integration lives under `src/main/platform/`
-
+- Capture strategy (what to use per OS): [`docs/CAPTURE-STRATEGY.md`](./docs/CAPTURE-STRATEGY.md) + `getCaptureStrategy()`
 ---
 
 ## Settings overview
@@ -168,3 +169,6 @@ For AI coding agents working on a local checkout, read [`AGENTS.md`](./AGENTS.md
 ## License
 
 [MIT](LICENSE) — Copyright (c) 2026 OSMOS contributors
+
+Windows packages may include FFmpeg binaries (gyan.dev **full** build with WASAPI for
+system-audio loopback); see [THIRD-PARTY-NOTICES.md](./THIRD-PARTY-NOTICES.md).

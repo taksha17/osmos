@@ -82,7 +82,7 @@ export const FEATURES: FeatureDef[] = [
     id: 'screen-capture',
     name: 'Screen / screenshot OCR',
     description:
-      'On-demand full-screen OCR (📷 / hotkey). Not continuous on Linux — avoids stealing the Wayland screen-share portal from Zoom/Meet.',
+      'On-demand 📷 + optional continuous loop-safe screen assist (Win GDI / macOS screencapture / Linux CLI). Never loops Wayland portal capture.',
     status: 'live',
     platforms: ['linux', 'darwin', 'win32'],
   },
