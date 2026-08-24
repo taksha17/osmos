@@ -42,7 +42,7 @@ const SECTIONS: Array<{ id: Section; label: string; icon: string }> = [
   { id: 'ai', label: 'AI Providers', icon: '✦' },
   { id: 'web', label: 'Intelligence', icon: '◈' },
   { id: 'speech', label: 'Audio', icon: '♫' },
-  { id: 'stealth', label: 'Undetectable', icon: '◌' },
+  { id: 'stealth', label: 'Low-profile', icon: '◌' },
   { id: 'keybinds', label: 'Keybinds', icon: '⌨' },
   { id: 'updates', label: 'Setup & Help', icon: '?' },
   { id: 'about', label: 'About', icon: 'ⓘ' },
@@ -171,17 +171,17 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose 
                   ◌
                 </div>
                 <div className="settings-row__copy">
-                  <strong>Undetectable</strong>
+                  <strong>Low-profile</strong>
                   <p>
                     {info?.platform === 'linux'
-                      ? 'On Linux this only hides Osmos from the taskbar/Alt-Tab. Entire-screen Meet/Zoom shares still include the overlay — share a Chrome tab (or a single window) so others do not see it while you keep using Osmos.'
-                      : 'Hide the overlay from screen shares where the OS supports capture exclusion (best on Windows / macOS).'}
+                      ? 'On Linux this only hides Osmos from the taskbar/Alt-Tab. Entire-screen Meet/Zoom shares still include the overlay — share a Chrome tab (or a single window) so others do not see it while you keep using Osmos. Full screen-share hiding will come later on Linux.'
+                      : 'Hides the overlay from screen shares where the OS supports capture exclusion (Windows / macOS). Only you can see Osmos during a call.'}
                   </p>
                 </div>
                 <button
                   type="button"
                   className={`home-switch${settings.stealthEnabled ? ' home-switch--on' : ''}`}
-                  aria-label="Toggle undetectable"
+                  aria-label="Toggle low-profile"
                   onClick={() => void save({ stealthEnabled: !settings.stealthEnabled })}
                 >
                   <span className="home-switch__knob" />

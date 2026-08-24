@@ -128,7 +128,7 @@ Renderer hook: `src/renderer/stt/useSystemAudioStt.ts` — prefers stream on Lin
 
 ## What is live (v0.5.1)
 
-- **Launcher hub** (`launcher-shell`): full-bleed home dashboard — search, Undetectable toggle, Start Osmos, sessions; Profile + Settings open as **modals** (`hub-modal`), not a permanent sidebar
+- **Launcher hub** (`launcher-shell`): full-bleed home dashboard — search, Low-profile toggle, Start Osmos, sessions; Profile + Settings open as **modals** (`hub-modal`), not a permanent sidebar
 - Frameless overlay (`#/overlay`) — always-on-top, translucent, draggable
 - Streaming LLM chat + cancel (Ollama + cloud providers)
 - SearXNG / DuckDuckGo / Tavily grounding (skipped in **interview** mode unless query looks like research)

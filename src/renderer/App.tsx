@@ -12,6 +12,7 @@ import { useMicStt } from './stt/useMicStt';
 import { activeSavedProfile } from '@shared/profiles';
 import { resolveAgent } from '@shared/agents';
 import { DEFAULT_SAVED_PROFILE } from '@shared/types';
+import startOsmosIcon from '@resources/Start_Osmos_64.png';
 
 type Tab = 'home' | 'chat' | 'history' | 'roadmap';
 type Modal = null | 'profile' | 'settings';
@@ -168,7 +169,7 @@ function OverlayApp() {
       <div className="overlay-stack">
         <div className="overlay-pill">
           <img
-            src="@resources/Start_Osmos_64.png"
+            src={startOsmosIcon}
             alt="OSMOS"
             width={28}
             height={28}
@@ -209,6 +210,23 @@ function OverlayApp() {
             title={paused ? 'Resume listening' : 'Pause listening'}
           >
             <span aria-hidden>{paused ? '▶' : '❚❚'}</span>
+          </button>
+          <button
+            type="button"
+            className={`overlay-pill__stealth${settings?.stealthEnabled ? ' overlay-pill__stealth--on' : ''}`}
+            onClick={() => {
+              const next = !settings?.stealthEnabled;
+              void window.osmos.updateSettings({ stealthEnabled: next }).then(setSettings);
+            }}
+            aria-pressed={Boolean(settings?.stealthEnabled)}
+            aria-label={settings?.stealthEnabled ? 'Disable low-profile' : 'Enable low-profile'}
+            title={
+              settings?.stealthEnabled
+                ? 'Low-profile on — hidden from screen shares'
+                : 'Low-profile off — enable to hide from screen shares (Windows/macOS)'
+            }
+          >
+            <span aria-hidden>◌</span>
           </button>
         </div>
 

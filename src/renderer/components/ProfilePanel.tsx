@@ -6,7 +6,7 @@ import { resolveAgent, effectiveProvider, allSupportedSkills, allSupportedMcps, 
 import { DocumentsTab } from './DocumentsTab';
 import { QuestionBankTab } from './QuestionBankTab';
 
-type ProfileSection = 'identity' | 'profile' | 'company' | 'documents' | 'questions' | 'web' | 'agent';
+type ProfileSection = 'identity' | 'profile' | 'company' | 'documents' | 'questions' | 'web';
 
 type Props = {
   settings: AppSettings;
@@ -23,7 +23,6 @@ const NAV: Array<{ id: ProfileSection; label: string; icon: string }> = [
   { id: 'documents', label: 'Role Insight', icon: '▤' },
   { id: 'questions', label: 'Cover Letter', icon: '✎' },
   { id: 'web', label: 'Web Search', icon: '⌕' },
-  { id: 'agent', label: 'Agent', icon: '◈' },
 ];
 
 function readInitialSection(): ProfileSection {
@@ -414,99 +413,12 @@ export function ProfilePanel({ settings, onChange, onSave, status, onClose }: Pr
                 Delete this profile
               </button>
             ) : null}
-          </div>
-        ) : null}
 
-        {section === 'company' ? (
-          <div className="hub-identity">
-            <h2>Company Intel</h2>
+            <hr className="hub-divider" />
+
+            <h3>Agent behavior</h3>
             <p className="hub-block__desc">
-              Add a name and/or careers URL. Research pulls live web results into this profile.
-            </p>
-            <div className="field">
-              <label>Company name</label>
-              <input
-                value={active.companyName || ''}
-                onChange={(e) => patchActive({ companyName: e.target.value })}
-                placeholder="e.g. Acme Corp"
-              />
-            </div>
-            <div className="field">
-              <label>Company / careers URL</label>
-              <input
-                value={active.companyUrl || ''}
-                onChange={(e) => {
-                  const companyUrl = e.target.value;
-                  const guessed =
-                    !active.companyName.trim() && companyUrl.trim()
-                      ? guessCompanyFromUrl(companyUrl)
-                      : active.companyName;
-                  patchActive({ companyUrl, companyName: guessed });
-                }}
-                placeholder="https://acme.com/careers"
-              />
-            </div>
-            <div className="row" style={{ marginBottom: 12 }}>
-              <button type="button" style={{ height: 40 }} onClick={() => void researchCompany()} disabled={Boolean(busy)}>
-                Research company
-              </button>
-              <button
-                type="button"
-                className="primary"
-                style={{ height: 40 }}
-                onClick={() => void assemblePrep()}
-                disabled={Boolean(busy)}
-              >
-                Assemble interview prep
-              </button>
-            </div>
-            <div className="field">
-              <label>Company intel</label>
-              <textarea
-                rows={10}
-                value={active.companyIntel || ''}
-                onChange={(e) => patchActive({ companyIntel: e.target.value })}
-                placeholder="Research results appear here…"
-              />
-            </div>
-          </div>
-        ) : null}
-
-        {section === 'documents' ? (
-          <div className="hub-identity">
-            <h2>Role Insight</h2>
-            <p className="hub-block__desc">Attach reference docs for retrieval during interviews.</p>
-            <DocumentsTab settings={settings} onSettingsChange={applySettings} embedded />
-          </div>
-        ) : null}
-
-        {section === 'questions' ? (
-          <div className="hub-identity">
-            <h2>Cover Letter / STAR</h2>
-            <p className="hub-block__desc">Question bank and STAR stories for speakable answers.</p>
-            <QuestionBankTab settings={settings} embedded onSettingsChange={applySettings} />
-          </div>
-        ) : null}
-
-        {section === 'web' ? (
-          <div className="hub-identity">
-            <h2>Web Search</h2>
-            <p className="hub-block__desc">
-              Live grounding is configured in Settings → Web. Provider:{' '}
-              <strong>{settings.webSearchProvider || 'duckduckgo'}</strong>
-              {settings.useWebSearch === false ? ' (disabled)' : ''}.
-            </p>
-            <button type="button" className="primary" onClick={onSave}>
-              Save &amp; continue
-            </button>
-          </div>
-        ) : null}
-
-        {section === 'agent' ? (
-          <div className="hub-identity">
-            <h2>Agent</h2>
-            <p className="hub-block__desc">
-              Give this profile its own agent identity, behavior, skills, and optional provider override.
+              This profile acts as an agent with its own identity, skills, and optional provider override.
             </p>
             {(() => {
               const agent = resolveAgent(active, settings);
@@ -545,7 +457,7 @@ export function ProfilePanel({ settings, onChange, onSave, status, onClose }: Pr
               };
 
               return (
-                <div className="hub-identity">
+                <>
                   <div className="field">
                     <label>Agent display name</label>
                     <input
@@ -642,9 +554,94 @@ export function ProfilePanel({ settings, onChange, onSave, status, onClose }: Pr
                   <button type="button" className="primary" onClick={onSave}>
                     Save agent
                   </button>
-                </div>
+                </>
               );
             })()}
+          </div>
+        ) : null}
+
+        {section === 'company' ? (
+          <div className="hub-identity">
+            <h2>Company Intel</h2>
+            <p className="hub-block__desc">
+              Add a name and/or careers URL. Research pulls live web results into this profile.
+            </p>
+            <div className="field">
+              <label>Company name</label>
+              <input
+                value={active.companyName || ''}
+                onChange={(e) => patchActive({ companyName: e.target.value })}
+                placeholder="e.g. Acme Corp"
+              />
+            </div>
+            <div className="field">
+              <label>Company / careers URL</label>
+              <input
+                value={active.companyUrl || ''}
+                onChange={(e) => {
+                  const companyUrl = e.target.value;
+                  const guessed =
+                    !active.companyName.trim() && companyUrl.trim()
+                      ? guessCompanyFromUrl(companyUrl)
+                      : active.companyName;
+                  patchActive({ companyUrl, companyName: guessed });
+                }}
+                placeholder="https://acme.com/careers"
+              />
+            </div>
+            <div className="row" style={{ marginBottom: 12 }}>
+              <button type="button" style={{ height: 40 }} onClick={() => void researchCompany()} disabled={Boolean(busy)}>
+                Research company
+              </button>
+              <button
+                type="button"
+                className="primary"
+                style={{ height: 40 }}
+                onClick={() => void assemblePrep()}
+                disabled={Boolean(busy)}
+              >
+                Assemble interview prep
+              </button>
+            </div>
+            <div className="field">
+              <label>Company intel</label>
+              <textarea
+                rows={10}
+                value={active.companyIntel || ''}
+                onChange={(e) => patchActive({ companyIntel: e.target.value })}
+                placeholder="Research results appear here…"
+              />
+            </div>
+          </div>
+        ) : null}
+
+        {section === 'documents' ? (
+          <div className="hub-identity">
+            <h2>Role Insight</h2>
+            <p className="hub-block__desc">Attach reference docs for retrieval during interviews.</p>
+            <DocumentsTab settings={settings} onSettingsChange={applySettings} embedded />
+          </div>
+        ) : null}
+
+        {section === 'questions' ? (
+          <div className="hub-identity">
+            <h2>Cover Letter / STAR</h2>
+            <p className="hub-block__desc">Question bank and STAR stories for speakable answers.</p>
+            <QuestionBankTab settings={settings} embedded onSettingsChange={applySettings} />
+          </div>
+        ) : null}
+
+        {section === 'web' ? (
+          <div className="hub-identity">
+            <h2>Web Search</h2>
+            <p className="hub-block__desc">
+              Live grounding is configured in Settings → Web. Provider:{' '}
+              <strong>{settings.webSearchProvider || 'duckduckgo'}</strong>
+              {settings.useWebSearch === false ? ' (disabled)' : ''}.
+            </p>
+            <button type="button" className="primary" onClick={onSave}>
+              Save &amp; continue
+            </button>
           </div>
         ) : null}
 

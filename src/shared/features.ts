@@ -88,7 +88,7 @@ export const FEATURES: FeatureDef[] = [
   },
   {
     id: 'stealth',
-    name: 'Stealth / undetectable',
+    name: 'Low-profile (stealth)',
     description:
       'Windows WDA_EXCLUDEFROMCAPTURE + macOS NSWindowSharingNone via setContentProtection; skip taskbar; Linux share-tab tips.',
     status: 'live',

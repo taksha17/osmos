@@ -3,6 +3,7 @@ import type { AppSettings } from '@shared/types';
 import { activeSavedProfile, profileSummary } from '@shared/profiles';
 import { resolveAgent } from '@shared/agents';
 import { DEFAULT_SAVED_PROFILE } from '@shared/types';
+import startOsmosIcon from '@resources/Start_Osmos_64.png';
 
 type Session = {
   id: string;
@@ -240,12 +241,12 @@ export function HomeDashboard({
               type="button"
               className={`home-detect${undetectable ? ' home-detect--on' : ''}`}
               onClick={() => void toggleUndetectable()}
-              title="Stealth / undetectable overlay"
+              title="Low-profile mode"
             >
               <span className="home-detect__ghost" aria-hidden>
                 ◌
               </span>
-              <span>Undetectable</span>
+              <span>Low-profile</span>
               <span className={`home-switch${undetectable ? ' home-switch--on' : ''}`} aria-hidden>
                 <span className="home-switch__knob" />
               </span>
@@ -262,7 +263,7 @@ export function HomeDashboard({
         <button type="button" className="home-start" onClick={onStartOsmos}>
           <span className="home-start__mark" aria-hidden>
             <img
-              src="@resources/Start_Osmos_64.png"
+              src={startOsmosIcon}
               alt="OSMOS"
               width={28}
               height={28}

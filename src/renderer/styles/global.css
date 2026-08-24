@@ -2138,6 +2138,28 @@ body.overlay-route {
   color: #9ee8ff;
   background: rgba(56, 217, 255, 0.12);
 }
+.overlay-pill__stealth {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.6);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  font-size: 0.78rem;
+  -webkit-app-region: no-drag;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.overlay-pill__stealth:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.overlay-pill__stealth--on {
+  border-color: rgba(59, 130, 246, 0.45);
+  color: #9dc0ff;
+  background: rgba(59, 130, 246, 0.14);
+}
 .overlay-root--paused .overlay-card {
   opacity: 0.72;
 }
@@ -2573,6 +2595,11 @@ body.overlay-route {
   font-size: 0.9rem;
   line-height: 1.45;
   max-width: 52ch;
+}
+.hub-divider {
+  margin: 4px 0 2px;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 .hub-upload {
   display: flex;
