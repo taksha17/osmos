@@ -75,6 +75,7 @@ export function useSystemAudioStt(settings: AppSettings | null) {
     let nextSeq = 0;
     const held = new Map<number, string | null>();
     let silentStreak = 0;
+    let lastWinDiagnostics: { trackLevel?: number; wavRms?: number } | null = null;
 
     const emitReady = () => {
       while (held.has(nextEmit)) {
@@ -90,11 +91,27 @@ export function useSystemAudioStt(settings: AppSettings | null) {
       if (silent) {
         silentStreak += 1;
         if (silentStreak >= 4) {
-          setError(
-            await isWindowsPlatform()
-              ? 'Windows loopback is active but still silent. Start Smart with a click once, then play audio on speakers and retry.'
-              : 'System audio is active but still silent. Play audio on speakers and retry.',
-          );
+          const win = await isWindowsPlatform();
+          if (win && lastWinDiagnostics) {
+            const { trackLevel, wavRms } = lastWinDiagnostics;
+            if ((trackLevel ?? 0) > 0.01 && (wavRms ?? 0) < 0.006) {
+              // Track carries audio but our recorder/decoder flattened it —
+              // that is OUR bug, say so plainly.
+              setError(
+                `Windows loopback bug: track has audio (level ${trackLevel}) but converted WAV is silent. Please report this with your Windows audio device name.`,
+              );
+            } else {
+              setError(
+                'Hearing silence from Windows loopback. Check: ① media plays through the DEFAULT output device (Settings → Sound), ② Spatial sound (Atmos/Realtek enhancements) is off for that device, ③ no app holds the device in exclusive mode.',
+              );
+            }
+          } else {
+            setError(
+              win
+                ? 'Windows loopback is active but still silent. Play audio on speakers, then toggle ⚡ Smart off/on once.'
+                : 'System audio is active but still silent. Play audio on speakers and retry.',
+            );
+          }
         }
         setPartial(
           silentStreak > 2
@@ -189,7 +206,10 @@ export function useSystemAudioStt(settings: AppSettings | null) {
         if (!activeRef.current || generationRef.current !== gen) break;
         try {
           const capture = preferElectronLoopback
-            ? await captureElectronLoopback(CONTINUOUS_CHUNK_MS)
+            ? await captureElectronLoopback(CONTINUOUS_CHUNK_MS).then((r) => {
+                lastWinDiagnostics = r as { trackLevel?: number; wavRms?: number };
+                return r;
+              })
             : await window.osmos.captureSystemAudio({
                 durationMs: CONTINUOUS_CHUNK_MS,
                 device: settingsRef.current?.systemAudioDevice || undefined,

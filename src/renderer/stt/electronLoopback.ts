@@ -16,6 +16,10 @@ export type ElectronLoopbackResult = {
   mimeType?: string;
   error?: string;
   silent?: boolean;
+  /** Max short-window RMS measured on the raw loopback TRACK during capture. */
+  trackLevel?: number;
+  /** RMS computed from the converted WAV (post MediaRecorder/decode). */
+  wavRms?: number;
 };
 
 let sharedStream: MediaStream | null = null;
@@ -76,7 +80,13 @@ async function openLoopbackStream(): Promise<MediaStream> {
   try {
     logger.log('[electronLoopback] Calling navigator.mediaDevices.getDisplayMedia...');
     const stream = await navigator.mediaDevices.getDisplayMedia({
-      audio: true,
+      // Voice DSP (NS/AGC) on the loopback pin can flatten music/system audio
+      // to digital silence on some Windows audio stacks — always opt out.
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
       video: {
         width: 4,
         height: 4,
@@ -198,7 +208,51 @@ export async function captureElectronLoopback(
     recorder = new MediaRecorder(audioOnlyStream);
   }
 
+  // Ground-truth level straight off the track (bypasses recorder/decoder):
+  // distinguishes "OS delivered silence" from "our conversion lost it".
+  let ctxRef: AudioContext | null = null;
+  let srcRef: MediaStreamAudioSourceNode | null = null;
+  let analyser: AnalyserNode | null = null;
+  let pollTimer: number | null = null;
+  let trackLevel = 0;
+
   return new Promise((resolve) => {
+    try {
+      const Ctx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      ctxRef = new Ctx();
+      srcRef = ctxRef.createMediaStreamSource(audioOnlyStream);
+      analyser = ctxRef.createAnalyser();
+      analyser.fftSize = 1024;
+      srcRef.connect(analyser);
+      const buf = new Uint8Array(analyser.fftSize);
+      pollTimer = window.setInterval(() => {
+        if (!analyser) return;
+        analyser.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) {
+          const v = (buf[i]! - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / buf.length);
+        if (rms > trackLevel) trackLevel = rms;
+      }, 80);
+    } catch (e) {
+      logger.warn('[electronLoopback] Track analyser unavailable:', e);
+    }
+
+    const finish = (result: ElectronLoopbackResult) => {
+      if (pollTimer !== null) window.clearInterval(pollTimer);
+      try {
+        srcRef?.disconnect();
+      } catch {
+        /* ignore */
+      }
+      void ctxRef?.close().catch(() => undefined);
+      resolve({ ...result, trackLevel: Number(trackLevel.toFixed(5)) });
+    };
+
     const ms = Math.max(800, durationMs);
     const timer = setTimeout(() => {
       try {
@@ -219,7 +273,7 @@ export async function captureElectronLoopback(
     recorder.onerror = (e) => {
       logger.error('[electronLoopback] MediaRecorder error event:', e);
       clearTimeout(timer);
-      resolve({ ok: false, error: 'MediaRecorder failed during Windows loopback capture' });
+      finish({ ok: false, error: 'MediaRecorder failed during Windows loopback capture' });
     };
     recorder.onstop = async () => {
       clearTimeout(timer);
@@ -227,22 +281,26 @@ export async function captureElectronLoopback(
         const webm = new Blob(chunks, { type: recorder.mimeType || mimeType });
         logger.log('[electronLoopback] Recorded WebM blob size:', webm.size);
         if (webm.size < 256) {
-          resolve({ ok: true, base64: '', mimeType: 'audio/wav', silent: true });
+          logger.log('[electronLoopback] Empty recording — trackLevel:', trackLevel);
+          finish({ ok: true, base64: '', mimeType: 'audio/wav', silent: true });
           return;
         }
         const wav = await recordingToWavBase64(webm);
-        logger.log('[electronLoopback] Converted to WAV, base64 length:', wav.base64.length);
         const rms = rmsFromWavBase64(wav.base64);
-        logger.log('[electronLoopback] Captured RMS volume:', rms);
-        resolve({
+        logger.log(
+          '[electronLoopback] Captured WAV rms:', rms,
+          '| trackLevel:', trackLevel,
+        );
+        finish({
           ok: true,
           base64: wav.base64,
           mimeType: 'audio/wav',
           silent: rms < 0.006,
+          wavRms: Number(rms.toFixed(5)),
         });
       } catch (e) {
         logger.error('[electronLoopback] Failed during post-processing:', e);
-        resolve({
+        finish({
           ok: false,
           error:
             e instanceof Error
@@ -258,7 +316,7 @@ export async function captureElectronLoopback(
     } catch (e) {
       clearTimeout(timer);
       logger.error('[electronLoopback] Failed to start MediaRecorder:', e);
-      resolve({
+      finish({
         ok: false,
         error: e instanceof Error ? e.message : 'Failed to start loopback recorder',
       });
