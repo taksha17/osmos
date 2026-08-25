@@ -27,13 +27,18 @@ const exeName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
 const outExe = path.join(outDir, exeName);
 
 const BASE = 'https://github.com/BtbN/FFmpeg-Builds/releases/latest/download';
+/**
+ * BtbN no longer publishes macOS assets in any release, so darwin compiles a
+ * pinned upstream source tarball instead. Minimal config keeps the license
+ * clean (LGPL — no GPL libs are autodetected or enabled) and trims build time;
+ * avfoundation is a builtin demuxer and stays available.
+ */
+const FFMPEG_VERSION = '7.1.1';
 function assetFor(platform, arch) {
   if (platform === 'win32') return `${BASE}/ffmpeg-master-latest-win64-lgpl.zip`;
   if (platform === 'linux') return `${BASE}/ffmpeg-master-latest-linux64-lgpl.tar.xz`;
   if (platform === 'darwin')
-    return arch === 'arm64'
-      ? `${BASE}/ffmpeg-master-latest-macosarm64-lgpl.tar.xz`
-      : `${BASE}/ffmpeg-master-latest-macos64-lgpl.tar.xz`;
+    return `https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz`;
   return null;
 }
 
@@ -129,8 +134,24 @@ async function main() {
   fs.rmSync(extractDir, { recursive: true, force: true });
   try {
     extract(archive, extractDir);
-    const found = findFfmpegBinary(extractDir);
-    if (!found) throw new Error(`${exeName} not found inside downloaded archive`);
+    let found;
+    if (process.platform === 'darwin') {
+      // Compile minimal LGPL ffmpeg from pinned source (BtbN ships no macOS
+      // builds). --disable-autodetect guarantees no GPL libraries link in;
+      // avfoundation is builtin and remains enabled.
+      const srcDir = path.join(extractDir, `ffmpeg-${FFMPEG_VERSION}`);
+      const os = await import('node:os');
+      const jobs = Math.max(2, os.cpus().length);
+      execFileSync('./configure', ['--disable-debug', '--disable-doc', '--disable-autodetect', '--disable-network', '--disable-ffplay', '--disable-ffprobe'], {
+        cwd: srcDir,
+        stdio: 'inherit',
+      });
+      execFileSync('make', [`-j${jobs}`, 'ffmpeg'], { cwd: srcDir, stdio: 'inherit' });
+      found = path.join(srcDir, 'ffmpeg');
+    } else {
+      found = findFfmpegBinary(extractDir);
+    }
+    if (!found) throw new Error(`${exeName} not produced`);
     fs.copyFileSync(found, outExe);
     fs.chmodSync(outExe, 0o755);
     // Stable staging dir consumed by electron-builder extraResources on ANY

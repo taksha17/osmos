@@ -38,6 +38,23 @@ if (!python) {
   process.exit(1);
 }
 
+// CI runners don't ship PyInstaller — self-provision so pack steps never fail
+// on environment drift (primary install lives in the workflow itself).
+const hasPy = spawnSync(python, ['-c', 'import PyInstaller'], { encoding: 'utf8' }).status === 0;
+if (!hasPy) {
+  console.log('[audio-worker] PyInstaller missing — installing…');
+  const pipArgs =
+    process.platform !== 'win32'
+      ? ['-m', 'pip', 'install', '--user', '--break-system-packages', 'pyinstaller', 'numpy']
+      : ['-m', 'pip', 'install', 'pyinstaller', 'numpy'];
+  const first = spawnSync(python, pipArgs, { stdio: 'inherit' });
+  if (first.status !== 0 && process.platform !== 'win32') {
+    spawnSync(python, ['-m', 'pip', 'install', '--user', 'pyinstaller', 'numpy'], {
+      stdio: 'inherit',
+    });
+  }
+}
+
 if (!fs.existsSync(worker)) {
   console.error(`[audio-worker] Worker script missing at ${worker}`);
   process.exit(1);

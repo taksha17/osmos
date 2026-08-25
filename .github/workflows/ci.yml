@@ -48,6 +48,8 @@ jobs:
           restore-keys: |
             electron-builder-linux-
       - run: npm ci
+      - name: Install Python build deps (audio worker)
+        run: python3 -m pip install --user --break-system-packages pyinstaller numpy || python3 -m pip install --user pyinstaller numpy
       - name: Package Linux with retry
         uses: nick-fields/retry@v2
         with:
@@ -85,8 +87,8 @@ jobs:
           restore-keys: |
             electron-builder-windows-
       - run: npm ci
-      - name: Vendor Windows ffmpeg
-        run: npm run ensure:ffmpeg-win
+      - name: Install Python build deps (audio worker)
+        run: python -m pip install --upgrade pip pyinstaller numpy
       - name: Package Windows with retry
         uses: nick-fields/retry@v2
         with:
@@ -122,10 +124,12 @@ jobs:
           restore-keys: |
             electron-builder-macos-
       - run: npm ci
+      - name: Install Python build deps (audio worker)
+        run: python3 -m pip install --upgrade pyinstaller numpy
       - name: Package macOS with retry
         uses: nick-fields/retry@v2
         with:
-          timeout_minutes: 30
+          timeout_minutes: 60
           max_attempts: 3
           retry_on: error
           command: npm run pack:mac
