@@ -125,7 +125,7 @@ jobs:
             electron-builder-macos-
       - run: npm ci
       - name: Install Python build deps (audio worker)
-        run: python3 -m pip install --upgrade pyinstaller numpy
+        run: python3 -m pip install --user pyinstaller numpy || python3 -m pip install --user --break-system-packages pyinstaller numpy
       - name: Package macOS with retry
         uses: nick-fields/retry@v2
         with:
