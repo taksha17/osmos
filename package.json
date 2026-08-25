@@ -1,7 +1,7 @@
 {
   "name": "osmos",
   "productName": "OSMOS",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "OSMOS — open-source, cross-platform AI interview & meeting copilot for Linux, macOS, and Windows.",
   "author": {
     "name": "OSMOS contributors",

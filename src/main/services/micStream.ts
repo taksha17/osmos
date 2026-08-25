@@ -141,7 +141,11 @@ export class MicStream extends EventEmitter {
     if (process.platform === 'win32') {
       const names: string[] = await listDshowAudioInputs();
       if (!names.length) {
-        return { ok: false, error: 'No DirectShow microphones found.' };
+        return {
+          ok: false,
+          error:
+            'No DirectShow microphones found. Check: ① Windows Settings → Privacy & security → Microphone → allow desktop apps; ② a mic is enabled in Sound settings; then toggle ⚡ Smart again.',
+        };
       }
       const wanted = (device || '').trim().toLowerCase();
       const pick =

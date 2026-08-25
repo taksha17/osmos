@@ -3,7 +3,7 @@ import type { AppSettings, CaptureResult, SystemAudioResponse } from '../../shar
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import { findOnPath, resolveCaptureTool, resolveFfmpeg, safeSpawnCwd } from '../services/resolveBin.js';
 import {
   listLinuxAudioDevices,
@@ -272,6 +272,47 @@ export function listAvAudioInputs(): Promise<Array<{ index: number; name: string
 
 /** DirectShow audio input names for continuous mic capture (Windows). */
 export function listDshowAudioInputs(): Promise<string[]> {
+  const parseDshow = (stderr: string): string[] => {
+    const section = stderr.split(/DirectShow audio devices/i)[1] || '';
+    const names: string[] = [];
+    const re = /"([^"]+)"/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(section))) {
+      const n = m[1]!.trim();
+      if (n && !/^alternative name/i.test(n)) names.push(n);
+    }
+    return names;
+  };
+
+  /** Fallback when ffmpeg dshow probing yields nothing (privacy block, odd
+   * builds): Win32_SoundDevice friendly names usually match dshow labels. */
+  const psSoundDevices = (): Promise<string[]> =>
+    new Promise((resolve) => {
+      try {
+        execFile(
+          'powershell.exe',
+          [
+            '-NoProfile',
+            '-Command',
+            "Get-CimInstance Win32_SoundDevice | Where-Object { $_.Status -eq 'OK' } | ForEach-Object { $_.Name }",
+          ],
+          { windowsHide: true, timeout: 8000 },
+          (err: Error | null, stdout: string | Buffer) => {
+            if (err || !stdout) return resolve([]);
+            const out = String(stdout);
+            resolve(
+              out
+                .split(/\r?\n/)
+                .map((l: string) => l.trim())
+                .filter(Boolean),
+            );
+          },
+        );
+      } catch {
+        resolve([]);
+      }
+    });
+
   return new Promise((resolve) => {
     const ffmpeg = resolveFfmpeg();
     if (!ffmpeg || process.platform !== 'win32') {
@@ -279,43 +320,47 @@ export function listDshowAudioInputs(): Promise<string[]> {
       return;
     }
     let child;
+    let stderr = '';
+    let settled = false;
+    const done = async () => {
+      if (settled) return;
+      settled = true;
+      let names = parseDshow(stderr);
+      if (!names.length) {
+        console.warn('[dshow] no audio devices parsed from ffmpeg stderr; trying PowerShell fallback');
+        names = await psSoundDevices();
+      }
+      resolve(names);
+    };
     try {
       child = spawn(
         ffmpeg,
         ['-hide_banner', '-list_devices', 'true', '-f', 'dshow', '-i', 'dummy'],
         { cwd: safeSpawnCwd(), windowsHide: true },
       );
-    } catch {
-      resolve([]);
+    } catch (e) {
+      console.error('[dshow] spawn failed:', e);
+      void done();
       return;
     }
-    let stderr = '';
     const timer = setTimeout(() => {
       try {
         child.kill('SIGTERM');
       } catch {
         /* ignore */
       }
-    }, 5000);
+    }, 6000);
     child.stderr?.on('data', (c: Buffer) => {
       stderr += String(c);
     });
-    const finish = () => {
+    child.on('close', () => {
       clearTimeout(timer);
-      const section = stderr.split(/DirectShow audio devices/i)[1] || '';
-      const names: string[] = [];
-      const re = /"([^"]+)"/g;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(section))) {
-        const n = m[1]!.trim();
-        if (n && !/^alternative name/i.test(n)) names.push(n);
-      }
-      resolve(names);
-    };
-    child.on('close', finish);
-    child.on('error', () => {
+      void done();
+    });
+    child.on('error', (err) => {
       clearTimeout(timer);
-      resolve([]);
+      console.error('[dshow] ffmpeg process error:', err.message);
+      void done();
     });
   });
 }
