@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FeatureDef } from '@shared/features';
 import type { AppSettings, AudioDeviceInfo, UpdateStatus, WebSearchProvider } from '@shared/types';
 import { describeAudioCaptureProfile, getAudioCaptureProfile } from '@shared/audioCaptureProfile';
@@ -65,6 +65,79 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose 
   const [section, setSection] = useState<Section>('general');
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
+  const [micTest, setMicTest] = useState<{
+    on: boolean;
+    level: number;
+    peak: number;
+    label: string;
+  }>({ on: false, level: 0, peak: 0, label: '' });
+  const micTestCleanupRef = useRef<null | (() => void)>(null);
+
+  const stopMicTest = useCallback(() => {
+    micTestCleanupRef.current?.();
+    micTestCleanupRef.current = null;
+    setMicTest({ on: false, level: 0, peak: 0, label: '' });
+  }, []);
+
+  const startMicTest = useCallback(async () => {
+    stopMicTest();
+    setError('');
+    try {
+      const dev = settings?.micDeviceId || '';
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: dev ? { deviceId: { exact: dev } } : true,
+        video: false,
+      });
+      const track = stream.getAudioTracks()[0];
+      const label = track?.label || 'Selected microphone';
+      const Ctx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new Ctx();
+      const srcNode = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      srcNode.connect(analyser);
+      const buf = new Uint8Array(analyser.fftSize);
+      let peak = 0;
+
+      const timer = window.setInterval(() => {
+        analyser.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) {
+          const v = (buf[i]! - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / buf.length);
+        // Perceptual scaling: typical speech lands in the 20-80% band.
+        const level = Math.min(100, Math.round(Math.sqrt(rms) * 260));
+        peak = Math.max(level, peak * 0.94);
+        setMicTest({ on: true, level, peak: Math.round(peak), label });
+      }, 100);
+
+      micTestCleanupRef.current = () => {
+        window.clearInterval(timer);
+        try {
+          void ctx.close();
+        } catch {
+          /* ignore */
+        }
+        stream.getTracks().forEach((t) => t.stop());
+      };
+      setMicTest({ on: true, level: 0, peak: 0, label });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setMicTest({ on: false, level: 0, peak: 0, label: '' });
+    }
+  }, [settings?.micDeviceId, stopMicTest]);
+
+  // Restart the meter when the selected device changes mid-test; always
+  // release the microphone when the panel unmounts.
+  useEffect(() => {
+    if (micTest.on) void startMicTest();
+    return () => micTestCleanupRef.current?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings?.micDeviceId]);
   const [models, setModels] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [nativeMonitors, setNativeMonitors] = useState<AudioDeviceInfo[]>([]);
@@ -818,28 +891,34 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose 
                     className="primary"
                     style={{ height: 38, marginLeft: 8 }}
                     type="button"
-                    onClick={async () => {
-                      setStatus('Testing microphone…');
-                      setError('');
-                      try {
-                        const devices = await navigator.mediaDevices.enumerateDevices();
-                        const inputs = devices.filter((d) => d.kind === 'audioinput');
-                        if (inputs.length === 0) {
-                          setError('No audio input devices found');
-                          return;
-                        }
-                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                        stream.getTracks().forEach((t) => t.stop());
-                        setStatus('Microphone capturing audio');
-                        setTimeout(() => setStatus(''), 2000);
-                      } catch (e) {
-                        setError(e instanceof Error ? e.message : String(e));
-                      }
-                    }}
+                    onClick={() => (micTest.on ? stopMicTest() : void startMicTest())}
                   >
-                    Test
+                    {micTest.on ? 'Stop' : '🎙 Test mic'}
                   </button>
                 </div>
+                {micTest.on ? (
+                  <div className="mic-test" style={{ marginTop: 10 }}>
+                    <div className="mic-meter" aria-hidden>
+                      <div
+                        className="mic-meter__fill"
+                        style={{ width: `${Math.min(100, micTest.level)}%` }}
+                      />
+                      <div
+                        className="mic-meter__peak"
+                        style={{ left: `${Math.min(100, micTest.peak)}%` }}
+                      />
+                    </div>
+                    <div className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
+                      <span className="meta">
+                        {micTest.level > 2 ? 'Hearing audio ✓' : 'Silence… speak now'}
+                      </span>
+                      <span className="meta" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                        {micTest.level}%
+                      </span>
+                    </div>
+                    <p className="meta" style={{ margin: '4px 0 0' }}>{micTest.label}</p>
+                  </div>
+                ) : null}
               </div>
 
               <div className="field">
@@ -959,6 +1038,26 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose 
                 />{' '}
                 Enable stealth mode (hide Osmos from screen share)
               </label>
+
+                <div className="field" style={{ marginTop: 14 }}>
+                  <label>Local data</label>
+                  <button
+                    type="button"
+                    style={{ height: 38 }}
+                    onClick={() => {
+                      if (!window.confirm('Delete ALL saved sessions and transcripts?')) return;
+                      void window.osmos.clearAllHistory().then(() => {
+                        setStatus('All sessions and transcripts deleted');
+                        setTimeout(() => setStatus(''), 2500);
+                      });
+                    }}
+                  >
+                    Delete all sessions & transcripts
+                  </button>
+                  <p className="meta" style={{ margin: '6px 0 0' }}>
+                    Transcripts of other people are personal data — delete what you don't need.
+                  </p>
+                </div>
 
               {settings.stealthEnabled ? (
                 <p className="meta" style={{ marginBottom: 14 }}>

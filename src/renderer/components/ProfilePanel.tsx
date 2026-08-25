@@ -6,7 +6,7 @@ import { resolveAgent, effectiveProvider, allSupportedSkills, allSupportedMcps, 
 import { DocumentsTab } from './DocumentsTab';
 import { QuestionBankTab } from './QuestionBankTab';
 
-type ProfileSection = 'identity' | 'profile' | 'company' | 'documents' | 'questions' | 'web';
+type ProfileSection = 'identity' | 'profile' | 'company' | 'documents' | 'questions';
 
 type Props = {
   settings: AppSettings;
@@ -17,12 +17,11 @@ type Props = {
 };
 
 const NAV: Array<{ id: ProfileSection; label: string; icon: string }> = [
-  { id: 'identity', label: 'Identity', icon: '◎' },
+  { id: 'identity', label: 'Resume & JD', icon: '◎' },
   { id: 'profile', label: 'Profile', icon: '◉' },
   { id: 'company', label: 'Company Intel', icon: '▣' },
   { id: 'documents', label: 'Role Insight', icon: '▤' },
   { id: 'questions', label: 'Cover Letter', icon: '✎' },
-  { id: 'web', label: 'Web Search', icon: '⌕' },
 ];
 
 function readInitialSection(): ProfileSection {
@@ -628,20 +627,6 @@ export function ProfilePanel({ settings, onChange, onSave, status, onClose }: Pr
             <h2>Cover Letter / STAR</h2>
             <p className="hub-block__desc">Question bank and STAR stories for speakable answers.</p>
             <QuestionBankTab settings={settings} embedded onSettingsChange={applySettings} />
-          </div>
-        ) : null}
-
-        {section === 'web' ? (
-          <div className="hub-identity">
-            <h2>Web Search</h2>
-            <p className="hub-block__desc">
-              Live grounding is configured in Settings → Web. Provider:{' '}
-              <strong>{settings.webSearchProvider || 'duckduckgo'}</strong>
-              {settings.useWebSearch === false ? ' (disabled)' : ''}.
-            </p>
-            <button type="button" className="primary" onClick={onSave}>
-              Save &amp; continue
-            </button>
           </div>
         ) : null}
 

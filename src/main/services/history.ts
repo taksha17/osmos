@@ -45,3 +45,8 @@ export function deleteSession(id: string): ChatSession[] {
   saveHistory(all);
   return all;
 }
+
+export function clearAllHistory(): ChatSession[] {
+  saveHistory([]);
+  return [];
+}

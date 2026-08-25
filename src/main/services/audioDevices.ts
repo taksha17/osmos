@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
+  humanizeLinuxAudioName,
   preferredLinuxInputId,
   preferredLinuxMonitorId,
   sanitizeLinuxInputDevices,
@@ -51,24 +52,77 @@ function parseShortList(out: string): NamedAudioDevice[] {
   return devices;
 }
 
+/**
+ * Long-form `pactl list sinks|sources` carries human descriptions
+ * ("Built-in Audio Analog Stereo") that short mode lacks. Returns a map of
+ * ALSA id -> description so pickers can show real names, not pci strings.
+ */
+function parseDescriptions(out: string, kind: 'Sink' | 'Source'): Map<string, string> {
+  const map = new Map<string, string>();
+  let currentId = '';
+  let desc = '';
+  const flush = () => {
+    if (currentId && desc) map.set(currentId, desc);
+    currentId = '';
+    desc = '';
+  };
+  for (const line of out.split('\n')) {
+    if (line.startsWith(`${kind} #`)) {
+      flush();
+      continue;
+    }
+    const nameMatch = /^\s*Name:\s*(.+)$/.exec(line);
+    if (nameMatch) {
+      flush();
+      currentId = nameMatch[1]!.trim();
+      continue;
+    }
+    const descMatch = /^\s*Description:\s*(.+)$/.exec(line);
+    if (descMatch && !desc) desc = descMatch[1].trim();
+  }
+  flush();
+  return map;
+}
+
 export async function listLinuxAudioDevices(): Promise<AudioDeviceList> {
   try {
     const [sourcesOut, sinksOut, defaultSink, defaultSource] = await Promise.all([
       pactlListShort('sources'),
       pactlListShort('sinks'),
+      pactl(['list', 'sources']),
+      pactl(['list', 'sinks']),
       pactl(['get-default-sink']).catch(() => ''),
       pactl(['get-default-source']).catch(() => ''),
     ]);
 
-    const rawSources = parseShortList(sourcesOut);
-    const rawSinks = parseShortList(sinksOut);
+    const sinkDescs = parseDescriptions(sinksOut, 'Sink');
+    const sourceDescs = parseDescriptions(sourcesOut, 'Source');
+
+    const rawSources = parseShortList(
+      sourcesOut
+        .split('\n')
+        .filter((l) => /^\s*Name:\s*/.test(l))
+        .map((l) => `0 ${/^\s*Name:\s*(.+)$/.exec(l)![1]!.trim()}`)
+        .join('\n'),
+    );
+    const rawSinks = parseShortList(
+      sinksOut
+        .split('\n')
+        .filter((l) => /^\s*Name:\s*/.test(l))
+        .map((l) => `0 ${/^\s*Name:\s*(.+)$/.exec(l)![1]!.trim()}`)
+        .join('\n'),
+    );
+
     const monitors = rawSources
       .filter((s) => s.id.endsWith('.monitor'))
       .map((s) => ({ id: s.id, name: s.name }));
     const inputs = sanitizeLinuxInputDevices(
       rawSources.filter((s) => !s.id.endsWith('.monitor')),
     );
-    const outputs = sanitizeLinuxOutputDevices(rawSinks);
+    const outputs = sanitizeLinuxOutputDevices(rawSinks).map((d) => ({
+      id: d.id,
+      name: humanizeLinuxAudioName(sinkDescs.get(d.id) || d.name),
+    }));
     const hasRealDevices =
       inputs.some((d) => d.id !== 'default') || monitors.some((d) => d.id !== '@DEFAULT_MONITOR@');
 
@@ -78,9 +132,11 @@ export async function listLinuxAudioDevices(): Promise<AudioDeviceList> {
     return {
       inputs,
       outputs,
+      // Friendly labels from pactl Description ("Built-in Audio Analog Stereo");
+      // monitor descriptions read "Monitor of X" → strip to just "X".
       monitors: monitors.map((m) => ({
         id: m.id,
-        name: m.name.replace(/\.monitor$/i, ' (meeting audio)'),
+        name: `${humanizeLinuxAudioName((sourceDescs.get(m.id) || m.name).replace(/^Monitor of /i, ''))} (meeting audio)`,
       })),
       preferredInputId,
       preferredMonitorId,

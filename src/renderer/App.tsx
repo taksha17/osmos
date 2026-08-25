@@ -82,6 +82,26 @@ declare global {
         }) => void,
       ) => () => void;
       onSystemAudioStatus: (listener: (ev: { text: string }) => void) => () => void;
+      startMicListen: (payload?: { device?: string; chunkMs?: number }) =>
+        Promise<{ ok: boolean; error?: string; source?: string }>;
+      stopMicListen: () => Promise<{ ok: boolean }>;
+      onMicChunk: (
+        listener: (chunk: {
+          ok: boolean;
+          base64?: string;
+          mimeType?: string;
+          error?: string;
+          rms?: number;
+          silent?: boolean;
+        }) => void,
+      ) => () => void;
+      onMicStatus: (listener: (ev: { text: string }) => void) => () => void;
+      clearAllHistory: () => Promise<{ ok: boolean; error?: string }>;
+      startScreenLive: (payload?: { intervalMs?: number }) =>
+        Promise<{ ok: boolean; error?: string }>;
+      stopScreenLive: () => Promise<{ ok: boolean }>;
+      screenLiveCapable: () => Promise<boolean>;
+      onScreenLiveText: (listener: (ev: { text: string; at: number }) => void) => () => void;
       listAudioDevices: () => Promise<import('@shared/types').AudioDevicesResponse>;
       captureMicAudio: (payload?: { durationMs?: number; device?: string }) =>
         Promise<{ ok: boolean; base64?: string; mimeType?: string; error?: string }>;
@@ -426,6 +446,11 @@ function LauncherApp() {
 }
 
 export default function App() {
-  if (isOverlayRoute()) return <OverlayApp />;
+  if (isOverlayRoute())
+    return (
+      <ErrorBoundary>
+        <OverlayApp />
+      </ErrorBoundary>
+    );
   return <LauncherApp />;
 }

@@ -165,6 +165,7 @@ function ensureServe(): Promise<void> {
           ...process.env,
           OSMOS_ROOT: root,
           UNCON_ROOT: root,
+          OSMOS_WHISPER_MODEL: process.env.OSMOS_WHISPER_MODEL || 'Xenova/whisper-base.en',
           // Help system Node find unpacked deps next to the worker.
           NODE_PATH: [path.join(root, 'node_modules'), process.env.NODE_PATH]
             .filter(Boolean)
@@ -287,6 +288,7 @@ function runOneShot(
           ...process.env,
           OSMOS_ROOT: root,
           UNCON_ROOT: root,
+          OSMOS_WHISPER_MODEL: process.env.OSMOS_WHISPER_MODEL || 'Xenova/whisper-base.en',
           NODE_PATH: [path.join(root, 'node_modules'), process.env.NODE_PATH]
             .filter(Boolean)
             .join(path.delimiter),

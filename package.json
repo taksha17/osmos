@@ -1,7 +1,7 @@
 {
   "name": "osmos",
   "productName": "OSMOS",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "OSMOS — open-source, cross-platform AI interview & meeting copilot for Linux, macOS, and Windows.",
   "author": {
     "name": "OSMOS contributors",
@@ -14,16 +14,18 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "predev": "node scripts/ensure-audio-worker.mjs",
     "build": "npm run build:renderer && npm run build:electron",
     "build:renderer": "vite build",
     "build:electron": "node scripts/build-electron.mjs",
+    "build:audio-worker": "node scripts/build-audio-worker.mjs",
     "start": "electron . --no-sandbox",
     "start:release": "node scripts/start-release.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
-    "pack": "npm run build && node scripts/pack.mjs",
-    "pack:linux": "npm run build && electron-builder --linux --publish never",
-    "pack:mac": "npm run build && electron-builder --mac --publish never",
-    "pack:win": "node scripts/ensure-ffmpeg-win.mjs && npm run build && electron-builder --win --publish never",
+    "pack": "npm run build && npm run build:audio-worker && node scripts/pack.mjs",
+    "pack:linux": "npm run build && npm run build:audio-worker && electron-builder --linux --publish never",
+    "pack:mac": "npm run build && npm run build:audio-worker && electron-builder --mac --publish never",
+    "pack:win": "node scripts/ensure-ffmpeg-win.mjs && npm run build && npm run build:audio-worker && electron-builder --win --publish never",
     "ensure:ffmpeg-win": "node scripts/ensure-ffmpeg-win.mjs",
     "pack:all": "node -e \"console.error('pack:all cannot cross-build mac/win from Linux (or vice versa). Use: npm run pack  (current OS), or pack:linux / pack:mac / pack:win on matching hosts / CI.'); process.exit(1)\""
   },
@@ -57,10 +59,20 @@
       "output": "release"
     },
     "publish": [],
+    "extraResources": [
+      {
+        "from": "binaries/audio-worker",
+        "to": "audio-worker",
+        "filter": [
+          "osmos-audio-worker*"
+        ]
+      }
+    ],
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
       "scripts/whisper-worker.mjs",
+      "src/python/**/*",
       "resources/icon.png",
       "resources/logo-ui.png",
       "resources/Start_Osmos_64.png",
@@ -76,6 +88,7 @@
     ],
     "asarUnpack": [
       "scripts/whisper-worker.mjs",
+      "src/python/**/*",
       "node_modules/@xenova/transformers/**/*",
       "node_modules/onnxruntime-node/**/*",
       "node_modules/onnxruntime-common/**/*",

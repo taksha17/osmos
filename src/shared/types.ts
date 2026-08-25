@@ -121,6 +121,10 @@ export type AppSettings = {
    * Uses loop-safe capture only (no Wayland portal loops).
    */
   continuousScreenAssist: boolean;
+  /** One-time migration flag: legacy 'system'-default installs move to 'both'. */
+  assistSourceMigrated?: boolean;
+  /** Explicit settings schema version — bump when a breaking migration runs. */
+  schemaVersion?: number;
   /** Optional loopback device (BlackHole name, WASAPI device, PipeWire source). Empty = auto. */
   systemAudioDevice: string;
   autoAskOnFinal: boolean;
@@ -172,7 +176,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sttProvider: 'local-whisper',
   sttLanguage: 'en-US',
   micDeviceId: '',
-  assistAudioSource: 'system',
+  assistAudioSource: 'both',
   continuousScreenAssist: true,
   systemAudioDevice: '',
   autoAskOnFinal: true,
@@ -268,8 +272,33 @@ export type SystemAudioResponse = {
 };
 
 export type AudioDeviceInfo = {
-  id: string;
-  name: string;
+   id: string;
+   name: string;
+   type?: string; // 'input' or 'output' or 'speaker' or 'microphone'
+   platform?: string;
+   capabilities?: string[];
+   sample_rates?: number[];
+   channel_counts?: number[];
+   is_default?: boolean;
+};
+
+export type PythonAudioDevicesResponse = {
+   ok: boolean;
+   inputs?: AudioDeviceInfo[];
+   outputs?: AudioDeviceInfo[];
+   preferredInputId?: string;
+   preferredOutputId?: string;
+   error?: string;
+};
+
+export type PythonAudioDeviceInfo = {
+   [key: string]: unknown;
+};
+
+export type PythonAudioCaptureResponse = {
+   ok: boolean;
+   error?: string;
+   message?: string;
 };
 
 export type AudioDevicesResponse = {

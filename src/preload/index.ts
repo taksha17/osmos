@@ -42,6 +42,39 @@ const api = {
       chunkMs: payload?.chunkMs ?? payload?.durationMs,
     }),
   stopSystemAudioListen: () => ipcRenderer.invoke('system:listen-stop'),
+  startMicListen: (payload?: { device?: string; chunkMs?: number }) =>
+    ipcRenderer.invoke('mic:listen-start', payload || {}),
+  stopMicListen: () => ipcRenderer.invoke('mic:listen-stop'),
+  onMicChunk: (
+    listener: (chunk: {
+      ok: boolean;
+      base64?: string;
+      mimeType?: string;
+      error?: string;
+      rms?: number;
+      silent?: boolean;
+    }) => void,
+  ) => {
+    const handler = (_e: Electron.IpcRendererEvent, chunk: Parameters<typeof listener>[0]) =>
+      listener(chunk);
+    ipcRenderer.on('mic:audio-chunk', handler);
+    return () => ipcRenderer.removeListener('mic:audio-chunk', handler);
+  },
+  onMicStatus: (listener: (ev: { text: string }) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, ev: { text: string }) => listener(ev);
+    ipcRenderer.on('mic:audio-status', handler);
+    return () => ipcRenderer.removeListener('mic:audio-status', handler);
+  },
+  listAudioDevicesPython: () => ipcRenderer.invoke('audio:list-devices-python'),
+  startAudioCapturePython: (payload?: {
+    sampleRate?: number;
+    channels?: number;
+    deviceId?: string;
+    audioSource?: 'system' | 'mic' | 'both';
+  }) => ipcRenderer.invoke('audio:start-capture-python', payload || {}),
+  stopAudioCapturePython: () => ipcRenderer.invoke('audio:stop-capture-python'),
+  getAudioDeviceInfoPython: (deviceId: string) =>
+    ipcRenderer.invoke('audio:get-device-info-python', deviceId),
   onSystemAudioChunk: (
     listener: (chunk: {
       ok: boolean;
@@ -160,6 +193,17 @@ const api = {
   },
   resetOverlayIdle: () => ipcRenderer.invoke('overlay:reset-idle'),
   log: (level: 'log' | 'info' | 'warn' | 'error', ...args: any[]) => ipcRenderer.invoke('app:log', level, ...args),
+  clearAllHistory: () => ipcRenderer.invoke('history:clear-all'),
+  startScreenLive: (payload?: { intervalMs?: number }) =>
+    ipcRenderer.invoke('screen:live-start', payload || {}),
+  stopScreenLive: () => ipcRenderer.invoke('screen:live-stop'),
+  screenLiveCapable: () => ipcRenderer.invoke('screen:live-capable'),
+  onScreenLiveText: (listener: (ev: { text: string; at: number }) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, ev: { text: string; at: number }) =>
+      listener(ev);
+    ipcRenderer.on('screen:live-text', handler);
+    return () => ipcRenderer.removeListener('screen:live-text', handler);
+  },
 };
 
 contextBridge.exposeInMainWorld('osmos', api);

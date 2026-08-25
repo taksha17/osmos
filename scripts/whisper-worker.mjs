@@ -24,10 +24,11 @@ const root =
   process.env.UNCON_ROOT ||
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const serveMode = process.argv.includes('--serve');
-const positional = process.argv.filter((a) => a !== '--serve' && !a.endsWith('whisper-worker.mjs'));
+const args = process.argv.slice(2);
+const serveMode = args.includes('--serve');
+const positional = args.filter((a) => a !== '--serve');
 const audioPath = serveMode ? null : positional[0];
-const cacheDir = (serveMode ? positional[0] : positional[1]) || path.join(root, '.whisper-cache');
+const cacheDir = positional[serveMode ? 0 : 1] || path.join(root, '.whisper-cache');
 
 function fail(error) {
   process.stdout.write(JSON.stringify({ ok: false, error }) + '\n');
@@ -95,8 +96,12 @@ function readWavPcm(filePath) {
 env.cacheDir = cacheDir;
 env.allowLocalModels = false;
 
+// tiny.en misses far-field/quiet speech; base.en is ~2x slower on CPU but
+// dramatically more accurate. Override with OSMOS_WHISPER_MODEL if needed.
+const WHISPER_MODEL = process.env.OSMOS_WHISPER_MODEL || 'Xenova/whisper-base.en';
+
 async function loadAsr() {
-  return pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en');
+  return pipeline('automatic-speech-recognition', WHISPER_MODEL);
 }
 
 async function transcribeFile(asr, filePath) {

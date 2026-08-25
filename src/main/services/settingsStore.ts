@@ -15,6 +15,8 @@ import {
 } from '../../shared/profiles.js';
 import { decryptSecret, encryptSecret } from './secretStore.js';
 
+const SETTINGS_SCHEMA_VERSION = 2;
+
 const store = new Store<{ settings: AppSettings }>({
   name: 'osmos-settings',
   defaults: { settings: DEFAULT_SETTINGS },
@@ -169,8 +171,24 @@ export function getSettings(): AppSettings {
       typeof raw.onboardingCompleted === 'boolean' ? raw.onboardingCompleted : true,
   };
 
+  // Explicit schema versioning: v1 → v2 added assistSourceMigrated semantics.
+  // Bump SETTINGS_SCHEMA_VERSION and add a `if (raw.schemaVersion! < N)` block
+  // per future breaking change instead of inferring from field presence.
+  if ((raw.schemaVersion ?? 1) < SETTINGS_SCHEMA_VERSION) {
+    next.schemaVersion = SETTINGS_SCHEMA_VERSION;
+  }
+
   if (next.sttProvider === 'webspeech' && process.platform === 'linux') {
     next.sttProvider = 'local-whisper';
+  }
+
+  // One-time: installs that never explicitly picked a source still hold the
+  // old default 'system', which is deaf to the mic and room audio. Move them
+  // to 'both' (mic + speaker loopback) once, then remember the migration.
+  if (!raw.assistSourceMigrated) {
+    next.assistAudioSource =
+      !raw.assistAudioSource || raw.assistAudioSource === 'system' ? 'both' : raw.assistAudioSource;
+    next.assistSourceMigrated = true;
   }
 
   const active = activeSavedProfile(next.profiles, next.activeProfileId);
@@ -185,7 +203,9 @@ export function getSettings(): AppSettings {
     (Array.isArray(raw.documents) &&
       raw.documents.length > 0 &&
       !(raw.profiles || []).some((p) => (p.documents || []).length > 0)) ||
-    (next.sttProvider === 'local-whisper' && raw.sttProvider === 'webspeech' && process.platform === 'linux')
+    (next.sttProvider === 'local-whisper' && raw.sttProvider === 'webspeech' && process.platform === 'linux') ||
+    next.assistSourceMigrated !== raw.assistSourceMigrated ||
+    (raw.schemaVersion ?? 1) < SETTINGS_SCHEMA_VERSION
   ) {
     // `next` here is still the as-stored (possibly encrypted, possibly
     // legacy-plaintext) shape — re-encrypt defensively so a first run that

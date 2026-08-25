@@ -392,6 +392,12 @@ export class MicSttSession {
       if (!this.nativeLoopRef || this.intentionalStop) break;
       this.handlers.onPartial?.('');
       if (!res.ok) {
+        // Silence between phrases comes back as benign "empty/too short"
+        // failures — never surface those as errors, just keep listening.
+        if (/empty text|too short|silent|no speech/i.test(res.error || '')) {
+          if (this.continuousCapture && !this.intentionalStop) continue;
+          break;
+        }
         this.handlers.onError?.(res.error || 'Transcription failed');
         if (this.continuousCapture && !this.intentionalStop) continue;
         break;

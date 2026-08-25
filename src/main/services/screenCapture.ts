@@ -14,7 +14,10 @@ import { desktopCapturer, screen } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 import type { CaptureResult } from '../../shared/types.js';
 import { findOnPath, safeSpawnCwd } from './resolveBin.js';
 
@@ -137,6 +140,25 @@ export function canLoopSafeScreenCapture(): boolean {
       findOnPath('grim') ||
       findOnPath('scrot'),
   );
+}
+
+/**
+ * True when a silent screenshot path exists on this OS:
+ * - Linux: one of the CLI tools (gnome-screenshot/spectacle/grim/scrot)
+ * - Windows/macOS: Electron desktopCapturer never shows a portal dialog
+ * Used to gate 👁 Live background reading without risking portal spam.
+ */
+export async function hasSilentScreenshotTool(): Promise<boolean> {
+  if (process.platform !== 'linux') return true;
+  for (const bin of ['gnome-screenshot', 'spectacle', 'grim', 'scrot']) {
+    try {
+      await execFileAsync(bin, ['--version'], { timeout: 2500 });
+      return true;
+    } catch {
+      /* try next */
+    }
+  }
+  return false;
 }
 
 /**

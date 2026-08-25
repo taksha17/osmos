@@ -247,6 +247,20 @@ Documented so the next agent does not reintroduce these bugs:
 - Linux: no OS exclusion API — skip taskbar + always-on-top; share a **tab/window**, not full desktop.
 - macOS: prefer app/tab share (ScreenCaptureKit full-desktop may still include overlay).
 
+### Smart-listen mic stream — PARKED (2026-08-24, Linux)
+
+State when paused: **first transcription works, then capture pipe dies**. Verified working stages (do not re-litigate):
+- dmic `_6__source` hears room audio (rms 2254 measured); loopback monitors healthy
+- whisper-worker argv bug FIXED (was reading node ELF); base.en cached; serve mode OK
+- Mic capture now lives in MAIN process (`src/main/services/micStream.ts`) — renderer churn can't kill it
+- Self-healing layers shipped: respawn-on-close (5×), 0.25s chunk overlap, renderer stall watchdog (15s)
+
+Remaining symptom: pipe still starves after ~1st chunk on this Zenbook/PipeWire host. Next leads when resumed:
+1. Log `MicStream` close codes + stderr tail (errBuf already captured) to see WHY ffmpeg exits
+2. Test `pw-record --target=<source>` streaming fallback (pw-record file-loop pattern exists in linuxLoopbackStream)
+3. Check PipeWire source suspend/adaptive-latency conflicts when BOTH monitor-stream + mic-stream run concurrently
+4. Renderer hook `useMainMicStt.ts` + IPC `mic:listen-start/stop`, preload `startMicListen` — all wired
+
 ## Known gotchas (do not regress)
 
 ### Ollama

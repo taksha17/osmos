@@ -1,0 +1,6 @@
+# OSMOS Audio Module Dependencies
+# Core dependencies
+numpy>=1.21.0
+scipy>=1.7.0
+sounddevice>=0.4.6
+typing_extensions>=3.10.0

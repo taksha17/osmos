@@ -3,7 +3,7 @@
  * Download a static Windows ffmpeg.exe into build/bin/win32 for electron-builder
  * extraResources. Run automatically before pack:win / pack on Windows.
  *
- * Uses the gyan.dev **full** build (not essentials) because essentials lacks the
+ * Uses the BtbN win64-lgpl build — LGPL, so bundling inside a distributed MIT app stays clean (gyan builds are GPL).
  * WASAPI demuxer required for speaker/meeting loopback. See THIRD-PARTY-NOTICES.md.
  */
 import fs from 'node:fs';
@@ -19,7 +19,7 @@ const outDir = path.join(root, 'build', 'bin', 'win32');
 const outExe = path.join(outDir, 'ffmpeg.exe');
 const ZIP_URL =
   process.env.OSMOS_FFMPEG_URL ||
-  'https://github.com/GyanD/codexffmpeg/releases/download/9.0.1/ffmpeg-9.0.1-full_build.zip';
+  'https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-lgpl.zip';
 
 function existsExe(p) {
   try {
@@ -87,7 +87,7 @@ async function main() {
   // We still vendor ffmpeg for any remaining CLI capture helpers / future use.
 
   fs.mkdirSync(outDir, { recursive: true });
-  const zipPath = path.join(outDir, 'ffmpeg-release-full.zip');
+  const zipPath = path.join(outDir, 'ffmpeg-win64-lgpl.zip');
   console.log(`[ensure-ffmpeg-win] downloading ${ZIP_URL}`);
   await download(ZIP_URL, zipPath);
 

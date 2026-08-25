@@ -2536,6 +2536,66 @@ body.overlay-route {
 .transcript-text.partial { opacity: 0.75; }
 .transcript-text.final { opacity: 1; }
 
+/* ── Chat + live-transcript split ── */
+.chat-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(200px, 28%, 300px);
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+.chat-split > * {
+  min-height: 0;
+}
+.chat-split--collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+.chat-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--line);
+  padding-left: 12px;
+}
+.chat-side__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 0.85rem;
+}
+.chat-side__actions {
+  display: inline-flex;
+  gap: 10px;
+}
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 2px 4px;
+}
+.link-btn:hover {
+  color: inherit;
+}
+.chat-side__show {
+  align-self: flex-end;
+}
+.chat-side .transcript-timeline {
+  flex: 1;
+  max-height: none;
+  overflow-y: auto;
+}
+@media (max-width: 640px) {
+  .chat-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .chat-side {
+    display: none;
+  }
+}
+
 .evidence-panel {
   display: flex;
   flex-wrap: wrap;
@@ -2836,4 +2896,42 @@ body.overlay-route {
   }
   .home-topbar__spacer { display: none; }
   .home-search { max-width: none; grid-column: 1 / -1; order: 2; }
+}
+
+/* ── Mic test meter (Settings → Speech) ── */
+.mic-meter {
+  position: relative;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.mic-meter__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(90deg, #34d399, #fbbf24 70%, #f87171);
+  border-radius: 999px;
+  transition: width 90ms linear;
+}
+.mic-meter__peak {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.75);
+  transition: left 120ms ease-out;
+}
+
+.rec-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
 }

@@ -98,7 +98,7 @@ export function useSystemAudioStt(settings: AppSettings | null) {
         }
         setPartial(
           silentStreak > 2
-            ? 'Listening… (no audio yet — play something on speakers)'
+            ? 'No laptop audio — play media on THIS machine (TV/phone audio won’t appear)'
             : 'Listening to system audio…',
         );
         return;

@@ -15,20 +15,33 @@ function isAlsaPluginAlias(id: string): boolean {
 }
 
 /** Strip the SOF/Alder Lake controller prefix so labels fit the overlay. */
+/**
+ * PulseAudio-format laptop digital mic: `…HiFi__hw_sofhdadsp_6__source`.
+ * The legacy matchers only knew ALSA `hw:CARD=…,DEV=6` ids, so on PipeWire
+ * hosts the laptop-mic preference never fired and capture fell back to the
+ * first listed source — often the electrically-silent analog jack.
+ */
+export function isLaptopMicId(id: string): boolean {
+    return /DEV=6\b/i.test(id) || /_6__source$/i.test(id);
+}
+
+/** Analog jack mic: `…HiFi__hw_sofhdadsp__source` (no numeric segment before __source). */
+export function isAnalogMicId(id: string): boolean {
+    return /DEV=0\b/i.test(id) || /(^|[^0-9])__source$/i.test(id);
+}
+
 export function humanizeLinuxAudioName(name: string): string {
     if (!name) return name;
+    if (isLaptopMicId(name)) return 'Laptop microphone';
+    if (/digital microphone|dmic/i.test(name) && !/16k/i.test(name)) return 'Laptop microphone';
+    if (/^hw:CARD=.+,DEV=0$/i.test(name) || isAnalogMicId(name)) return 'Microphone (analog)';
     let label = name
         .replace(/^Alder Lake PCH-P High Definition Audio Controller\s+/i, '')
         .replace(/^.*?High Definition Audio Controller\s+/i, '')
         .replace(/^sof-hda-dsp\s*[-:]?\s*/i, '')
         .trim();
     label = label.replace(/^HDMI \/ DisplayPort\s+(\d+)\s+Output$/i, 'HDMI $1');
-    if (/^hw:CARD=.+,DEV=6$/i.test(name)) return 'Laptop microphone';
-    if (/^hw:CARD=.+,DEV=0$/i.test(name)) return 'Headset microphone';
-    if (/digital microphone|dmic/i.test(name) && !/16k/i.test(name)) {
-        return 'Laptop microphone';
-    }
-    if (/headphone.*mic|headset.*mic/i.test(name)) return 'Headset microphone';
+    if (/headphone.*mic|headset.*mic/i.test(label)) return 'Headset microphone';
     if (/speaker \+ headphones/i.test(label)) return 'Speakers + headphones';
     return label || name;
 }
@@ -46,7 +59,7 @@ export function sanitizeLinuxInputDevices(devices: NamedAudioDevice[]): NamedAud
         out.push({ id: device.id, name: humanizeLinuxAudioName(device.name || device.id) });
     }
 
-    const dmic = out.find((d) => /laptop microphone/i.test(d.name) || /DEV=6\b/.test(d.id));
+    const dmic = out.find((d) => /laptop microphone/i.test(d.name) || isLaptopMicId(d.id));
     const ordered = dmic ? [dmic, ...out.filter((d) => d.id !== dmic.id)] : out;
     if (ordered.length === 0) {
         return [{ id: 'default', name: 'System default microphone' }];
@@ -72,9 +85,9 @@ function isHdmiLabel(name: string): boolean {
 }
 
 export function preferredLinuxInputId(devices: NamedAudioDevice[]): string {
-    const dmic = devices.find((d) => /laptop microphone/i.test(d.name) || /DEV=6\b/.test(d.id));
+    const dmic = devices.find((d) => /laptop microphone/i.test(d.name) || isLaptopMicId(d.id));
     if (dmic) return dmic.id;
-    const analog = devices.find((d) => /headset microphone/i.test(d.name) || /DEV=0\b/.test(d.id));
+    const analog = devices.find((d) => /headset microphone|microphone \(analog\)/i.test(d.name) || isAnalogMicId(d.id));
     if (analog) return analog.id;
     if (devices.some((d) => d.id === 'default')) return 'default';
     return devices[0]?.id || 'default';

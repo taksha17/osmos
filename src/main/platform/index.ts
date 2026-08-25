@@ -265,6 +265,61 @@ const LOOPBACK_DEVICE_RE = /blackhole|loopback|soundflower|aggregate|multi-outpu
 
 let avAudioCache: { at: number; devices: Array<{ index: number; name: string }> } | null = null;
 
+/** Audio input devices for continuous capture backends (macOS AVFoundation). */
+export function listAvAudioInputs(): Promise<Array<{ index: number; name: string }>> {
+  return listAvfoundationAudioDevices();
+}
+
+/** DirectShow audio input names for continuous mic capture (Windows). */
+export function listDshowAudioInputs(): Promise<string[]> {
+  return new Promise((resolve) => {
+    const ffmpeg = resolveFfmpeg();
+    if (!ffmpeg || process.platform !== 'win32') {
+      resolve([]);
+      return;
+    }
+    let child;
+    try {
+      child = spawn(
+        ffmpeg,
+        ['-hide_banner', '-list_devices', 'true', '-f', 'dshow', '-i', 'dummy'],
+        { cwd: safeSpawnCwd(), windowsHide: true },
+      );
+    } catch {
+      resolve([]);
+      return;
+    }
+    let stderr = '';
+    const timer = setTimeout(() => {
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        /* ignore */
+      }
+    }, 5000);
+    child.stderr?.on('data', (c: Buffer) => {
+      stderr += String(c);
+    });
+    const finish = () => {
+      clearTimeout(timer);
+      const section = stderr.split(/DirectShow audio devices/i)[1] || '';
+      const names: string[] = [];
+      const re = /"([^"]+)"/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(section))) {
+        const n = m[1]!.trim();
+        if (n && !/^alternative name/i.test(n)) names.push(n);
+      }
+      resolve(names);
+    };
+    child.on('close', finish);
+    child.on('error', () => {
+      clearTimeout(timer);
+      resolve([]);
+    });
+  });
+}
+
 function preferredAudioDevice(explicit?: string): string {
   return (explicit || process.env.OSMOS_AUDIO_DEVICE || '').trim();
 }

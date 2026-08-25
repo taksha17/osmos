@@ -87,3 +87,9 @@ coverage/
 build/bin/**
 !build/bin/.gitkeep
 
+# Frozen audio worker binaries (built per-platform, not committed)
+binaries/
+
+# Python bytecode
+__pycache__/
+*.pyc

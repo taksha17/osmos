@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   ipcMain,
   globalShortcut,
+  screen,
   shell,
   session,
   nativeImage,
@@ -22,13 +23,16 @@ import { transcribeWithWhisper } from './services/whisper.js';
 import { extractTextFromImage } from './services/ocr.js';
 import { researchCompany } from './services/companyIntel.js';
 import { chatWithProvider, streamWithProvider } from './services/providers.js';
-import { loadHistory, saveHistory, upsertSession, deleteSession } from './services/history.js';
+import { loadHistory, saveHistory, upsertSession, deleteSession, clearAllHistory } from './services/history.js';
 import { checkForUpdates } from './services/updates.js';
 import { retrieveChunks } from './services/retrieval.js';
 import { extractTextFromUpload } from './services/documentExtract.js';
 import { assembleInterviewPrep } from './services/profilePrep.js';
 import { listAudioDevices } from './services/audioDevices.js';
 import { getLinuxLoopbackStream } from './services/linuxLoopbackStream.js';
+import { getMicStream } from './services/micStream.js';
+import { getScreenLiveEngine } from './services/screenLive.js';
+import { listAudioDevicesPython, stopPythonAudioWorker, startAudioCapturePython, stopAudioCapturePython, getAudioDeviceInfoPython } from './services/pythonAudio.js';
 import { CONTINUOUS_CHUNK_MS } from '../shared/continuousAssist.js';
 import {
   addQuestionBankItem,
@@ -49,6 +53,7 @@ import { activeSavedProfile } from '../shared/profiles.js';
 import {
   DEFAULT_PROFILE,
   type AssemblePrepResponse,
+  type AudioDeviceInfo,
   type CaptureResult,
   type ChatRequest,
   type ChatResponse,
@@ -61,6 +66,9 @@ import {
   type HistoryResponse,
   type OcrRequest,
   type ProviderConfig,
+  type PythonAudioDevicesResponse,
+  type PythonAudioCaptureResponse,
+  type PythonAudioDeviceInfo,
   type QuestionBankItem,
   type QuestionBankResponse,
   type StarTemplate,
@@ -611,6 +619,69 @@ function registerIpc() {
     return { ok: true };
   });
 
+  // ── Background live-screen engine (👁 Live) ──
+  ipcMain.handle('screen:live-capable', async (): Promise<boolean> => {
+    return getScreenLiveEngine().capable();
+  });
+
+  ipcMain.handle(
+    'screen:live-start',
+    async (e, req?: { intervalMs?: number }): Promise<{ ok: boolean; error?: string }> => {
+      const engine = getScreenLiveEngine();
+      const sender = e.sender;
+      engine.removeAllListeners('text');
+      engine.on('text', (ev) => {
+        if (!sender.isDestroyed()) sender.send('screen:live-text', ev);
+      });
+      return engine.start(req?.intervalMs ?? 2500);
+    },
+  );
+
+  ipcMain.handle('screen:live-stop', async (): Promise<{ ok: boolean }> => {
+    await getScreenLiveEngine().stop();
+    return { ok: true };
+  });
+
+  /** Main-process mic stream for Smart mode — survives renderer lifecycle churn. */
+  ipcMain.handle(
+    'mic:listen-start',
+    async (
+      e,
+      req?: { device?: string; chunkMs?: number },
+    ): Promise<{ ok: boolean; error?: string; source?: string }> => {
+      try {
+        const stream = getMicStream();
+        const sender = e.sender;
+        stream.removeAllListeners('chunk');
+        stream.removeAllListeners('error');
+        stream.removeAllListeners('status');
+        stream.on('chunk', (chunk) => {
+          if (!sender.isDestroyed()) sender.send('mic:audio-chunk', chunk);
+        });
+        stream.on('error', (error: string) => {
+          if (!sender.isDestroyed()) sender.send('mic:audio-chunk', { ok: false, error });
+        });
+        stream.on('status', (text: string) => {
+          if (!sender.isDestroyed()) sender.send('mic:audio-status', { text });
+        });
+        return await stream.start({
+          device: req?.device,
+          chunkMs: req?.chunkMs || CONTINUOUS_CHUNK_MS,
+        });
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : 'Mic listen start failed',
+        };
+      }
+    },
+  );
+
+  ipcMain.handle('mic:listen-stop', async (): Promise<{ ok: boolean }> => {
+    await getMicStream().stop();
+    return { ok: true };
+  });
+
   ipcMain.handle('audio:list-devices', async (): Promise<AudioDevicesResponse> => {
     try {
       const list = await listAudioDevices();
@@ -630,19 +701,45 @@ function registerIpc() {
     }
   });
 
-  ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise<SystemAudioResponse> => {
-    try {
-      if (!platform.captureMicAudio) {
-        return { ok: false, error: 'Native mic capture is not available on this platform.' };
-      }
-      return await platform.captureMicAudio(req?.durationMs, req?.device);
-    } catch (err) {
-      return {
-        ok: false,
-        error: err instanceof Error ? err.message : 'Microphone capture failed',
-      };
-    }
-  });
+ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise<SystemAudioResponse> => {
+     try {
+       if (!platform.captureMicAudio) {
+         return { ok: false, error: 'Native mic capture is not available on this platform.' };
+       }
+       return await platform.captureMicAudio(req?.durationMs, req?.device);
+     } catch (err) {
+       return {
+         ok: false,
+         error: err instanceof Error ? err.message : 'Microphone capture failed',
+       };
+     }
+   });
+
+   // Python Audio Module Handlers
+   ipcMain.handle('audio:list-devices-python', async (): Promise<PythonAudioDevicesResponse> => {
+     return await listAudioDevicesPython();
+   });
+
+   ipcMain.handle('audio:start-capture-python', async (_e, req: {
+     sampleRate?: number;
+     channels?: number;
+     deviceId?: string;
+     audioSource?: 'system' | 'mic' | 'both';
+   }): Promise<PythonAudioCaptureResponse> => {
+     return await startAudioCapturePython(req);
+   });
+
+   ipcMain.handle('audio:stop-capture-python', async (): Promise<PythonAudioCaptureResponse> => {
+     return await stopAudioCapturePython();
+   });
+
+   ipcMain.handle('audio:get-device-info-python', async (_e, deviceId: string): Promise<{
+     ok: boolean;
+     device_info?: PythonAudioDeviceInfo;
+     error?: string;
+   }> => {
+     return await getAudioDeviceInfoPython(deviceId);
+   });
 
   ipcMain.handle('company:intel', async (_e, req: CompanyIntelRequest): Promise<CompanyIntelResponse> => {
     const s = getSettings();
@@ -793,6 +890,15 @@ function registerIpc() {
       return { ok: true, sessions };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+
+  ipcMain.handle('history:clear-all', async (): Promise<HistoryResponse> => {
+    try {
+      const sessions = clearAllHistory();
+      return { ok: true, sessions };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'Clear failed' };
     }
   });
 
@@ -960,8 +1066,28 @@ app.whenReady().then(() => {
   registerIpc();
   createLauncher();
   createOverlay();
+  getScreenLiveEngine().setWindowsProvider(() =>
+    BrowserWindow.getAllWindows().filter((w) => {
+      try {
+        return w.webContents.getURL().includes('#/overlay');
+      } catch {
+        return false;
+      }
+    }),
+  );
   registerShortcuts();
   platform.applyStealth(getSettings().stealthEnabled, allWindows());
+
+  // Windows can drop WDA_EXCLUDEFROMCAPTURE and macOS spaces can reset
+  // sharing flags across display changes — re-assert on every geometry event.
+  const reassertStealth = () => {
+    if (getSettings().stealthEnabled) {
+      platform.applyStealth(true, allWindows());
+    }
+  };
+  screen.on('display-metrics-changed', reassertStealth);
+  screen.on('display-added', reassertStealth);
+  screen.on('display-removed', reassertStealth);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createLauncher();
@@ -971,6 +1097,8 @@ app.whenReady().then(() => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   void getLinuxLoopbackStream().stop().catch(() => undefined);
+  void getMicStream().stop().catch(() => undefined);
+  void getScreenLiveEngine().stop().catch(() => undefined);
   stopLocalWhisperWorker();
 });
 
