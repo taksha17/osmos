@@ -140,9 +140,7 @@ export function HomeDashboard({
   };
 
   const openGithub = () => {
-    void window.osmos.openExternal('https://github.com/sponsors/taksha17').catch(() => {
-      void window.osmos.openExternal('https://github.com/taksha17/osmos');
-    });
+    void window.osmos.openExternal('https://github.com/taksha17/osmos');
   };
 
   return (
@@ -277,16 +275,16 @@ export function HomeDashboard({
       <div className="home-bento">
         <article className="home-promo home-promo--fund">
           <div className="home-promo__copy">
-            <h2>Support development</h2>
-            <p>Built openly and sustained by users</p>
+            <h2>Open source, community built</h2>
+            <p>Star or fork the project on GitHub</p>
             <ul>
-              <li>Development driven by real users</li>
-              <li>Faster iteration without subscription lock-in</li>
-              <li>MIT-licensed desktop copilot you control</li>
+              <li>MIT-licensed — inspect every line</li>
+              <li>Fork it, shape it, ship your own build</li>
+              <li>Stars help other privacy-minded users find OSMOS</li>
             </ul>
           </div>
           <button type="button" className="home-promo__cta home-promo__cta--gold" onClick={openGithub}>
-            <span aria-hidden>🚀</span> Fund development
+            <span aria-hidden>⭐</span> Star / Fork on GitHub
           </button>
         </article>
 

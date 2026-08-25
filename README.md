@@ -61,7 +61,12 @@ Named multi-profiles, each carrying: résumé + job description, company intel (
 Ollama (local) first-class; OpenAI / Anthropic / Groq / OpenRouter / LiteLLM via one OpenAI-compatible surface. Streaming, cancel, markdown rendering sanitized with DOMPurify.
 
 ### 🔇 Zero-dependency installs
-The audio worker ships as a **frozen standalone binary** (PyInstaller) built per-platform in CI — users install nothing: no Python, no pip, no PortAudio. Linux needs only `ffmpeg` from distro repos.
+Two runtime pieces are vendored into every installer by CI:
+
+- **Whisper audio worker** — frozen standalone binary (PyInstaller bundles Python + NumPy)
+- **ffmpeg** — official **LGPL** builds (BtbN), staged per-platform; LGPL keeps redistribution clean inside an MIT app
+
+Users install nothing manually: no Python, no pip, no PortAudio, no ffmpeg.
 
 ---
 
@@ -92,9 +97,13 @@ Key design rule: **all capture lives in the main process** (`src/main/services/m
 ### End users
 Grab an installer from [Releases](https://github.com/taksha17/osmos/releases) (built automatically by CI for Windows / macOS / Linux).
 
-- **Windows**: NSIS installer; bundled ffmpeg + audio worker
-- **macOS**: `.dmg` (unsigned for now — right-click → Open pastes Gatekeeper)
-- **Linux**: `.deb` / AppImage; requires `ffmpeg` (`sudo apt install ffmpeg`) and PipeWire/Pulse
+Every installer is **fully self-contained** — no manual installs on any OS:
+
+- **Windows**: NSIS installer with LGPL ffmpeg + frozen audio worker bundled
+- **macOS**: `.dmg` (unsigned for now — right-click → Open pastes Gatekeeper) with bundled ffmpeg
+- **Linux**: `.deb` / AppImage with bundled ffmpeg; uses your existing PipeWire/Pulse
+
+Optional (not required): `gnome-screenshot` unlocks silent background screen reading on GNOME Wayland — without it the 👁 Live toggle simply stays off instead of nagging you with dialogs.
 
 ### Developers
 
@@ -155,4 +164,4 @@ See [`docs/ROADMAP.md`](docs/ROADMAP.md) for status and [`AGENTS.md`](AGENTS.md)
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Bundled runtime dependencies keep their own licenses; the frozen audio worker bundles Python+NumPy under their respective licenses.
+MIT — see [LICENSE](LICENSE). Bundled runtimes keep their own licenses: ffmpeg is an unmodified **LGPL** build ([source](https://github.com/BtbN/FFmpeg-Builds)); the frozen audio worker bundles Python+NumPy under their respective licenses.
