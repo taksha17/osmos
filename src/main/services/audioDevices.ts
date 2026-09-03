@@ -86,11 +86,18 @@ function parseDescriptions(out: string, kind: 'Sink' | 'Source'): Map<string, st
 
 export async function listLinuxAudioDevices(): Promise<AudioDeviceList> {
   try {
-    const [sourcesOut, sinksOut, defaultSink, defaultSource] = await Promise.all([
-      pactlListShort('sources'),
-      pactlListShort('sinks'),
+    // Bug fix: the first two slots MUST be the LONG pactl output because
+    // parseShortList and parseDescriptions both look for "Name:" /
+    // "Description:" lines that only exist in long format. Previously the
+    // long outputs were fetched but discarded into thin air (positions
+    // 2 and 3) and the short outputs were misfed to the long-format parser,
+    // which returned an empty list. Net effect: Smart mode had no
+    // devices to work with, even when pactl clearly saw them.
+    const [sourcesOut, sinksOut, _sourcesShort, _sinksShort, defaultSink, defaultSource] = await Promise.all([
       pactl(['list', 'sources']),
       pactl(['list', 'sinks']),
+      pactlListShort('sources'),
+      pactlListShort('sinks'),
       pactl(['get-default-sink']).catch(() => ''),
       pactl(['get-default-source']).catch(() => ''),
     ]);
