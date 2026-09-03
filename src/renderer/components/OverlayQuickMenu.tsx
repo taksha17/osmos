@@ -3,7 +3,8 @@ import type { AppSettings, CopilotMode } from '@shared/types';
 import { MODE_DEFS } from '@shared/modes';
 import { activeSavedProfile, modeLabel } from '@shared/profiles';
 import { DEFAULT_SAVED_PROFILE } from '@shared/types';
-import type { MicDevice } from '../stt/micStt';
+
+type MicDevice = { deviceId: string; label: string };
 
 type Props = {
   settings: AppSettings;

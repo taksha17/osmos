@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppSettings } from '../../shared/types';
-import { CONTINUOUS_CHUNK_MS } from '../../shared/continuousAssist';
 
 function engineFor(settings: AppSettings | null): 'local' | 'openai' {
   return settings?.sttProvider === 'openai-whisper' ? 'openai' : 'local';
@@ -40,7 +39,7 @@ export function useMainMicStt(settings: AppSettings | null) {
       lastChunkAt.current = Date.now();
       const res = await window.osmos.startMicListen({
         device: settingsRef.current?.micDeviceId || undefined,
-        chunkMs: CONTINUOUS_CHUNK_MS,
+        chunkMs: settingsRef.current?.transcribeChunkMs || 4000,
       });
       if (genRef.current !== gen) return;
       if (!res.ok) {
@@ -114,6 +113,11 @@ export function useMainMicStt(settings: AppSettings | null) {
     setPartial('');
   }, []);
 
+  const toggle = useCallback(async () => {
+    if (listening) await stop();
+    else await start();
+  }, [listening, start, stop]);
+
   const startRef = useRef(start);
   startRef.current = start;
 
@@ -165,5 +169,5 @@ export function useMainMicStt(settings: AppSettings | null) {
     [],
   );
 
-  return { listening, partial, error, start, stop, onFinal };
+  return { listening, partial, error, start, stop, toggle, onFinal };
 }

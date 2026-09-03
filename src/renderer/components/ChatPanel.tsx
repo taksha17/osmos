@@ -5,7 +5,6 @@ import {
   SCREEN_CONTEXT_FRESH_MS,
   shouldAutoAssist,
 } from '@shared/continuousAssist';
-import { useMicStt } from '../stt/useMicStt';
 import { useMainMicStt } from '../stt/useMainMicStt';
 import { useSystemAudioStt } from '../stt/useSystemAudioStt';
 import { extractTextFromBase64 } from '../stt/ocr';
@@ -42,7 +41,6 @@ type Props = {
   title?: string;
   paused?: boolean;
   onPausedChange?: (paused: boolean) => void;
-  onPreferSttProvider?: (provider: AppSettings['sttProvider']) => void;
   onRegisterControls?: (controls: OverlayControls) => void;
   onSettingsChange?: (next: AppSettings) => void;
 };
@@ -72,7 +70,6 @@ export function ChatPanel({
   title,
   paused = false,
   onPausedChange,
-  onPreferSttProvider,
   onRegisterControls,
   onSettingsChange,
 }: Props) {
@@ -86,22 +83,18 @@ export function ChatPanel({
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [transcriptOpen, setTranscriptOpen] = useState(true);
   const [continuousEnabled, setContinuousEnabled] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   const [starTemplates, setStarTemplates] = useState<StarTemplate[]>([]);
   const continuousRef = useRef(continuousEnabled);
   continuousRef.current = continuousEnabled;
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
-  const mic = useMicStt(settings, { onPreferProvider: onPreferSttProvider });
   const mainMic = useMainMicStt(settings);
   const system = useSystemAudioStt(settings);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const cancelRef = useRef<null | (() => void)>(null);
   const sessionIdRef = useRef(typeof crypto !== 'undefined' && crypto.randomUUID?.() || `session-${Date.now()}`);
-  const micStopRef = useRef(mic.stop);
-  const micStartRef = useRef(mic.start);
-  micStopRef.current = mic.stop;
-  micStartRef.current = mic.start;
   const mainMicStopRef = useRef(mainMic.stop);
   const mainMicStartRef = useRef(() => mainMic.start());
   mainMicStopRef.current = mainMic.stop;
@@ -121,6 +114,23 @@ export function ChatPanel({
   const wantsSystem =
     continuousEnabled && (assistSource === 'system' || assistSource === 'both');
   const wantsMic = continuousEnabled && (assistSource === 'mic' || assistSource === 'both');
+
+  // Mic device list for the overlay's quick-pick menu. Refreshed on demand —
+  // mainMic doesn't own devices, so we go through the platform listAudioDevices
+  // IPC whenever the menu opens or refresh is requested.
+  const [micDevices, setMicDevices] = useState<{ deviceId: string; label: string }[]>([]);
+  const refreshMicDevices = useCallback(async () => {
+    try {
+      const res = await window.osmos.listAudioDevices();
+      if (res?.ok) {
+        setMicDevices(
+          (res.inputs ?? []).map((d) => ({ deviceId: d.id, label: d.name })),
+        );
+      }
+    } catch {
+      /* non-fatal */
+    }
+  }, []);
 
   /**
    * Self-healing listener watchdog.
@@ -212,7 +222,8 @@ export function ChatPanel({
     void window.osmos.listStarTemplates().then((res) => {
       if (res.ok && res.templates) setStarTemplates(res.templates);
     });
-  }, [overlay]);
+    void refreshMicDevices();
+  }, [overlay, refreshMicDevices]);
 
   useEffect(() => {
     if (!overlay) return;
@@ -228,7 +239,6 @@ export function ChatPanel({
     const next = !pausedRef.current;
     onPausedChange?.(next);
     if (next) {
-      micStopRef.current();
       systemStopRef.current();
       cancelRef.current?.();
       cancelRef.current = null;
@@ -246,6 +256,24 @@ export function ChatPanel({
     },
     [onSettingsChange],
   );
+
+  // Press "?" anywhere in the overlay to open the shortcuts panel.
+  useEffect(() => {
+    if (!overlay) return;
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const inField =
+        target && /^(input|textarea|select)$/i.test(target.tagName);
+      if (e.key === '?' && !inField && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setShowShortcuts((v) => !v);
+      } else if (e.key === 'Escape' && showShortcuts) {
+        setShowShortcuts(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [overlay, showShortcuts]);
 
   const sttLabel =
     settings?.sttProvider === 'openai-whisper'
@@ -352,7 +380,7 @@ export function ChatPanel({
       }
       // Mic ear is owned by the self-healing watchdog (main-process stream).
     }
-  }, [busy, input, overlay, settings, mic, system]);
+  }, [busy, input, overlay, settings, system]);
 
   const sendRef = useRef(sendMessage);
   sendRef.current = sendMessage;
@@ -591,8 +619,8 @@ export function ChatPanel({
           {settings ? (
             <OverlayQuickMenu
               settings={settings}
-              micDevices={mic.devices}
-              onRefreshMics={() => void mic.refreshDevices()}
+              micDevices={micDevices}
+              onRefreshMics={() => void refreshMicDevices()}
               onUpdate={updateSettingsPatch}
             />
           ) : (
@@ -669,8 +697,8 @@ export function ChatPanel({
         <div className="overlay-tools">
           <button
             type="button"
-            className={`overlay-tool${mic.listening ? ' overlay-tool--live' : ''}`}
-            onClick={() => void mic.toggle()}
+            className={`overlay-tool${mainMic.listening ? ' overlay-tool--live' : ''}`}
+            onClick={() => void mainMic.toggle()}
             disabled={busy || continuousEnabled}
             title={
               continuousEnabled
@@ -707,6 +735,15 @@ export function ChatPanel({
           >
             Audio
           </button>
+          <button
+            type="button"
+            className="overlay-tool overlay-tool--soft"
+            onClick={() => setShowShortcuts(true)}
+            title="Keyboard shortcuts"
+            aria-label="Keyboard shortcuts"
+          >
+            ?
+          </button>
           {busy ? (
             <button type="button" className="overlay-tool overlay-tool--live" onClick={() => cancelRef.current?.()}>
               Stop
@@ -720,6 +757,7 @@ export function ChatPanel({
               ● REC
             </span>
           )}
+          {settings?.stealthEnabled && <StealthBadge />}
           <span className="overlay-tools__status meta">
             {paused
               ? 'Paused — tap ▶ to resume'
@@ -754,8 +792,8 @@ export function ChatPanel({
           </span>
         </div>
 
-        {(error || mic.error || system.error) && (
-          <div className="overlay-error">{error || mic.error || system.error}</div>
+        {(error || mainMic.error || system.error) && (
+          <div className="overlay-error">{error || mainMic.error || system.error}</div>
         )}
 
         <div className="overlay-composer">
@@ -795,6 +833,7 @@ export function ChatPanel({
             ▶
           </button>
         </div>
+        {showShortcuts ? <ShortcutsModal onClose={() => setShowShortcuts(false)} /> : null}
       </section>
     );
   }
@@ -818,12 +857,12 @@ export function ChatPanel({
       <div className="mic-bar">
         <button
           type="button"
-          className={`mic-btn ${mic.listening ? 'mic-btn--live' : ''}`}
-          onClick={() => void mic.toggle()}
+          className={`mic-btn ${mainMic.listening ? 'mic-btn--live' : ''}`}
+          onClick={() => void mainMic.toggle()}
           disabled={busy}
           title="Start/stop microphone"
         >
-          {mic.listening ? 'Stop mic' : 'Start mic'}
+          {mainMic.listening ? 'Stop mic' : 'Start mic'}
         </button>
         <button
           type="button"
@@ -885,13 +924,13 @@ export function ChatPanel({
             ? streamMeta || 'Streaming…'
             : ocrStatus
               ? ocrStatus
-              : mic.listening
+              : mainMic.listening
                 ? settings?.sttProvider === 'webspeech'
                   ? 'Listening…'
                   : 'Recording… click Stop when done'
                 : 'Mic idle'}
         </span>
-        {mic.partial ? <span className="partial">{mic.partial}</span> : null}
+        {mainMic.partial ? <span className="partial">{mainMic.partial}</span> : null}
       </div>
 
       <div className={`chat-split${transcriptOpen ? '' : ' chat-split--collapsed'}`}>
@@ -977,7 +1016,7 @@ export function ChatPanel({
         </button>
       )}
 
-      {(error || mic.error) && <div className="error">{error || mic.error}</div>}
+      {(error || mainMic.error) && <div className="error">{error || mainMic.error}</div>}
 
       <div className="composer">
         <textarea
@@ -1000,6 +1039,97 @@ export function ChatPanel({
           {busy ? '…' : 'Ask'}
         </button>
       </div>
+      {showShortcuts ? <ShortcutsModal onClose={() => setShowShortcuts(false)} /> : null}
     </section>
+  );
+}
+
+function StealthBadge() {
+  const [status, setStatus] = useState<{
+    ok: boolean;
+    supported: boolean;
+    detail: string;
+    checkedAt: number;
+  } | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const check = async () => {
+      try {
+        const r = await window.osmos.verifyStealth();
+        if (mounted) setStatus(r);
+      } catch {
+        /* ignore */
+      }
+    };
+    void check();
+    const t = window.setInterval(check, 10_000);
+    return () => {
+      mounted = false;
+      window.clearInterval(t);
+    };
+  }, []);
+
+  if (!status) {
+    return (
+      <span className="stealth-chip stealth-chip--pending" title="Verifying capture-exclusion status…">
+        ⌖ checking…
+      </span>
+    );
+  }
+  if (!status.supported) {
+    return (
+      <span
+        className="stealth-chip stealth-chip--warn"
+        title={status.detail}
+      >
+        ⌖ Linux · tab-share to stay private
+      </span>
+    );
+  }
+  const age = Math.max(0, Math.floor((Date.now() - status.checkedAt) / 1000));
+  return (
+    <span
+      className={`stealth-chip ${status.ok ? 'stealth-chip--ok' : 'stealth-chip--warn'}`}
+      title={`${status.detail} · checked ${age}s ago`}
+    >
+      ⌖ {status.ok ? 'Verified invisible' : 'Off'} · {age}s
+    </span>
+  );
+}
+
+function ShortcutsModal({ onClose }: { onClose: () => void }) {
+  const rows: { key: string; desc: string }[] = [
+    { key: '?', desc: 'Show this shortcuts panel' },
+    { key: 'Esc', desc: 'Close dialogs and overlays' },
+    { key: 'Ctrl/⌘ + Enter', desc: 'Send the current question' },
+    { key: 'Ctrl/⌘ + .', desc: 'Cancel a streaming response' },
+    { key: 'Alt+Shift+Space', desc: 'Toggle the overlay' },
+    { key: 'Alt+Shift+A', desc: 'Ask the assistant' },
+    { key: 'Alt+Shift+C', desc: 'Capture screen (OCR)' },
+    { key: 'Alt+Shift+M', desc: 'Toggle microphone' },
+  ];
+  return (
+    <div className="shortcuts-backdrop" role="dialog" aria-label="Keyboard shortcuts" onClick={onClose}>
+      <div className="shortcuts-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="shortcuts-modal__head">
+          <h2>Keyboard shortcuts</h2>
+          <button type="button" className="link-btn" onClick={onClose} aria-label="Close">×</button>
+        </div>
+        <table className="shortcuts-table">
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key}>
+                <td><kbd>{r.key}</kbd></td>
+                <td>{r.desc}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="meta" style={{ marginTop: 12 }}>
+          Press <kbd>?</kbd> again to dismiss this panel.
+        </p>
+      </div>
+    </div>
   );
 }

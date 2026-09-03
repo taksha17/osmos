@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppSettings } from '../../shared/types';
-import { CONTINUOUS_CHUNK_MS, CONTINUOUS_MAX_IN_FLIGHT } from '@shared/continuousAssist';
+import { CONTINUOUS_MAX_IN_FLIGHT } from '@shared/continuousAssist';
 import { captureElectronLoopback, isWindowsPlatform } from './electronLoopback';
 
 function engineForSettings(settings: AppSettings | null): 'local' | 'openai' {
@@ -157,7 +157,7 @@ export function useSystemAudioStt(settings: AppSettings | null) {
       try {
         const res = await window.osmos.startSystemAudioListen({
           device: s.systemAudioDevice || undefined,
-          chunkMs: CONTINUOUS_CHUNK_MS,
+          chunkMs: s.transcribeChunkMs || 4000,
         });
         if (res.ok && res.mode === 'stream') {
           useStream = true;
@@ -206,12 +206,12 @@ export function useSystemAudioStt(settings: AppSettings | null) {
         if (!activeRef.current || generationRef.current !== gen) break;
         try {
           const capture = preferElectronLoopback
-            ? await captureElectronLoopback(CONTINUOUS_CHUNK_MS).then((r) => {
+            ? await captureElectronLoopback(s.transcribeChunkMs || 4000).then((r) => {
                 lastWinDiagnostics = r as { trackLevel?: number; wavRms?: number };
                 return r;
               })
             : await window.osmos.captureSystemAudio({
-                durationMs: CONTINUOUS_CHUNK_MS,
+                durationMs: s.transcribeChunkMs || 4000,
                 device: settingsRef.current?.systemAudioDevice || undefined,
               });
           if (!activeRef.current || generationRef.current !== gen) break;

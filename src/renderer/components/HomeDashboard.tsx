@@ -13,7 +13,7 @@ type Session = {
   updatedAt: number;
 };
 
-type Tab = 'home' | 'chat' | 'history' | 'profile' | 'settings' | 'roadmap';
+type Tab = 'home' | 'chat' | 'history' | 'profile' | 'settings';
 
 type Info = {
   name: string;
@@ -186,9 +186,6 @@ export function HomeDashboard({
                 <button type="button" role="menuitem" onClick={() => { setAppsOpen(false); onSwitchTab('history'); }}>
                   Sessions
                 </button>
-                <button type="button" role="menuitem" onClick={() => { setAppsOpen(false); onSwitchTab('roadmap'); }}>
-                  Roadmap
-                </button>
                 <button type="button" role="menuitem" onClick={() => { setAppsOpen(false); onOpenProfile(); }}>
                   Profile
                 </button>
@@ -252,7 +249,7 @@ export function HomeDashboard({
             <button
               type="button"
               className="home-whatsnew"
-              onClick={() => onSwitchTab('roadmap')}
+              onClick={() => window.osmos.openExternal('https://github.com/taksha17/osmos/releases')}
             >
               What&apos;s New in {version.split('.').slice(0, 2).join('.')} ↗
             </button>

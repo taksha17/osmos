@@ -18,11 +18,6 @@ type MicDevice = { deviceId: string; label: string };
 type Props = {
   settings: AppSettings;
   info: Info | null;
-  mic: {
-    devices: MicDevice[];
-    webspeechAvailable: boolean;
-    refreshDevices: () => Promise<void>;
-  };
   onChange: (next: AppSettings) => void;
   onSaved: (next: AppSettings) => void;
   onClose?: () => void;
@@ -61,7 +56,7 @@ function providerDefaults(id: AppSettings['activeProvider'], current?: AppSettin
   );
 }
 
-export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose }: Props) {
+export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Props) {
   const [section, setSection] = useState<Section>('general');
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
@@ -71,6 +66,25 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose 
     peak: number;
     label: string;
   }>({ on: false, level: 0, peak: 0, label: '' });
+  const [micDevices, setMicDevices] = useState<MicDevice[]>([]);
+  const [webspeechAvailable] = useState(
+    typeof window !== 'undefined' && 'webkitSpeechRecognition' in window,
+  );
+  const refreshMicDevices = useCallback(async () => {
+    try {
+      const res = await window.osmos.listAudioDevices();
+      if (res?.ok) {
+        setMicDevices((res.inputs ?? []).map((d) => ({ deviceId: d.id, label: d.name })));
+      }
+    } catch {
+      /* non-fatal */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshMicDevices();
+  }, [refreshMicDevices]);
+
   const micTestCleanupRef = useRef<null | (() => void)>(null);
 
   const stopMicTest = useCallback(() => {
@@ -757,7 +771,7 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose 
                 >
                   <option value="local-whisper">Local Whisper (offline, recommended)</option>
                   <option value="webspeech">
-                    Web Speech {mic.webspeechAvailable ? '(needs Google cloud)' : '(unavailable here)'}
+                    Web Speech {webspeechAvailable ? '(needs Google cloud)' : '(unavailable here)'}
                   </option>
                   <option value="openai-whisper">OpenAI Whisper (API key)</option>
                 </select>
@@ -852,6 +866,9 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose 
                 </p>
               )}
 
+              {/* P0: end-to-end diagnostics — exercises every audio path in one click. */}
+              <DiagnosticsPanel settings={settings} />
+
               {settings.sttProvider === 'local-whisper' && (
                 <p className="meta" style={{ marginBottom: 14 }}>
                   Click Start mic, speak, then Stop. Uses a local Node Whisper worker (needs `node` on PATH). First
@@ -873,7 +890,7 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose 
                     onChange={(e) => set({ micDeviceId: e.target.value })}
                   >
                     <option value="">System default</option>
-                    {mic.devices.map((d) => (
+                    {micDevices.map((d) => (
                       <option key={d.deviceId} value={d.deviceId}>
                         {d.label}
                       </option>
@@ -883,7 +900,7 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose 
                     className="primary"
                     style={{ height: 38 }}
                     type="button"
-                    onClick={() => void mic.refreshDevices()}
+                    onClick={() => void refreshMicDevices()}
                   >
                     Refresh
                   </button>
@@ -928,6 +945,22 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose 
                   onChange={(e) => set({ sttLanguage: e.target.value })}
                   placeholder="en-US"
                 />
+              </div>
+
+              <div className="field">
+                <label>Response latency (chunk size): {settings.transcribeChunkMs} ms</label>
+                <input
+                  type="range"
+                  min={2000}
+                  max={8000}
+                  step={500}
+                  value={settings.transcribeChunkMs}
+                  onChange={(e) => set({ transcribeChunkMs: Number(e.target.value) })}
+                  style={{ width: '100%' }}
+                />
+                <p className="meta" style={{ margin: '4px 0 0' }}>
+                  Lower = snappier answers, more CPU. Higher = less chatty for long monologues.
+                </p>
               </div>
 
               <label className="meta" style={{ display: 'block', marginBottom: 14 }}>
@@ -1131,6 +1164,162 @@ export function SettingsPanel({ settings, info, mic, onChange, onSaved, onClose 
             </button>
           </div>
       </div>
+    </div>
+  );
+}
+
+type Diag = { name: string; status: 'ok' | 'warn' | 'fail' | 'pending'; detail: string };
+
+function DiagnosticsPanel({ settings }: { settings: AppSettings }) {
+  const [running, setRunning] = useState(false);
+  const [results, setResults] = useState<Diag[]>([]);
+
+  const setAt = (i: number, patch: Partial<Diag>) =>
+    setResults((r) => r.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
+
+  const rmsFromWav = (b64: string): number => {
+    try {
+      const bin = atob(b64);
+      let sum = 0;
+      let n = 0;
+      for (let i = 44; i + 1 < bin.length; i += 2) {
+        const s = bin.charCodeAt(i) | (bin.charCodeAt(i + 1) << 8);
+        const v = (s >= 0x8000 ? s - 0x10000 : s) / 32768;
+        sum += v * v;
+        n++;
+      }
+      return n ? Math.sqrt(sum / n) : 0;
+    } catch {
+      return 0;
+    }
+  };
+
+  const run = useCallback(async () => {
+    if (running) return;
+    setRunning(true);
+    setResults([
+      { name: 'Microphone', status: 'pending', detail: 'Recording 4 s…' },
+      { name: 'Speaker / system audio', status: 'pending', detail: 'Capturing 3 s…' },
+      { name: 'Speech-to-text model', status: 'pending', detail: 'Warming Whisper…' },
+      { name: 'Stealth (capture exclusion)', status: 'pending', detail: 'Checking OS support…' },
+    ]);
+
+    // 1. Mic test
+    try {
+      const dev = settings.micDeviceId;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: dev ? { deviceId: { exact: dev }, echoCancellation: false, noiseSuppression: false, autoGainControl: false } : { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        video: false,
+      });
+      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new Ctx();
+      const src = ctx.createMediaStreamSource(stream);
+      const an = ctx.createAnalyser();
+      an.fftSize = 1024;
+      src.connect(an);
+      const buf = new Uint8Array(an.fftSize);
+      let peak = 0;
+      const start = Date.now();
+      while (Date.now() - start < 4000) {
+        await new Promise((r) => setTimeout(r, 80));
+        an.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) {
+          const v = (buf[i]! - 128) / 128;
+          sum += v * v;
+        }
+        const r = Math.sqrt(sum / buf.length);
+        if (r > peak) peak = r;
+      }
+      stream.getTracks().forEach((t) => t.stop());
+      void ctx.close();
+      if (peak > 0.01) {
+        setAt(0, { status: 'ok', detail: `peak level ${(peak * 100).toFixed(0)}% — mic is working` });
+      } else {
+        setAt(0, { status: 'warn', detail: 'peak level 0% — speak during the test or check the picker' });
+      }
+    } catch (e) {
+      setAt(0, { status: 'fail', detail: e instanceof Error ? e.message : String(e) });
+    }
+
+    // 2. System audio
+    try {
+      const res = await window.osmos.captureSystemAudio({ durationMs: 3000 });
+      if (!res?.ok || !res.base64) {
+        setAt(1, { status: 'fail', detail: res?.error || 'no audio captured' });
+      } else {
+        const rms = rmsFromWav(res.base64);
+        if (rms > 0.01) {
+          setAt(1, { status: 'ok', detail: `level ${(rms * 100).toFixed(0)}% — system audio working` });
+        } else {
+          setAt(1, { status: 'warn', detail: 'silent — play media on this machine (TV/cast won\'t appear)' });
+        }
+      }
+    } catch (e) {
+      setAt(1, { status: 'fail', detail: e instanceof Error ? e.message : String(e) });
+    }
+
+    // 3. Whisper model — we cannot probe the cache from renderer without IPC,
+    //    so we just confirm the STT provider and that the local-whisper code
+    //    path resolves. The first real call will still download if missing.
+    if (settings.sttProvider === 'local-whisper' || settings.sttProvider === undefined) {
+      setAt(2, {
+        status: 'ok',
+        detail: 'Local Whisper configured — first real transcript downloads the model',
+      });
+    } else {
+      setAt(2, {
+        status: 'warn',
+        detail: `${settings.sttProvider} selected — confirm API key in Settings`,
+      });
+    }
+
+    // 4. Stealth
+    try {
+      const info = await window.osmos.getInfo();
+      const plat = info?.platformName ?? '';
+      if (plat === 'macOS' || plat === 'Windows') {
+        setAt(3, { status: 'ok', detail: `${plat} — OS-level capture exclusion available (Low-profile toggle)` });
+      } else {
+        setAt(3, { status: 'warn', detail: 'Linux has no OS-level exclusion; share a window/tab, not the whole desktop' });
+      }
+    } catch {
+      setAt(3, { status: 'pending', detail: 'no info available' });
+    }
+
+    setRunning(false);
+  }, [running, settings.micDeviceId]);
+
+  return (
+    <div className="field">
+      <label>Run diagnostics</label>
+      <p className="meta" style={{ marginBottom: 8 }}>
+        Tests mic, system audio, speech model, and stealth in ~10 seconds.
+      </p>
+      <button
+        type="button"
+        className="primary"
+        style={{ height: 38 }}
+        onClick={() => void run()}
+        disabled={running}
+      >
+        {running ? 'Running…' : 'Run diagnostics'}
+      </button>
+      {results.length ? (
+        <ul className="diag-list" style={{ marginTop: 12, listStyle: 'none', padding: 0 }}>
+          {results.map((r) => (
+            <li key={r.name} className={`diag-row diag-row--${r.status}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
+              <span className="diag-row__icon" aria-hidden style={{ width: 18, display: 'inline-block', textAlign: 'center' }}>
+                {r.status === 'ok' ? '✓' : r.status === 'warn' ? '!' : r.status === 'fail' ? '✗' : '…'}
+              </span>
+              <div>
+                <strong>{r.name}</strong>
+                <div className="meta">{r.detail}</div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }

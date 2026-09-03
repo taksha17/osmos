@@ -125,6 +125,8 @@ export type AppSettings = {
   assistSourceMigrated?: boolean;
   /** Explicit settings schema version — bump when a breaking migration runs. */
   schemaVersion?: number;
+  /** Audio chunk size in ms (2000–8000). Lower = snappier responses, more CPU. */
+  transcribeChunkMs: number;
   /** Optional loopback device (BlackHole name, WASAPI device, PipeWire source). Empty = auto. */
   systemAudioDevice: string;
   autoAskOnFinal: boolean;
@@ -180,6 +182,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   continuousScreenAssist: true,
   systemAudioDevice: '',
   autoAskOnFinal: true,
+  transcribeChunkMs: 4000,
   openaiApiKey: '',
   openaiBaseUrl: 'https://api.openai.com/v1',
   openaiWhisperModel: 'whisper-1',

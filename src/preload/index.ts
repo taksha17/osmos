@@ -28,6 +28,13 @@ const api = {
   listDesktopSources: () => ipcRenderer.invoke('desktop:list-sources'),
   enableLoopbackAudio: () => ipcRenderer.invoke('loopback:enable'),
   disableLoopbackAudio: () => ipcRenderer.invoke('loopback:disable'),
+  verifyStealth: () =>
+    ipcRenderer.invoke('stealth:verify') as Promise<{
+      ok: boolean;
+      supported: boolean;
+      detail: string;
+      checkedAt: number;
+    }>,
   ocrExtract: (payload: { base64: string }) => ipcRenderer.invoke('ocr:extract', payload),
   companyIntel: (payload: { companyName: string; jdText?: string; companyUrl?: string }) =>
     ipcRenderer.invoke('company:intel', payload),

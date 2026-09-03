@@ -8,13 +8,12 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { HomeDashboard } from './components/HomeDashboard';
 import { SettingsPanel } from './components/SettingsPanel';
 import { OnboardingWizard } from './components/OnboardingWizard';
-import { useMicStt } from './stt/useMicStt';
 import { activeSavedProfile } from '@shared/profiles';
 import { resolveAgent } from '@shared/agents';
 import { DEFAULT_SAVED_PROFILE } from '@shared/types';
 import startOsmosIcon from '@resources/Start_Osmos_64.png';
 
-type Tab = 'home' | 'chat' | 'history' | 'roadmap';
+type Tab = 'home' | 'chat' | 'history';
 type Modal = null | 'profile' | 'settings';
 
 type Info = {
@@ -66,6 +65,12 @@ declare global {
       }>;
       enableLoopbackAudio: () => Promise<{ ok: boolean }>;
       disableLoopbackAudio: () => Promise<{ ok: boolean }>;
+      verifyStealth: () => Promise<{
+        ok: boolean;
+        supported: boolean;
+        detail: string;
+        checkedAt: number;
+      }>;
       captureSystemAudio: (payload?: { durationMs?: number; device?: string }) =>
         Promise<{ ok: boolean; base64?: string; mimeType?: string; error?: string }>;
       startSystemAudioListen: (payload?: { device?: string; chunkMs?: number }) =>
@@ -267,9 +272,6 @@ function OverlayApp() {
             paused={paused}
             onPausedChange={setPaused}
             onSettingsChange={setSettings}
-            onPreferSttProvider={(provider) => {
-              void window.osmos.updateSettings({ sttProvider: provider }).then(setSettings);
-            }}
             onRegisterControls={(controls) => {
               controlsRef.current = controls;
             }}
@@ -286,8 +288,6 @@ function LauncherApp() {
   const [info, setInfo] = useState<Info | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [status, setStatus] = useState('');
-  const mic = useMicStt(settings);
-
   useEffect(() => {
     void (async () => {
       const [i, s] = await Promise.all([window.osmos.getInfo(), window.osmos.getSettings()]);
@@ -360,9 +360,6 @@ function LauncherApp() {
               <ChatPanel
                 settings={settings}
                 onSettingsChange={setSettings}
-                onPreferSttProvider={(provider) => {
-                  void window.osmos.updateSettings({ sttProvider: provider }).then(setSettings);
-                }}
               />
             </ErrorBoundary>
           </div>
@@ -377,27 +374,7 @@ function LauncherApp() {
           </div>
         )}
 
-        {tab === 'roadmap' && (
-          <div className="launcher-page">
-            <button type="button" className="launcher-back" onClick={() => setTab('home')}>
-              ← Home
-            </button>
-            <section className="panel">
-              <h2>Feature roadmap</h2>
-              <p>Target capabilities on Linux, macOS, and Windows — original MIT code.</p>
-              <div className="grid">
-                {(info?.features ?? []).map((f) => (
-                  <div className="card" key={f.id}>
-                    <span className={`badge ${f.status}`}>{f.status}</span>
-                    <strong>{f.name}</strong>
-                    <div className="meta">{f.description}</div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </div>
-        )}
-      </main>
+              </main>
 
       {modal && settings ? (
         <div
@@ -433,7 +410,6 @@ function LauncherApp() {
             <SettingsPanel
               settings={settings}
               info={info}
-              mic={mic}
               onChange={setSettings}
               onSaved={setSettings}
               onClose={() => setModal(null)}

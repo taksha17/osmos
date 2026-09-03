@@ -12,7 +12,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { createPlatformAdapter } from './platform/index.js';
+import { createPlatformAdapter, verifyStealth, type StealthStatus } from './platform/index.js';
 import { canLoopSafeScreenCapture } from './services/screenCapture.js';
 import { getSettings, updateSettings } from './services/settingsStore.js';
 import { chatOllama, listOllamaModels, streamChatOllama } from './services/ollama.js';
@@ -1061,6 +1061,19 @@ app.whenReady().then(() => {
   ipcMain.handle('loopback:disable', async () => {
     loopbackAudioEnabled = false;
     return { ok: true };
+  });
+
+  ipcMain.handle('stealth:verify', async (): Promise<StealthStatus> => {
+    const enabled = getSettings().stealthEnabled;
+    const ov = BrowserWindow.getAllWindows().find((w) => {
+      try {
+        return w.webContents.getURL().includes('#/overlay');
+      } catch {
+        return false;
+      }
+    });
+    if (!ov) return { ok: false, supported: false, detail: 'overlay not ready', checkedAt: Date.now() };
+    return verifyStealth(ov, enabled);
   });
 
   registerIpc();
