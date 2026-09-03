@@ -90,6 +90,15 @@ declare global {
       startMicListen: (payload?: { device?: string; chunkMs?: number }) =>
         Promise<{ ok: boolean; error?: string; source?: string }>;
       stopMicListen: () => Promise<{ ok: boolean }>;
+      micDiagnostics: () => Promise<{
+        deathCount: number;
+        lastSpawnAt: number | null;
+        lastDeathAt: number | null;
+        lastSpawnArgs: string[];
+        lastStderr: string;
+        lastExitCode: number | null;
+        lastErrorMessage: string;
+      }>;
       onMicChunk: (
         listener: (chunk: {
           ok: boolean;

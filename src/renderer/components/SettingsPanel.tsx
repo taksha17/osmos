@@ -1202,6 +1202,7 @@ function DiagnosticsPanel({ settings }: { settings: AppSettings }) {
       { name: 'Speaker / system audio', status: 'pending', detail: 'Capturing 3 s…' },
       { name: 'Speech-to-text model', status: 'pending', detail: 'Warming Whisper…' },
       { name: 'Stealth (capture exclusion)', status: 'pending', detail: 'Checking OS support…' },
+      { name: 'Mic stream lifecycle', status: 'pending', detail: 'Checking main-process mic stream…' },
     ]);
 
     // 1. Mic test
@@ -1285,6 +1286,25 @@ function DiagnosticsPanel({ settings }: { settings: AppSettings }) {
       }
     } catch {
       setAt(3, { status: 'pending', detail: 'no info available' });
+    }
+
+    // 5. Mic stream lifecycle — report recent deaths (Linux PipeWire stalls
+    // typically only show up here, after the user has hit Smart once).
+    try {
+      const d = await window.osmos.micDiagnostics();
+      if (!d || d.deathCount === 0) {
+        setAt(4, { status: 'ok', detail: 'no recent deaths — stream has not crashed this session' });
+      } else {
+        const age = d.lastDeathAt ? Math.round((Date.now() - d.lastDeathAt) / 1000) : '?';
+        const code = d.lastExitCode === null ? '?' : d.lastExitCode;
+        const stderr = (d.lastStderr || '').slice(-200) || '<empty>';
+        setAt(4, {
+          status: 'warn',
+          detail: `${d.deathCount} death(s); last exit=${code} ${age}s ago; stderr: ${stderr}`,
+        });
+      }
+    } catch (e) {
+      setAt(4, { status: 'pending', detail: e instanceof Error ? e.message : String(e) });
     }
 
     setRunning(false);

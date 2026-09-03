@@ -682,6 +682,10 @@ function registerIpc() {
     return { ok: true };
   });
 
+  ipcMain.handle('mic:diagnostics', async () => {
+    return getMicStream().getLastError();
+  });
+
   ipcMain.handle('audio:list-devices', async (): Promise<AudioDevicesResponse> => {
     try {
       const list = await listAudioDevices();

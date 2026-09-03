@@ -52,6 +52,16 @@ const api = {
   startMicListen: (payload?: { device?: string; chunkMs?: number }) =>
     ipcRenderer.invoke('mic:listen-start', payload || {}),
   stopMicListen: () => ipcRenderer.invoke('mic:listen-stop'),
+  micDiagnostics: () =>
+    ipcRenderer.invoke('mic:diagnostics') as Promise<{
+      deathCount: number;
+      lastSpawnAt: number | null;
+      lastDeathAt: number | null;
+      lastSpawnArgs: string[];
+      lastStderr: string;
+      lastExitCode: number | null;
+      lastErrorMessage: string;
+    }>,
   onMicChunk: (
     listener: (chunk: {
       ok: boolean;

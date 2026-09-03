@@ -13,9 +13,32 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { app } from 'electron';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { listAudioDevices, resolveLinuxMicSource } from './audioDevices.js';
 import { resolveFfmpeg, safeSpawnCwd } from './resolveBin.js';
 import { listAvAudioInputs, listDshowAudioInputs } from '../platform/index.js';
+
+const LOG_PATH = (() => {
+  try {
+    const dir = path.join(os.homedir(), '.config', 'OSMOS', 'logs');
+    fs.mkdirSync(dir, { recursive: true });
+    return path.join(dir, 'mic-stream.log');
+  } catch {
+    return '';
+  }
+})();
+
+function logLine(msg: string) {
+  if (!LOG_PATH) return;
+  try {
+    fs.appendFileSync(LOG_PATH, `${new Date().toISOString()} ${msg}\n`);
+  } catch {
+    /* ignore */
+  }
+}
 
 const SAMPLE_RATE = 16_000;
 const CHANNELS = 1;
@@ -74,11 +97,39 @@ export class MicStream extends EventEmitter {
   /** Tail of previous chunk (0.25s) so words split at boundaries keep context. */
   private tail: Buffer = Buffer.alloc(0);
   private static OVERLAP_BYTES = Math.floor(SAMPLE_RATE * BYTES_PER_SAMPLE * 0.25);
+
+  // ── Diagnostics surface — every death is captured in-memory for the
+  // "Run diagnostics" panel and persisted to a log file so we can finally
+  // answer "why does the Linux mic stream die after one chunk?".
+  private deathCount = 0;
+  private lastSpawnAt: number | null = null;
+  private lastDeathAt: number | null = null;
+  private lastSpawnArgs: string[] = [];
+  private lastStderr: string = '';
+  private lastExitCode: number | null = null;
+  private lastErrorMessage: string = '';
   /** Resolved per-platform spawn target + args prefix. */
   private backendArgs: string[] | null = null;
 
   get isRunning() {
     return this.running;
+  }
+
+  /**
+   * Diagnostic snapshot — every death is captured here so the
+   * "Run diagnostics" panel can show the user *why* capture died.
+   * Backs a log file on disk so it survives app crashes.
+   */
+  getLastError() {
+    return {
+      deathCount: this.deathCount,
+      lastSpawnAt: this.lastSpawnAt,
+      lastDeathAt: this.lastDeathAt,
+      lastSpawnArgs: this.lastSpawnArgs,
+      lastStderr: this.lastStderr,
+      lastExitCode: this.lastExitCode,
+      lastErrorMessage: this.lastErrorMessage,
+    };
   }
 
   async start(
@@ -193,6 +244,13 @@ export class MicStream extends EventEmitter {
     }
     this.child = child;
     this.running = true;
+    this.lastSpawnAt = Date.now();
+    this.lastSpawnArgs = [...this.backendArgs!, bin];
+    this.lastStderr = '';
+    this.lastExitCode = null;
+    logLine(
+      `spawn pid=${child.pid} backend=${process.platform} args=${JSON.stringify(this.lastSpawnArgs)}`,
+    );
 
     let errBuf = '';
     child.stdout?.on('data', (buf: Buffer) => {
@@ -217,16 +275,29 @@ export class MicStream extends EventEmitter {
 
     child.stderr?.on('data', (b: Buffer) => {
       errBuf += b.toString('utf8');
-      if (errBuf.length > 500) errBuf = errBuf.slice(-500);
+      // 16 KB is enough to capture the useful tail of an ffmpeg crash on
+      // PipeWire (which prints multi-line probe errors + stack hints) without
+      // blowing up memory if ffmpeg is chatty.
+      if (errBuf.length > 16_384) errBuf = errBuf.slice(-16_384);
     });
 
     child.on('error', (err) => {
       if (!this.running) return;
+      logLine(`error event: ${err.message}`);
+      this.lastErrorMessage = err.message;
       this.emit('error', err.message || 'mic ffmpeg failed');
     });
 
     child.on('close', (code) => {
       if (!this.running) return;
+      this.deathCount += 1;
+      this.lastDeathAt = Date.now();
+      this.lastStderr = errBuf.trim();
+      this.lastExitCode = code;
+      const stderrTail = (errBuf.trim() || '<empty>').slice(-2_000);
+      logLine(
+        `close pid=${child.pid} code=${code} ageMs=${this.lastDeathAt - (this.lastSpawnAt ?? 0)} stderr=${stderrTail}`,
+      );
       // Self-heal: respawn with escalating backoff instead of going silent.
       if (this.respawns < 5) {
         this.respawns += 1;
@@ -238,10 +309,11 @@ export class MicStream extends EventEmitter {
         return;
       }
       this.running = false;
-      this.emit(
-        'error',
-        `Mic capture stopped (code ${code})${errBuf.trim() ? `: ${errBuf.trim().slice(0, 160)}` : ''}`,
-      );
+      const stderrHead = errBuf.trim().slice(0, 400);
+      this.lastErrorMessage = `Mic capture stopped (code ${code})${
+        stderrHead ? ` · ${stderrHead}` : ''
+      }`;
+      this.emit('error', this.lastErrorMessage);
     });
   }
 
