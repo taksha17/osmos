@@ -25,8 +25,12 @@ out/
 
 # Local Whisper / Transformers / ONNX caches (downloaded at runtime)
 whisper-cache/
+.whisper-cache/
 .transformers-cache/
 onnx-cache/
+
+# AppImage extract leftovers
+squashfs-root/
 
 # OCR language data (downloaded at runtime by tesseract.js; must not be committed)
 *.traineddata

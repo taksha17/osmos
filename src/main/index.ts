@@ -34,6 +34,7 @@ import { getMicStream } from './services/micStream.js';
 import { getScreenLiveEngine } from './services/screenLive.js';
 import { listAudioDevicesPython, stopPythonAudioWorker, startAudioCapturePython, stopAudioCapturePython, getAudioDeviceInfoPython } from './services/pythonAudio.js';
 import { CONTINUOUS_CHUNK_MS } from '../shared/continuousAssist.js';
+import { SCREEN_CONTEXT_MAX_CHARS } from '../shared/screenContext.js';
 import {
   addQuestionBankItem,
   deleteQuestionBankItem,
@@ -121,7 +122,10 @@ let launcher: BrowserWindow | null = null;
 let overlay: BrowserWindow | null = null;
 const streamAbortControllers = new Map<string, AbortController>();
 
-async function buildChatContext(message: string) {
+async function buildChatContext(
+  message: string,
+  screen?: { text?: string; at?: number },
+) {
   const s = getSettings();
   const mode = modeDef(s.activeMode || 'general');
   const active = activeSavedProfile(s.profiles, s.activeProfileId);
@@ -255,6 +259,23 @@ async function buildChatContext(message: string) {
     }
   }
 
+  const screenText = (screen?.text || '').trim().slice(0, SCREEN_CONTEXT_MAX_CHARS);
+  let screenBlock = '';
+  if (screenText) {
+    const ageSec = screen?.at ? Math.max(0, Math.round((Date.now() - screen.at) / 1000)) : null;
+    screenBlock = [
+      '',
+      '',
+      `# On-screen text (OCR${ageSec !== null ? `, captured ${ageSec}s ago` : ''})`,
+      'This is what is currently visible on the user’s screen (meeting slide, coding problem, question, document).',
+      'OCR is imperfect and may include browser/UI noise — ignore anything irrelevant.',
+      'If the user’s question refers to “this”, “the screen”, “the question”, or a problem shown, answer using this text.',
+      '---',
+      screenText,
+      '---',
+    ].join('\n');
+  }
+
   const system = [
     `You are ${APP_NAME}, an open-source desktop AI copilot.`,
     'Be accurate, concise, and honest about uncertainty.',
@@ -271,6 +292,7 @@ async function buildChatContext(message: string) {
     toolBlock,
     prepBlock,
     docBlock,
+    screenBlock,
     webBlock ? `\n\n# Live web research\n${webBlock}` : '',
   ].join('\n');
 
@@ -500,9 +522,10 @@ function registerIpc() {
   );
 
   ipcMain.handle('stt:transcribe', async (_e, req: TranscribeRequest) => {
-    const engine =
-      req.engine ||
-      (getSettings().sttProvider === 'local-whisper' ? 'local' : 'openai');
+    // Local STT (moonshine/whisper via system Node worker) is the default —
+    // cloud keys are never used for transcription unless the user explicitly
+    // picks the openai-whisper engine in Settings.
+    const engine = req.engine || 'local';
     try {
       if (engine === 'local') return await transcribeLocalWhisper(req);
       return await transcribeWithWhisper(req);
@@ -626,12 +649,19 @@ function registerIpc() {
 
   ipcMain.handle(
     'screen:live-start',
-    async (e, req?: { intervalMs?: number }): Promise<{ ok: boolean; error?: string }> => {
+    async (
+      e,
+      req?: { intervalMs?: number },
+    ): Promise<{ ok: boolean; error?: string; backend?: string }> => {
       const engine = getScreenLiveEngine();
       const sender = e.sender;
       engine.removeAllListeners('text');
+      engine.removeAllListeners('error');
       engine.on('text', (ev) => {
         if (!sender.isDestroyed()) sender.send('screen:live-text', ev);
+      });
+      engine.on('error', (error: string) => {
+        if (!sender.isDestroyed()) sender.send('screen:live-text', { text: '', at: Date.now(), error });
       });
       return engine.start(req?.intervalMs ?? 2500);
     },
@@ -640,6 +670,11 @@ function registerIpc() {
   ipcMain.handle('screen:live-stop', async (): Promise<{ ok: boolean }> => {
     await getScreenLiveEngine().stop();
     return { ok: true };
+  });
+
+  /** Silent one-shot OCR (Mutter on GNOME — no picker, no flash). */
+  ipcMain.handle('screen:grab', async (): Promise<{ ok: boolean; text?: string; at?: number; error?: string }> => {
+    return getScreenLiveEngine().grabOnce();
   });
 
   /** Main-process mic stream for Smart mode — survives renderer lifecycle churn. */
@@ -768,7 +803,10 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
     const message = (req?.message || '').trim();
     if (!message) return { ok: false, error: 'Empty message' };
 
-    const { s, system, usedWebSearch, searchHits, provider } = await buildChatContext(message);
+    const { s, system, usedWebSearch, searchHits, provider } = await buildChatContext(message, {
+      text: req?.screenText,
+      at: req?.screenAt,
+    });
 
     try {
       const answer = await chatWithProvider(
@@ -814,7 +852,10 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
       const ac = new AbortController();
       streamAbortControllers.set(requestId, ac);
 
-      const { s, system, usedWebSearch, searchHits, provider } = await buildChatContext(message);
+      const { s, system, usedWebSearch, searchHits, provider } = await buildChatContext(message, {
+        text: req?.screenText,
+        at: req?.screenAt,
+      });
       emit({ requestId, type: 'meta', usedWebSearch, searchHits });
 
       try {
@@ -1032,11 +1073,16 @@ app.whenReady().then(() => {
       console.log('[setDisplayMediaRequestHandler] Request received:', request);
       try {
         const { desktopCapturer } = await import('electron');
+        // Linux/Wayland: getSources IS the portal picker. Offer windows too so the
+        // user can hand 👁 Live just the meeting window (no overlay, no browser
+        // chrome in OCR). Windows/macOS keep screen-only for the audio-loopback path.
+        const types: Array<'screen' | 'window'> =
+          process.platform === 'linux' && !loopbackAudioEnabled ? ['screen', 'window'] : ['screen'];
         const sources = await desktopCapturer.getSources({
-          types: ['screen'],
+          types,
           thumbnailSize: { width: 1, height: 1 },
         });
-        const screen = sources[0];
+        const screen = sources.find((s) => s.id.startsWith('screen:')) || sources[0];
         console.log('[setDisplayMediaRequestHandler] Sources count:', sources.length, 'Selected screen:', screen?.name);
         if (!screen) {
           console.warn('[setDisplayMediaRequestHandler] No screen source found');

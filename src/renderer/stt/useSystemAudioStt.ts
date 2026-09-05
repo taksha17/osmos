@@ -57,6 +57,7 @@ export function useSystemAudioStt(settings: AppSettings | null) {
       mimeType: mimeType || 'audio/wav',
       fileName: 'system-audio.wav',
       engine: engineForSettings(settingsRef.current),
+      model: settingsRef.current?.localSttModel,
     });
 
   const start = useCallback(async () => {

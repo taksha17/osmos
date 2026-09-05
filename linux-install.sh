@@ -71,6 +71,14 @@ check_system_deps() {
       MISSING+=("$dep")
     fi
   done
+
+  # No-prompt screen reading on GNOME (Mutter ScreenCast via python + GStreamer/PipeWire).
+  # Optional: only the 👁 Live silent path needs these; falls back to the share dialog without them.
+  for dep in python3-gi gir1.2-gst-plugins-base-1.0 gstreamer1.0-plugins-good gstreamer1.0-pipewire; do
+    if ! dpkg -l "$dep" >/dev/null 2>&1; then
+      MISSING+=("$dep")
+    fi
+  done
   
   if [ ${#MISSING[@]} -ne 0 ]; then
     echo "Installing missing system dependencies..."

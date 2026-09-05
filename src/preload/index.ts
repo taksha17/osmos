@@ -20,6 +20,7 @@ const api = {
     mimeType: string;
     fileName?: string;
     engine?: 'local' | 'openai';
+    model?: string;
   }) => ipcRenderer.invoke('stt:transcribe', payload),
   captureRegion: () => ipcRenderer.invoke('screen:capture'),
   captureFullScreen: (opts?: { loopSafe?: boolean }) =>
@@ -164,6 +165,8 @@ const api = {
     payload: {
       message: string;
       history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+      screenText?: string;
+      screenAt?: number;
     },
     onEvent: (event: ChatStreamEvent) => void,
   ) => {
@@ -211,13 +214,19 @@ const api = {
   resetOverlayIdle: () => ipcRenderer.invoke('overlay:reset-idle'),
   log: (level: 'log' | 'info' | 'warn' | 'error', ...args: any[]) => ipcRenderer.invoke('app:log', level, ...args),
   clearAllHistory: () => ipcRenderer.invoke('history:clear-all'),
-  startScreenLive: (payload?: { intervalMs?: number }) =>
+  startScreenLive: (
+    payload?: { intervalMs?: number },
+  ): Promise<{ ok: boolean; error?: string; backend?: string }> =>
     ipcRenderer.invoke('screen:live-start', payload || {}),
   stopScreenLive: () => ipcRenderer.invoke('screen:live-stop'),
+  grabScreen: (): Promise<{ ok: boolean; text?: string; at?: number; error?: string }> =>
+    ipcRenderer.invoke('screen:grab'),
   screenLiveCapable: () => ipcRenderer.invoke('screen:live-capable'),
-  onScreenLiveText: (listener: (ev: { text: string; at: number }) => void) => {
-    const handler = (_e: Electron.IpcRendererEvent, ev: { text: string; at: number }) =>
-      listener(ev);
+  onScreenLiveText: (listener: (ev: { text: string; at: number; error?: string }) => void) => {
+    const handler = (
+      _e: Electron.IpcRendererEvent,
+      ev: { text: string; at: number; error?: string },
+    ) => listener(ev);
     ipcRenderer.on('screen:live-text', handler);
     return () => ipcRenderer.removeListener('screen:live-text', handler);
   },

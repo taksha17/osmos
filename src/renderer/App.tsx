@@ -53,6 +53,7 @@ declare global {
         mimeType: string;
         fileName?: string;
         engine?: 'local' | 'openai';
+        model?: string;
       }) => Promise<{ ok: boolean; text?: string; error?: string }>;
       captureRegion: () => Promise<{ dataUrl: string; cancelled: boolean; error?: string }>;
       captureFullScreen: (opts?: { loopSafe?: boolean }) =>
@@ -112,10 +113,13 @@ declare global {
       onMicStatus: (listener: (ev: { text: string }) => void) => () => void;
       clearAllHistory: () => Promise<{ ok: boolean; error?: string }>;
       startScreenLive: (payload?: { intervalMs?: number }) =>
-        Promise<{ ok: boolean; error?: string }>;
+        Promise<{ ok: boolean; error?: string; backend?: string }>;
       stopScreenLive: () => Promise<{ ok: boolean }>;
+      grabScreen: () => Promise<{ ok: boolean; text?: string; at?: number; error?: string }>;
       screenLiveCapable: () => Promise<boolean>;
-      onScreenLiveText: (listener: (ev: { text: string; at: number }) => void) => () => void;
+      onScreenLiveText: (
+        listener: (ev: { text: string; at: number; error?: string }) => void,
+      ) => () => void;
       listAudioDevices: () => Promise<import('@shared/types').AudioDevicesResponse>;
       captureMicAudio: (payload?: { durationMs?: number; device?: string }) =>
         Promise<{ ok: boolean; base64?: string; mimeType?: string; error?: string }>;
@@ -159,6 +163,8 @@ declare global {
         payload: {
           message: string;
           history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+          screenText?: string;
+          screenAt?: number;
         },
         onEvent: (event: ChatStreamEvent) => void,
       ) => { requestId: string; done: Promise<unknown>; cancel: () => Promise<unknown> };

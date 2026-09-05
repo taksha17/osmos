@@ -12,7 +12,7 @@
 <p align="center">
   <a href="#license"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <a href="#install--run"><img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue"></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.5.3-orange">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.5.9-orange">
 </p>
 
 ---
@@ -43,7 +43,7 @@ Everything runs **on your machine**: audio never leaves it unless *you* pick a c
 - Silence is skipped intelligently (no wasted transcription), and non-speech markers like `[Music]` are filtered out of notes
 
 ### 👁 Live Screen Reading
-Cluely-style continuous context: every ~2.5s OSMOS snapshots the display, hides its own overlay first so it never OCRs itself, runs hash-deduplicated OCR (unchanged screens cost almost nothing), and feeds the text into every answer automatically. No buttons mid-session.
+Silent background OCR on every OS — Mutter ScreenCast on GNOME (no picker, no flash), GDI on Windows, `screencapture` on macOS. Overlay self-echo is stripped in software. Fresh on-screen text is attached to the next question automatically.
 
 ### ⚡ Smart Mode
 One toggle orchestrates both ears + live screen. A visible `● REC` chip stays on while capture is active — honest by default.
@@ -77,7 +77,7 @@ flowchart LR
     subgraph Main process
         MIC[Mic stream\nffmpeg pulse/dshow/avfoundation] --> WAV[6s WAV chunks]
         SPK[Speaker loopback\nmonitor capture] --> WAV
-        LIVE[Live screen engine\nhide → snap → OCR] --> CTX[Fused context]
+        LIVE[Live screen engine\nsilent snap → OCR] --> CTX[Fused context]
         WAV --> WHISPER[Whisper worker\nstandalone binary]
     end
     WHISPER -->|finals| PANEL[Transcript panel]
@@ -103,7 +103,7 @@ Every installer is **fully self-contained** — no manual installs on any OS:
 - **macOS**: `.dmg` (unsigned for now — right-click → Open pastes Gatekeeper) with bundled ffmpeg
 - **Linux**: `.deb` / AppImage with bundled ffmpeg; uses your existing PipeWire/Pulse
 
-Optional (not required): `gnome-screenshot` unlocks silent background screen reading on GNOME Wayland — without it the 👁 Live toggle simply stays off instead of nagging you with dialogs.
+GNOME Live screen reading uses Mutter ScreenCast (`python3-gi` + GStreamer/PipeWire, default on Ubuntu). macOS needs Screen Recording once in System Settings.
 
 ### Developers
 

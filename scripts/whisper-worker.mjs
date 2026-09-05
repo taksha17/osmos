@@ -1,19 +1,23 @@
 #!/usr/bin/env node
 /**
- * Standalone Whisper worker (system Node, not Electron).
+ * Standalone STT worker (system Node, not Electron).
  *
  * One-shot:
- *   node scripts/whisper-worker.mjs <audioPath> <cacheDir>
+ *   node scripts/whisper-worker.mjs <audioPath> <cacheDir> [modelId]
  *
  * Persistent (keeps model warm for continuous STT):
  *   node scripts/whisper-worker.mjs --serve <cacheDir>
- *   stdin:  one JSON line per request { "id": "...", "audioPath": "..." }
+ *   stdin:  one JSON line per request { "id": "...", "audioPath": "...", "model"?: "..." }
  *   stdout: one JSON line per response { "id", "ok", "text?"|"error?" }
  *
  * Audio must be WAV (PCM). The renderer converts mic recordings to 16 kHz mono WAV.
+ *
+ * Supported models (transformers.js v3+ / ONNX):
+ *   - onnx-community/moonshine-tiny-ONNX  (MIT, fast streaming STT — default)
+ *   - Xenova/whisper-base.en              (MIT, strong on accents)
  */
 
-import { pipeline, env } from '@xenova/transformers';
+import { pipeline, env } from '@huggingface/transformers';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -96,28 +100,41 @@ function readWavPcm(filePath) {
 env.cacheDir = cacheDir;
 env.allowLocalModels = false;
 
-// tiny.en misses far-field/quiet speech; base.en is ~2x slower on CPU but
-// dramatically more accurate. Override with OSMOS_WHISPER_MODEL if needed.
-const WHISPER_MODEL = process.env.OSMOS_WHISPER_MODEL || 'Xenova/whisper-base.en';
+// Moonshine tiny is fast enough for real-time chunk transcription on CPU.
+// Override with OSMOS_WHISPER_MODEL if needed (e.g. Xenova/whisper-base.en).
+const DEFAULT_MODEL = process.env.OSMOS_WHISPER_MODEL || 'onnx-community/moonshine-tiny-ONNX';
 
-async function loadAsr() {
-  return pipeline('automatic-speech-recognition', WHISPER_MODEL);
+const isWhisper = (m) => /whisper/i.test(m);
+const isMoonshine = (m) => /moonshine/i.test(m);
+// English-only whisper variants (.en) reject the language/task args.
+const isEnOnly = (m) => /\.en$/i.test(m);
+
+async function loadAsr(modelId) {
+  // Moonshine's fp32 ONNX export silently outputs empty text — q8 is the
+  // quantization the upstream team ships as default and works reliably.
+  const opts = isMoonshine(modelId) ? { dtype: 'q8' } : {};
+  return pipeline('automatic-speech-recognition', modelId, opts);
 }
 
-async function transcribeFile(asr, filePath) {
+async function transcribeFile(asr, modelId, filePath) {
   const { samples, sampleRate } = readWavPcm(filePath);
   if (samples.length < 1600) throw new Error('Recording too short — speak a bit longer.');
-  const result = await asr(samples, {
-    sampling_rate: sampleRate,
-    language: 'english',
-    task: 'transcribe',
-    return_timestamps: false,
-  });
+  const opts = { sampling_rate: sampleRate, return_timestamps: false };
+  if (isWhisper(modelId) && !isEnOnly(modelId)) {
+    opts.language = 'english';
+    opts.task = 'transcribe';
+  }
+  const result = await asr(samples, opts);
   return String(result?.text || '').trim();
 }
 
 if (serveMode) {
-  let asr = null;
+  /** Warm ASR instances keyed by model id — switching models keeps both warm. */
+  const asrs = new Map();
+  async function getAsr(modelId) {
+    if (!asrs.has(modelId)) asrs.set(modelId, await loadAsr(modelId));
+    return asrs.get(modelId);
+  }
   const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 
   process.stdout.write(JSON.stringify({ ok: true, ready: true }) + '\n');
@@ -133,9 +150,10 @@ if (serveMode) {
       continue;
     }
     const id = req.id || '';
+    const modelId = typeof req.model === 'string' && req.model ? req.model : DEFAULT_MODEL;
     try {
-      if (!asr) asr = await loadAsr();
-      const text = await transcribeFile(asr, req.audioPath);
+      const asr = await getAsr(modelId);
+      const text = await transcribeFile(asr, modelId, req.audioPath);
       process.stdout.write(JSON.stringify({ id, ok: true, text }) + '\n');
     } catch (e) {
       process.stdout.write(
@@ -151,10 +169,11 @@ if (serveMode) {
 }
 
 if (!audioPath) fail('missing audio path');
+const oneShotModel = positional[2] || DEFAULT_MODEL;
 
 try {
-  const asr = await loadAsr();
-  const text = await transcribeFile(asr, audioPath);
+  const asr = await loadAsr(oneShotModel);
+  const text = await transcribeFile(asr, oneShotModel, audioPath);
   process.stdout.write(JSON.stringify({ ok: true, text }) + '\n');
 } catch (e) {
   fail(e instanceof Error ? e.message : String(e));

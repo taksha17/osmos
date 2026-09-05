@@ -723,8 +723,8 @@ $bmp.Dispose();
       'Stealth: skip taskbar + always-on-top. Linux has no OS capture-exclusion flag — share a browser tab/window, not the full desktop.',
       'System audio: ffmpeg pulse or pw-record on the default sink *.monitor (meeting audio). Not screen-share.',
       canLoopSafeScreenCapture()
-        ? 'Continuous screen OCR uses CLI tools (grim / gnome-screenshot / spectacle / scrot) — never loops the Wayland portal.'
-        : 'Continuous screen OCR needs grim, gnome-screenshot, spectacle, or scrot. 📷 one-shot may still use the portal.',
+        ? 'Continuous screen OCR uses a silent CLI tool (spectacle / grim / scrot). gnome-screenshot is one-shot only (it flashes).'
+        : '👁 Live screen reading uses the screen-share dialog once (ScreenCast portal), then reads silently. 📷 one-shot uses gnome-screenshot (flashes once).',
     ],
     applyStealth(enabled, windows) {
       for (const win of windows) {

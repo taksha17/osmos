@@ -321,8 +321,9 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                 <div className="settings-row__copy">
                   <strong>Continuous screen assist</strong>
                   <p>
-                    While Smart is on, keep OCR-reading the screen (loop-safe only — never
-                    loops the Wayland portal)
+                    Allow 👁 Live background screen reading. Silent on GNOME (Mutter),
+                    Windows (GDI), and macOS (screencapture). macOS needs Screen Recording
+                    in System Settings once. Answers automatically see fresh on-screen text.
                   </p>
                 </div>
                 <button
@@ -797,8 +798,8 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                 <div>
                   <label style={{ marginBottom: 4 }}>Continuous screen assist</label>
                   <p className="meta" style={{ margin: 0 }}>
-                    While Smart is on, keep OCR-reading the screen. Uses loop-safe capture only
-                    (never loops the Wayland portal).
+                    Allow 👁 Live background screen reading. Silent on GNOME, Windows, and
+                    macOS (macOS: grant Screen Recording once). No share picker on those paths.
                   </p>
                 </div>
                 <button
@@ -870,10 +871,30 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
               <DiagnosticsPanel settings={settings} />
 
               {settings.sttProvider === 'local-whisper' && (
-                <p className="meta" style={{ marginBottom: 14 }}>
-                  Click Start mic, speak, then Stop. Uses a local Node Whisper worker (needs `node` on PATH). First
-                  run downloads a small model once.
-                </p>
+                <>
+                  <p className="meta" style={{ marginBottom: 14 }}>
+                    Runs fully offline via a local Node worker (moonshine by default — no cloud
+                    keys involved). First run downloads the model once.
+                  </p>
+                  <div className="field" style={{ marginBottom: 14 }}>
+                    <label>Local STT model</label>
+                    <select
+                      value={settings.localSttModel || 'onnx-community/moonshine-tiny-ONNX'}
+                      onChange={(e) => set({ localSttModel: e.target.value })}
+                    >
+                      <option value="onnx-community/moonshine-tiny-ONNX">
+                        Moonshine tiny (recommended — fast + accurate)
+                      </option>
+                      <option value="Xenova/whisper-base.en">
+                        Whisper base.en (slower, strong on accents)
+                      </option>
+                      <option value="Xenova/whisper-tiny.en">Whisper tiny.en (lightest)</option>
+                    </select>
+                    <p className="meta" style={{ marginTop: 6 }}>
+                      Switching models triggers a one-time download on first use.
+                    </p>
+                  </div>
+                </>
               )}
               {settings.sttProvider === 'webspeech' && (
                 <p className="meta" style={{ marginBottom: 14 }}>

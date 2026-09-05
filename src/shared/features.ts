@@ -82,7 +82,7 @@ export const FEATURES: FeatureDef[] = [
     id: 'screen-capture',
     name: 'Screen / screenshot OCR',
     description:
-      'On-demand 📷 + optional continuous loop-safe screen assist (Win GDI / macOS screencapture / Linux CLI). Never loops Wayland portal capture.',
+      '📷 one-shot OCR + 👁 Live. Silent backends: Mutter ScreenCast (GNOME), GDI (Windows), screencapture (macOS). Fresh screen text is attached to your next question automatically.',
     status: 'live',
     platforms: ['linux', 'darwin', 'win32'],
   },

@@ -50,7 +50,7 @@ Open-source, free alternative to Cluely: real-time desktop AI copilot for interv
 - [x] Stealth / screen-share safer overlay (Win/macOS OS capture exclusion, skip taskbar, faster idle dim; Linux share-tab guidance)
 - [ ] Signed builds + notarization (CI matrix builds unsigned artifacts today)
 - [x] Branding pass (name lock, icon, landing)
-- [x] CI typecheck + build matrix (unsigned packaging on Linux)
+- [x] CI typecheck + build matrix (unsigned Linux / macOS / Windows installers on `v*` tags)
 
 ## Design rules
 

@@ -116,9 +116,9 @@ also awaited inline, which blocks the next capture.
 
 ### Fix — persistent loop with change detection
 
-Implemented in `src/renderer/stt/useScreenAssist.ts`, wired from overlay Smart mode when
-`continuousScreenAssist` is enabled (Settings). LLM assist is fire-and-forget so capture
-keeps polling.
+Implemented in `src/main/services/screenLive.ts` (Mutter / GDI / screencapture) and
+`src/renderer/stt/liveScreenStream.ts` (Win/mac fallback). LLM assist is fire-and-forget
+so capture keeps polling.
 
 **Hard constraint (Linux/Wayland):** never loop Electron `desktopCapturer` (portal spam).
 Loop-safe capture uses CLI / OS APIs only (`screen:capture-full` with `loopSafe: true`).

@@ -14,10 +14,7 @@ import { desktopCapturer, screen } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
+import { spawn } from 'node:child_process';
 import type { CaptureResult } from '../../shared/types.js';
 import { findOnPath, safeSpawnCwd } from './resolveBin.js';
 
@@ -26,36 +23,87 @@ export type CaptureScreenOptions = {
   loopSafe?: boolean;
 };
 
+/**
+ * Strip VS Code Snap's library/module overrides — child processes inherit a
+ * polluted glibc/gtk/gio module path that kills system binaries like
+ * `gnome-screenshot` (`undefined symbol: __libc_pthread_init`).
+ */
+export function cleanSpawnEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  const SNAP_VARS = [
+    'LD_LIBRARY_PATH',
+    'LD_PRELOAD',
+    'GIO_MODULE_DIR',
+    'GTK_PATH',
+    'GTK_IM_MODULE_FILE',
+    'GDK_PIXBUF_MODULE_FILE',
+    'GDK_PIXBUF_MODULEDIR',
+    'GSETTINGS_SCHEMA_DIR',
+    'GTK_EXE_PREFIX',
+    'XOAUTH_TOKEN',
+    'SNAP_LIBRARY_PATH',
+  ];
+  for (const k of SNAP_VARS) delete env[k];
+  return env;
+}
+
 async function tryCliScreenshot(command: string, args: string[], tmp: string): Promise<boolean> {
   const bin = findOnPath(command);
-  if (!bin) return false;
+  if (!bin) {
+    console.log(`[screenCapture] ${command}: not on PATH`);
+    return false;
+  }
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(bin, args, { stdio: 'ignore', cwd: safeSpawnCwd(), windowsHide: true });
+      child = spawn(bin, args, {
+        stdio: ['ignore', 'ignore', 'pipe'],
+        cwd: safeSpawnCwd(),
+        windowsHide: true,
+        env: cleanSpawnEnv(),
+      });
     } catch {
       resolve(false);
       return;
     }
+    let stderr = '';
+    child.stderr?.on('data', (d: Buffer) => {
+      stderr += d.toString('utf8');
+      if (stderr.length > 2000) stderr = stderr.slice(-2000);
+    });
     const timer = setTimeout(() => {
       try {
         child.kill('SIGTERM');
       } catch {
         /* ignore */
       }
+      console.log(`[screenCapture] ${command}: timeout`);
       resolve(false);
     }, 8000);
-    child.on('error', () => {
+    child.on('error', (err) => {
       clearTimeout(timer);
+      console.log(`[screenCapture] ${command}: spawn error:`, err.message);
       resolve(false);
     });
-    child.on('close', (code) => {
+    child.on('close', async (code) => {
       clearTimeout(timer);
-      try {
-        resolve(code === 0 && fs.existsSync(tmp) && fs.statSync(tmp).size > 800);
-      } catch {
-        resolve(false);
+      // gnome-screenshot sometimes writes the file just before/at close —
+      // a brief poll avoids racing the write.
+      let sz = 0;
+      for (let i = 0; i < 15; i++) {
+        try {
+          sz = fs.existsSync(tmp) ? fs.statSync(tmp).size : 0;
+        } catch {
+          sz = 0;
+        }
+        if (sz > 800) break;
+        await new Promise((r) => setTimeout(r, 100));
       }
+      const ok = code === 0 && sz > 800;
+      console.log(
+        `[screenCapture] ${command}: exit=${code} ok=${ok} size=${sz}${stderr.trim() ? ` stderr=${stderr.trim().slice(0, 400)}` : ''}`,
+      );
+      resolve(ok);
     });
   });
 }
@@ -130,35 +178,66 @@ async function captureViaDesktopCapturer(): Promise<CaptureResult> {
   }
 }
 
-/** True when a non-portal capture path exists for continuous OCR. */
-export function canLoopSafeScreenCapture(): boolean {
-  if (process.platform === 'win32') return true;
-  if (process.platform === 'darwin') return Boolean(findOnPath('screencapture'));
-  return Boolean(
-    findOnPath('gnome-screenshot') ||
-      findOnPath('spectacle') ||
-      findOnPath('grim') ||
-      findOnPath('scrot'),
+function isWaylandSession(): boolean {
+  return (
+    (process.env.XDG_SESSION_TYPE || '').toLowerCase() === 'wayland' ||
+    Boolean(process.env.WAYLAND_DISPLAY)
   );
 }
 
+function isGnomeDesktop(): boolean {
+  return /gnome/i.test(process.env.XDG_CURRENT_DESKTOP || process.env.DESKTOP_SESSION || '');
+}
+
 /**
- * True when a silent screenshot path exists on this OS:
- * - Linux: one of the CLI tools (gnome-screenshot/spectacle/grim/scrot)
- * - Windows/macOS: Electron desktopCapturer never shows a portal dialog
- * Used to gate 👁 Live background reading without risking portal spam.
+ * Whether a capture tool can be polled every few seconds WITHOUT the user
+ * noticing. Rules (verified on GNOME 46 / Ubuntu 24.04):
+ *   - `gnome-screenshot` and the xdg Screenshot portal play GNOME Shell's white
+ *     shutter flash on EVERY shot (hard-coded, no flag). Fine for 📷 one-shot,
+ *     unusable in a loop.
+ *   - `grim` (wlroots) and `scrot` (X11) are silent, but do not work on Mutter/
+ *     GNOME Wayland at all.
+ *   - `spectacle -b -n` (KDE) is silent.
+ * On GNOME Wayland the silent continuous path is Mutter ScreenCast
+ * (`mutterScreenCast.ts`), not gnome-screenshot and not the share picker.
+ */
+export function describeLoopSafeCapture(): { ok: boolean; reason?: string; tool?: string } {
+  if (process.platform === 'win32') return { ok: true, tool: 'gdi' };
+  if (process.platform === 'darwin') {
+    return findOnPath('screencapture')
+      ? { ok: true, tool: 'screencapture' }
+      : { ok: false, reason: 'macOS screencapture not found' };
+  }
+  const wayland = isWaylandSession();
+  if (findOnPath('spectacle')) return { ok: true, tool: 'spectacle' };
+  if (findOnPath('grim') && wayland && !isGnomeDesktop()) return { ok: true, tool: 'grim' };
+  if (findOnPath('scrot') && !wayland) return { ok: true, tool: 'scrot' };
+  if (wayland && isGnomeDesktop()) {
+    return {
+      ok: false,
+      reason:
+        'GNOME Wayland cannot loop gnome-screenshot (it flashes). Live reading uses Mutter ScreenCast instead.',
+    };
+  }
+  return {
+    ok: false,
+    reason:
+      'No silent screenshot tool found (Windows GDI, macOS screencapture, grim on wlroots, scrot on X11, spectacle on KDE).',
+  };
+}
+
+/** True when a non-portal, non-flashing capture path exists for continuous OCR. */
+export function canLoopSafeScreenCapture(): boolean {
+  return describeLoopSafeCapture().ok;
+}
+
+/**
+ * Whether the main-process CLI loop (`screenLive.ts`) may run here. Same rule as
+ * `describeLoopSafeCapture` — gnome-screenshot is intentionally excluded because
+ * it flashes. Kept async for API compatibility.
  */
 export async function hasSilentScreenshotTool(): Promise<boolean> {
-  if (process.platform !== 'linux') return true;
-  for (const bin of ['gnome-screenshot', 'spectacle', 'grim', 'scrot']) {
-    try {
-      await execFileAsync(bin, ['--version'], { timeout: 2500 });
-      return true;
-    } catch {
-      /* try next */
-    }
-  }
-  return false;
+  return describeLoopSafeCapture().ok;
 }
 
 /**
@@ -175,18 +254,20 @@ export async function capturePrimaryScreen(opts?: CaptureScreenOptions): Promise
   const mac = await captureMacPrimary(tmp);
   if (mac) return mac;
 
-  // Non-interactive fullscreen tools (no region UI).
-  if (await tryCliScreenshot('gnome-screenshot', ['-f', tmp], tmp)) return readPngDataUrl(tmp);
+  // Non-interactive fullscreen tools (no region UI). Silent tools first; the
+  // flashing gnome-screenshot only for one-shot (never when loopSafe).
   if (await tryCliScreenshot('spectacle', ['-f', '-b', '-n', '-o', tmp], tmp)) return readPngDataUrl(tmp);
   if (await tryCliScreenshot('grim', [tmp], tmp)) return readPngDataUrl(tmp);
   if (await tryCliScreenshot('scrot', [tmp], tmp)) return readPngDataUrl(tmp);
+  if (!loopSafe && (await tryCliScreenshot('gnome-screenshot', ['-f', tmp], tmp))) {
+    return readPngDataUrl(tmp);
+  }
 
   if (loopSafe) {
     return {
       dataUrl: '',
       cancelled: true,
-      error:
-        'Continuous screen assist needs a non-portal capture tool (grim, gnome-screenshot, spectacle, or scrot on Linux).',
+      error: describeLoopSafeCapture().reason || 'No silent capture tool for continuous screen reading.',
     };
   }
 

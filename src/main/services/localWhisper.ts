@@ -5,7 +5,7 @@
  *
  * Uses a persistent `--serve` worker so continuous chunks reuse a warm model.
  *
- * Packaged builds: worker + @xenova/transformers live under app.asar.unpacked
+ * Packaged builds: worker + @huggingface/transformers live under app.asar.unpacked
  * (external Node cannot read asar). Never use app.getAppPath() as spawn cwd —
  * that path is the asar *file* and causes spawn ENOTDIR.
  */
@@ -19,6 +19,18 @@ import { app } from 'electron';
 import type { TranscribeRequest, TranscribeResponse } from '../../shared/types.js';
 import readline from 'node:readline';
 import { findOnPath, isExecutableFile, resolveFfmpeg, safeSpawnCwd } from './resolveBin.js';
+import { getSettings } from './settingsStore.js';
+
+/** Default local STT model when settings/env don't specify one. */
+const DEFAULT_LOCAL_MODEL = 'onnx-community/moonshine-tiny-ONNX';
+
+function getSettingsModel(): string {
+  try {
+    return getSettings().localSttModel || DEFAULT_LOCAL_MODEL;
+  } catch {
+    return DEFAULT_LOCAL_MODEL;
+  }
+}
 
 function isDir(p: string): boolean {
   try {
@@ -165,7 +177,7 @@ function ensureServe(): Promise<void> {
           ...process.env,
           OSMOS_ROOT: root,
           UNCON_ROOT: root,
-          OSMOS_WHISPER_MODEL: process.env.OSMOS_WHISPER_MODEL || 'Xenova/whisper-base.en',
+          OSMOS_WHISPER_MODEL: process.env.OSMOS_WHISPER_MODEL || 'onnx-community/moonshine-tiny-ONNX',
           // Help system Node find unpacked deps next to the worker.
           NODE_PATH: [path.join(root, 'node_modules'), process.env.NODE_PATH]
             .filter(Boolean)
@@ -241,7 +253,7 @@ function ensureServe(): Promise<void> {
   return serveReady;
 }
 
-async function runViaServe(audioPath: string): Promise<{ ok: boolean; text?: string; error?: string }> {
+async function runViaServe(audioPath: string, model?: string): Promise<{ ok: boolean; text?: string; error?: string }> {
   await ensureServe();
   if (!serveProc?.stdin) return { ok: false, error: 'Local Whisper worker not available' };
 
@@ -249,7 +261,7 @@ async function runViaServe(audioPath: string): Promise<{ ok: boolean; text?: str
   return new Promise((resolve) => {
     pending.set(id, { resolve });
     try {
-      serveProc!.stdin.write(JSON.stringify({ id, audioPath }) + '\n');
+      serveProc!.stdin.write(JSON.stringify({ id, audioPath, model }) + '\n');
     } catch (e) {
       pending.delete(id);
       killServe();
@@ -268,6 +280,7 @@ async function runViaServe(audioPath: string): Promise<{ ok: boolean; text?: str
 function runOneShot(
   audioPath: string,
   cacheDir: string,
+  model?: string,
 ): Promise<{ ok: boolean; text?: string; error?: string }> {
   const root = projectRoot();
   const worker = resolveWorkerScript();
@@ -282,7 +295,7 @@ function runOneShot(
 
     let child;
     try {
-      child = spawn(nodeBin, [worker, audioPath, cacheDir], {
+      child = spawn(nodeBin, [worker, audioPath, cacheDir, ...(model ? [model] : [])], {
         cwd,
         env: {
           ...process.env,
@@ -412,11 +425,12 @@ export async function transcribeLocalWhisper(
     }
 
     let result: { ok: boolean; text?: string; error?: string };
+    const model = req.model || getSettingsModel();
     try {
-      result = await runViaServe(whisperInput);
+      result = await runViaServe(whisperInput, model);
     } catch {
       killServe();
-      result = await runOneShot(whisperInput, cacheDir);
+      result = await runOneShot(whisperInput, cacheDir, model);
     }
 
     if (!result.ok) return { ok: false, error: result.error || 'Local Whisper failed' };

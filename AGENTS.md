@@ -10,7 +10,7 @@
 - GitHub: `https://github.com/taksha17/osmos` (public)
 - **Not** a fork or rebrand of Natively. Natively at `/media/taksha/New Volume/natively` is **personal reference only** — study ideas, never copy proprietary/source-available code.
 - License: MIT (`LICENSE`)
-- Current version: **0.5.1** (`package.json`)
+- Current version: **0.5.9** (`package.json`)
 - Reference product: Cluely (real-time interview/meeting copilot). We match core UX: desktop overlay, live transcription, screen context, answer suggestions. We do **not** copy proprietary code or data.
 
 ## Stack
@@ -22,8 +22,8 @@
 | Local LLM | Ollama HTTP (`/api/chat` NDJSON stream) |
 | Cloud LLMs | OpenAI / Anthropic / Groq / OpenRouter / LiteLLM via OpenAI-compatible `/chat/completions` |
 | Web search | DuckDuckGo (default) / Tavily / SearXNG |
-| Offline STT | System Node worker + `@xenova/transformers` Whisper tiny |
-| Screen OCR | Main-process `tesseract.js` via `ocr:extract` IPC |
+| Offline STT | System Node worker + `@huggingface/transformers` v4 — **Moonshine tiny (default, MIT)** or Whisper base.en |
+| Screen OCR | Main-process `tesseract.js` via `ocr:extract` IPC. Continuous 👁 Live prefers a **silent main backend** on every OS: **Mutter ScreenCast** (GNOME), **GDI/PowerShell** (Windows), **`screencapture -x`** (macOS), CLI (`spectacle`/`grim`/`scrot`) elsewhere. Renderer `getDisplayMedia` is Windows/macOS fallback only — **never** on Linux |
 | Audio loopback | Platform adapters: Linux `ffmpeg` pulse / `pw-record` on sink `*.monitor` (not `parec`), Windows `ffmpeg` WASAPI, macOS `ffmpeg`/`rec` + BlackHole |
 | Settings | `electron-store` → `~/.config/OSMOS/osmos-settings.json` (Linux); migrates from legacy `Unconventionally/` |
 | Packaging | electron-builder (AppImage + deb on Linux) |
@@ -55,14 +55,15 @@ Dev entry: `scripts/dev.mjs` → builds electron → Vite → `electron . --no-s
 
 ```
 src/
-  shared/          # types, features, modes, continuousAssist, linuxAudioDevices
+  shared/          # types, features, modes, continuousAssist, screenContext, linuxAudioDevices
   main/
     platform/      # Linux / macOS / Windows adapters (capture, audio loopback, stealth)
     services/      # ollama, whisper, localWhisper, ocr, imageHash, audioDevices,
-                   # linuxLoopbackStream, screenCapture, resolveBin, providers, …
+                   # linuxLoopbackStream, screenCapture, screenLive,
+                   # mutterScreenCast (GNOME no-prompt screen read), resolveBin, providers, …
   preload/         # contextBridge → window.osmos
   renderer/
-    stt/           # micStt, useMicStt, useSystemAudioStt, useScreenAssist, ocr
+    stt/           # useMainMicStt, useSystemAudioStt, liveScreenStream, ocr
     components/    # ChatPanel, HomeDashboard, ProfilePanel, SettingsPanel, …
 scripts/
   whisper-worker.mjs   # system Node Whisper (NOT Electron) — required for local STT
@@ -88,7 +89,7 @@ IPC system:audio-chunk  →  useSystemAudioStt  →  stt:transcribe  →  should
 
 1. **Preload API is `window.osmos`** (not `electronAPI` / legacy `window.uncon`).
 2. **Settings type is `AppSettings`**; store key is `settings`; file name `osmos-settings`.
-3. System prompt is built **only in main** via `buildChatContext()` in `src/main/index.ts`. Renderer sends `{ message, history }` only.
+3. System prompt is built **only in main** via `buildChatContext()` in `src/main/index.ts`. Renderer sends `{ message, history, screenText?, screenAt? }` — raw context, never prompt text.
 4. Feature status lives in `src/shared/features.ts` (`live` | `scaffold` | `planned`). Keep `docs/ROADMAP.md` in sync.
 5. Cross-platform: never ship Unix-only or Windows-only commands in shared scripts; prefer Node APIs. Platform OS integration goes behind `src/main/platform/`.
 6. Prefer `@shared/...` imports in renderer; main uses relative `../shared/...` with `.js` extensions in compiled ESM.
@@ -97,7 +98,9 @@ IPC system:audio-chunk  →  useSystemAudioStt  →  stt:transcribe  →  should
 9. After **main/preload** changes: `npm run build:electron` and restart `npm run dev` (Vite HMR is not enough).
 10. **Never rely on bare `ffmpeg` in packaged builds.** Always resolve through `getFfmpegPath()` / `resolveFfmpeg()` (bundled `resources/bin` first, then known installs, then PATH). See `FIXES.md` Symptom J.
 11. **Never await LLM inference inline inside a capture loop.** Fire-and-handle; keep capture running independently.
-12. **Always hash/diff frames before OCR+LLM** in continuous screen assist.
+12. **Always hash/diff frames before OCR+LLM** in continuous screen assist (pixel diff in `liveScreenStream.ts`, not byte-sampling of JPEG).
+14. **Never loop a flashing screenshot tool** (`gnome-screenshot`, xdg Screenshot portal). Continuous reading: GNOME = Mutter ScreenCast; Windows = GDI; macOS = `screencapture -x`. **Do not** fall back to `getDisplayMedia` on Linux. Portal is Windows/macOS last resort only.
+15. **Never call `setOpacity` on Linux expecting it to work** — it is a no-op there. Strip overlay self-echo from OCR in the renderer instead.
 13. **Ship third-party license notices** (`THIRD-PARTY-NOTICES.md`) when bundling GPL/LGPL binaries such as ffmpeg.
 
 ## Smart assist model (do not confuse with Cluely screen-share)
@@ -109,8 +112,9 @@ IPC system:audio-chunk  →  useSystemAudioStt  →  stt:transcribe  →  should
 | Meeting audio (Linux) | Long-lived `ffmpeg -f pulse` on sink `*.monitor` (`linuxLoopbackStream.ts`) → WAV chunks; remounts on default-sink change | Falls back to timed `pw-record` if ffmpeg unavailable. **Do not use `parec`** — often records 0 bytes on PipeWire |
 | Meeting audio (Win/mac) | Chunked `ffmpeg` WASAPI / BlackHole | Windows packages **bundle** `ffmpeg.exe` via `extraResources` (`scripts/ensure-ffmpeg-win.mjs`) |
 | Mic STT | Linux: native `ffmpeg` pulse / `pw-record` on preferred input; else MediaRecorder | Device list from `pactl` via `audio:list-devices` |
-| Screen OCR | On-demand 📷 **and** optional continuous loop (`useScreenAssist`, Settings → Continuous screen assist) | Loop uses **loopSafe** capture only (Win GDI / macOS `screencapture` / Linux CLI). **Never** loop `desktopCapturer` on Wayland |
-| Assist fusion | `fusedAssistPrompt(transcript + fresh screen OCR)` | Screen text stays “fresh” ~45s; continuous screen fires `continuousScreenPrompt` without blocking the poll |
+| Screen OCR | 📷 + 👁 Live via `screenLive.ts` / `screen:grab`. Same silent order on every OS: (1) Mutter ScreenCast, (2) Win GDI / mac `screencapture -x` / KDE `spectacle` / `grim` / `scrot` | **gnome-screenshot flashes → never looped.** `getDisplayMedia` is Win/mac fallback only. Never loop `desktopCapturer` on Wayland |
+| Screen → answers | Renderer sends `ChatRequest.screenText/screenAt` (fresh ≤45s); main `buildChatContext()` injects an “On-screen text (OCR)” block | Renderer first runs `prepareScreenContext()` (`shared/screenContext.ts`) to drop UI noise **and the overlay’s own answers** (Linux has no capture exclusion) |
+| Assist fusion | `fusedAssistPrompt(transcript)` for auto-ask; screen comes via the request field above | Do not paste OCR into the user message any more — it is system-prompt context |
 
 **Why:** On Ubuntu Wayland, Electron `desktopCapturer` opens the xdg-desktop-portal picker. Looping it spam-popups, breaks PipeWire, and fights real meeting shares. Do **not** reintroduce continuous portal capture.
 
@@ -142,7 +146,7 @@ Renderer hook: `src/renderer/stt/useSystemAudioStt.ts` — prefers stream on Lin
 - **Profile Intelligence** modal (left nav: Identity, Resume/JD upload, company intel, docs, question bank)
 - First-run onboarding wizard; overlay quick menu (profile / mode / mic)
 - Mic STT: `local-whisper` (Node worker), `webspeech`, `openai-whisper`; Linux native mic via ffmpeg / pw-record
-- On-demand screen OCR (`captureFullScreen` → Tesseract + image-hash cache); region tools when installed
+- Screen reading: 📷 one-shot + 👁 Live via the silent main engine on every OS (Mutter / Win GDI / macOS `screencapture`). Self-echo stripped; fresh text auto-attached via `ChatRequest.screenText`. Overlay **Live** pane shows speech; ask bar is type-only.
 - System audio: **ffmpeg pulse stream** → STT → Smart assist (Linux); chunked WASAPI / BlackHole elsewhere
 - Assist fusion: transcript + optional fresh screen OCR (`fusedAssistPrompt`, ~45s screen freshness in ChatPanel)
 - Linux audio device sanitization (`linuxAudioDevices.ts` + `audioDevices.ts`) — prefer laptop mic / speaker monitor
@@ -171,7 +175,7 @@ Documented so the next agent does not reintroduce these bugs:
   - **Fix:** `scripts/start-release.mjs` forces `GDK_BACKEND=x11`, cleans schema dirs, `--ozone-platform=x11`. Packaged main also forces X11 ozone.
 - **Symptom E:** Overlay audio / Local Whisper fails with `spawn ENOTDIR` (Ubuntu packaged) or vague ffmpeg/spawn errors.
   - **Cause:** Packaged Whisper used `app.getAppPath()` (`…/app.asar`, a *file*) as `spawn` cwd; bare tools on a dirty PATH can also ENOTDIR.
-  - **Fix:** Run Whisper from `app.asar.unpacked` with a real directory cwd (`resolveBin.ts` / `safeSpawnCwd`); asarUnpack `scripts/whisper-worker.mjs` + `@xenova/transformers`; absolute paths for capture tools (incl. bundled `ffmpeg.exe` on Windows).
+  - **Fix:** Run Whisper from `app.asar.unpacked` with a real directory cwd (`resolveBin.ts` / `safeSpawnCwd`); asarUnpack `scripts/whisper-worker.mjs` + `@huggingface/transformers` + `onnxruntime-*`; absolute paths for capture tools (incl. bundled `ffmpeg.exe` on Windows).
 - Packaged `files` / `asarUnpack` must include `tesseract.js` (and existing Whisper/ORT deps).
 - Linux main process always appends `no-sandbox` + ozone auto (packaged and unpackaged).
 - **CI packaging:** `publish: []` in electron-builder; `--publish never` on pack scripts; `GH_TOKEN` only in `create-release` job.
@@ -186,6 +190,19 @@ Documented so the next agent does not reintroduce these bugs:
   - **Fix:** `captureFullScreen()` via `src/main/services/screenCapture.ts` — try CLI (`gnome-screenshot -f`, `spectacle -f`, `grim`, `scrot`) then Electron `desktopCapturer` last.
 - **Symptom F2 (critical):** Continuous Smart screen OCR looped `desktopCapturer` → endless portal dialogs, PipeWire `thread-loop` errors, fights Zoom/Meet share.
   - **Fix:** Smart = **audio only**. Screen OCR = **on-demand** (📷 / hotkey). Never reintroduce a continuous portal capture loop.
+- **Symptom F3 (dev-only):** CLI screenshot tools crash with `undefined symbol: __libc_pthread_init` inside VS Code Snap shell; child spawns inherit poisoned `LD_LIBRARY_PATH`/`GIO_MODULE_DIR`/`GDK_PIXBUF_*`/`GSETTINGS_SCHEMA_DIR`.
+  - **Fix:** `cleanSpawnEnv()` in `screenCapture.ts` strips Snap/bootstrap vars before spawning CLI tools; also `gnome-screenshot` exit-0 does **not** mean the PNG exists — poll the tmp file up to 1.5 s after close before reading it.
+- **Symptom L (`screen:capture-full` crashing Electron):** gnome-screenshot succeeds (exit 0, PNG written) yet the OCR step SIGSEGVs Electron on Wayland when run under VS Code Snap env. Root cause: Snap's `LD_LIBRARY_PATH`/`GIO_MODULE_DIR` leak into tesseract worker spawn.
+  - **Fix:** The CLI-tool spawn path now uses `cleanSpawnEnv()` for any `spawn()`/`execFile()` of system tools; the image-to-buffer → Tesseract flow no longer touches `LD_LIBRARY_PATH`-dependent paths directly from Electron.
+- **Symptom M (screen reading “doesn’t work”, 2026-09-05) — three root causes, all fixed; do not regress:**
+  1. `BrowserWindow.setOpacity()` is a **documented no-op on Linux**. `screenLive.ts` used it to “hide” the overlay before each shot → every frame OCR’d OSMOS’s own answer and fed it back to the model. Fix: no fade; renderer strips self-echo with `stripOverlayEcho()` (`shared/screenContext.ts`) using the texts it is currently displaying (last messages, transcript, composer, button labels; tolerant of OCR typos via ≥70–80% token overlap).
+  2. **`gnome-screenshot` flashes the screen on every call** on GNOME Wayland (hard-coded in Shell, no flag), and `grim`/`scrot` do not work on Mutter. The old “loop-safe” gate approved it → 2.5 s strobe. Fix: `describeLoopSafeCapture()` excludes gnome-screenshot (one-shot 📷 only); on GNOME Wayland the CLI loop refuses with a clear reason.
+  3. Screen text was only used when `autoAskOnFinal` was on. Ctrl+Enter / “What should I say?” sent the bare question. Fix: `sendMessage` attaches `screenText/screenAt`; main injects it into the system prompt.
+- **Symptom N (user: “no permissions or prompts — just keep reading the screen”, 2026-09-05) — SOLVED for GNOME Linux:** The portal (`getDisplayMedia`) shows a picker and `gnome-screenshot` flashes; neither is silent+dialog-free. **Fix:** call `org.gnome.Mutter.ScreenCast` directly — the compositor API the portal wraps. `src/python/screen_worker.py` creates a session, `RecordMonitor` on the primary connector, `Start`, gets the PipeWire node, and runs `pipewiresrc ! videoconvert ! videoscale ! video/x-raw,format=I420,width=1440 ! jpegenc ! appsink` (I420 → correct colours; RGB tints green). It emits base64 JPEG frames on stdout (byte-equal frames skipped). `src/main/services/mutterScreenCast.ts` spawns it (via `cleanSpawnEnv()` so Snap's `LD_LIBRARY_PATH` doesn't break GStreamer), OCRs each frame with backpressure, and emits `text`. `screenLive.start()` probes Mutter first (`screen_worker.py probe`: gi/GStreamer import + live Mutter D-Bus name + `pipewiresrc` plugin) and prefers it; the renderer on Linux calls the main engine **before** the portal so there is no dialog and no flash. Needs system `python3-gi` + GStreamer + `gstreamer1.0-pipewire` (default on Ubuntu GNOME); nothing is bundled, so it's only offered when the probe passes. GNOME-only (X11 GNOME works too; non-GNOME falls back to the portal/CLI). **Do not** reintroduce a portal-first path on GNOME Linux.
+- **Streaming live-screen (`src/renderer/stt/liveScreenStream.ts`) is the Windows/macOS fallback only.** Silent main backends go first: Mutter (GNOME), GDI (Windows), `screencapture -x` (macOS). `getDisplayMedia` is auto-granted on Win/mac via `setDisplayMediaRequestHandler` and already excludes the content-protected overlay. Never start it on Linux. 📷 uses `screen:grab` (same silent backends) on every OS.
+- On Linux the display-media handler requests `types: ['screen','window']` (unless audio loopback is active) so the portal shows both tabs.
+- OCR timing on the Zenbook (2880×1800): gnome-screenshot ≈2.4 s, Tesseract ≈3.7 s full-res, ≈2 s at 2000 px wide.
+- **Never** pipe CLI screenshots through a GIF ffmpeg chain on Linux; always read PNG → base64 directly.
 
 ### Shortcuts
 
@@ -224,10 +241,17 @@ Documented so the next agent does not reintroduce these bugs:
 - Profile/JD clipped in `buildChatContext`; empty final → explicit `error` event.
 - Probe Ollama saves form URL first, then probes that host (LAN often `http://192.168.4.31:11434`).
 
-### Local Whisper `registerBackend`
+### Local STT (moonshine / whisper worker)
 
-- **Do not** run `@xenova/transformers` / onnxruntime in the Electron **renderer**.
-- Path: MediaRecorder or native WAV → IPC → `localWhisper.ts` → `scripts/whisper-worker.mjs` (system Node).
+- **Do not** run `@huggingface/transformers` / onnxruntime in the Electron **renderer**.
+- Path: MediaRecorder or native WAV → IPC `stt:transcribe` → `localWhisper.ts` → `scripts/whisper-worker.mjs` (system Node, `--serve` warm model).
+- **Default model: `onnx-community/moonshine-tiny-ONNX`** (MIT, fast CPU streaming STT). Alternative: `Xenova/whisper-base.en`. Selectable via `AppSettings.localSttModel` (Settings → Local STT model) and `TranscribeRequest.model`.
+- **Moonshine gotchas (do not regress):**
+  - Requires `@huggingface/transformers` **v3/v4**, not v2 `@xenova/transformers`.
+  - fp32 ONNX export **silently transcribes empty** — worker pins `dtype: 'q8'` for moonshine. fp16 fails to init on CPU; q4 also yields empty. Use q8.
+  - `moonshine-base-ONNX` currently returns empty on CPU in every tested dtype — do not ship as default until verified; tiny is fine.
+  - Whisper `.en` variants reject `language`/`task` args — worker skips them for `.en` models.
+- Packaged builds must asarUnpack `@huggingface/transformers` + `onnxruntime-*` (worker runs in system Node, cannot read asar).
 
 ### Multi-provider / RAG / history / question bank
 
@@ -290,14 +314,16 @@ Remaining symptom: pipe still starves after ~1st chunk on this Zenbook/PipeWire 
 | Channel | Purpose |
 |---|---|
 | `settings:get` / `settings:update` | AppSettings |
-| `chat:ask` / `chat:ask-stream` / `chat:cancel-stream` / event `chat:stream` | Chat |
+| `chat:ask` / `chat:ask-stream` / `chat:cancel-stream` / event `chat:stream` | Chat; `ChatRequest` may carry `screenText` + `screenAt` (fresh OCR → system prompt) |
 | `ollama:list-models` | Probe models (optional `baseUrl`) |
 | `searxng:test` / `websearch:test` | Probe search |
 | `stt:transcribe` | Whisper API or local worker (`engine: 'local' \| 'openai'`) |
 | `screen:capture` | Interactive region (when tools exist) → `{ dataUrl, cancelled }` |
-| `screen:capture-full` | Silent fullscreen for OCR; optional `{ loopSafe: true }` skips portal fallback |
-| `screen:can-loop` | Whether non-portal continuous screen capture is available |
-| `ocr:extract` | Tesseract OCR |
+| `screen:capture-full` | Fullscreen for OCR; `{ loopSafe: true }` = silent tools only (no gnome-screenshot, no portal) |
+| `screen:can-loop` | Whether a **silent** non-portal loop tool exists (`describeLoopSafeCapture`) |
+| `screen:live-start` / `screen:live-stop` / `screen:live-capable` / event `screen:live-text` | Main live engine (`screenLive.ts` → Mutter on GNOME). Event: `{ text, at, error? }` |
+| `screen:grab` | Silent one-shot OCR (Mutter on GNOME — no picker, no flash) |
+| `ocr:extract` | Tesseract OCR (main) — used by 📷, 👁 Live frames, and the CLI loop |
 | `system:audio` | One-shot system/loopback capture → WAV base64 |
 | `system:listen-start` / `system:listen-stop` | Continuous Linux loopback (`linuxLoopbackStream.ts`) |
 | event `system:audio-chunk` / `system:audio-status` | Streamed WAV chunks + status (`silent`, `rms`, `backend`) |

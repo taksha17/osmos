@@ -67,6 +67,7 @@ export function useMainMicStt(settings: AppSettings | null) {
             mimeType: chunk.mimeType || 'audio/wav',
             fileName: 'mic-chunk.wav',
             engine: engineFor(settingsRef.current),
+            model: settingsRef.current?.localSttModel,
           });
           if (genRef.current !== gen) return;
           if (t.ok && t.text?.trim()) {

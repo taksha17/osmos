@@ -5,9 +5,15 @@ import {
   SCREEN_CONTEXT_FRESH_MS,
   shouldAutoAssist,
 } from '@shared/continuousAssist';
+import { prepareScreenContext, SCREEN_CONTEXT_MAX_CHARS } from '@shared/screenContext';
 import { useMainMicStt } from '../stt/useMainMicStt';
 import { useSystemAudioStt } from '../stt/useSystemAudioStt';
 import { extractTextFromBase64 } from '../stt/ocr';
+import {
+  getLatestLiveFrame,
+  startLiveScreenStream,
+  stopLiveScreenStream,
+} from '../stt/liveScreenStream';
 import { TranscriptTimeline } from './TranscriptTimeline';
 import type { TranscriptEntry } from './TranscriptTimeline';
 import { MarkdownText } from './MarkdownText';
@@ -16,6 +22,11 @@ import { OverlayQuickMenu } from './OverlayQuickMenu';
 
 function sttEngine(settings: AppSettings | null): 'local' | 'openai' {
   return settings?.sttProvider === 'openai-whisper' ? 'openai' : 'local';
+}
+
+/** Status strings from the STT hooks — not words the user/meeting just said. */
+function isSttStatusLine(text: string): boolean {
+  return /^(starting|listening|waiting|ready|no laptop|ocr|screen read|👁|📄)/i.test(text.trim());
 }
 
 type Msg = {
@@ -80,6 +91,13 @@ export function ChatPanel({
   const [streamMeta, setStreamMeta] = useState('');
   const [ocrStatus, setOcrStatus] = useState('');
   const [liveScreen, setLiveScreen] = useState(false);
+  const [liveScreenStatus, setLiveScreenStatus] = useState('');
+  /** UI mirror of lastScreenRef so the status line can show "screen ctx · N chars". */
+  const [screenInfo, setScreenInfo] = useState<{ chars: number; at: number; preview: string }>({
+    chars: 0,
+    at: 0,
+    preview: '',
+  });
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [transcriptOpen, setTranscriptOpen] = useState(true);
   const [continuousEnabled, setContinuousEnabled] = useState(false);
@@ -105,6 +123,10 @@ export function ChatPanel({
   systemStartRef.current = system.start;
   const lastAssistRef = useRef({ key: '', at: 0 });
   const lastScreenRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
+  const transcriptRef = useRef<TranscriptEntry[]>([]);
+  transcriptRef.current = transcript;
+  const inputRef = useRef('');
+  inputRef.current = input;
   const micFailRef = useRef(0);
   const systemFailRef = useRef(0);
   const settingsRef = useRef(settings);
@@ -178,40 +200,170 @@ export function ChatPanel({
   }, [wantsMic, wantsSystem, mainMic.listening, system.listening, mainMic.error, system.error]);
 
   /**
-   * Background live-screen context (opt-in 👁 Live).
-   * The main-process engine hides our overlay, snapshots, OCRs (hash-deduped),
-   * and streams fresh text over IPC. Renderer only stores the latest snapshot
-   * so every assist automatically sees the current screen.
+   * Text the overlay itself is showing right now. Linux has no capture
+   * exclusion, so full-screen frames include OSMOS — strip it before the OCR
+   * text becomes "screen context", or the model reads its own last answer.
+   */
+  const ownOverlayTexts = useCallback((): string[] => {
+    const msgs = messagesRef.current.slice(-4).map((m) => m.content);
+    const tx = transcriptRef.current.slice(-10).map((t) => t.text);
+    return [...msgs, ...tx, inputRef.current, title || ''];
+  }, [title]);
+
+  /** Clean + de-echo raw OCR, then publish it as the current screen context. */
+  const applyScreenText = useCallback(
+    (rawOcr: string, at: number, source: 'live' | 'shot'): number => {
+      const text = prepareScreenContext(rawOcr, ownOverlayTexts()).slice(0, SCREEN_CONTEXT_MAX_CHARS);
+      if (text.length < 12) return 0;
+      lastScreenRef.current = { text, at };
+      setScreenInfo({ chars: text.length, at, preview: text.slice(0, 280) });
+      if (source === 'live') setLiveScreenStatus(`👁 screen read · ${text.length} chars`);
+      return text.length;
+    },
+    [ownOverlayTexts],
+  );
+
+  /** Fresh screen context (≤ SCREEN_CONTEXT_FRESH_MS old) for the next ask. */
+  const freshScreen = useCallback((): { text: string; at: number } | null => {
+    const cur = lastScreenRef.current;
+    if (!cur.text) return null;
+    if (Date.now() - cur.at > SCREEN_CONTEXT_FRESH_MS) return null;
+    return cur;
+  }, []);
+
+  /**
+   * 👁 Live — background screen reading.
+   * All OSes try the silent main-process engine first:
+   *   GNOME → Mutter ScreenCast; Win → GDI; macOS → screencapture; KDE/wlroots → CLI.
+   * getDisplayMedia is Windows/macOS fallback only (Electron auto-grants).
+   * Never open the Linux share picker.
    */
   const liveTextUnsubRef = useRef<null | (() => void)>(null);
-  useEffect(() => {
-    if (!overlay || paused || !liveScreen || settings?.continuousScreenAssist === false) return;
-    let cancelled = false;
-    void (async () => {
-      const res = await window.osmos.startScreenLive({ intervalMs: 2500 });
-      if (!res.ok) {
-        setError(res.error || 'Live screen unavailable');
+  const liveOcrBusyRef = useRef(false);
+
+  const stopLiveScreen = useCallback(() => {
+    stopLiveScreenStream();
+    liveTextUnsubRef.current?.();
+    liveTextUnsubRef.current = null;
+    void window.osmos.stopScreenLive?.();
+    setLiveScreen(false);
+    setLiveScreenStatus('');
+  }, []);
+
+  // Wire the main-process engine's OCR text (Mutter ScreenCast / silent CLI)
+  // into the same applyScreenText path the stream uses.
+  const wireMainEngineText = useCallback(() => {
+    liveTextUnsubRef.current?.();
+    liveTextUnsubRef.current =
+      window.osmos.onScreenLiveText?.((ev) => {
+        if (ev.error) {
+          setError(ev.error);
+          setLiveScreen(false);
+          setLiveScreenStatus('');
+          return;
+        }
+        if (!ev.text?.trim()) return;
+        applyScreenText(ev.text, ev.at || Date.now(), 'live');
+      }) ?? null;
+  }, [applyScreenText]);
+
+  const startLiveScreen = useCallback(async () => {
+    if (settings?.continuousScreenAssist === false) {
+      setError('Continuous screen assist is off — enable it in Settings → General.');
+      return;
+    }
+    setError('');
+    setLiveScreen(true);
+    setLiveScreenStatus('👁 starting screen read…');
+
+    const isLinux = /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent);
+
+    // Silent main engine first on every OS (Mutter / GDI / screencapture / CLI).
+    const main = await window.osmos.startScreenLive({ intervalMs: 2000 });
+    if (main.ok) {
+      wireMainEngineText();
+      setLiveScreenStatus(
+        main.backend === 'mutter-screencast'
+          ? '👁 watching (no prompt)'
+          : `👁 watching${main.backend ? ` (${main.backend})` : ''}`,
+      );
+      console.log('[liveScreen] main engine started:', main.backend);
+      return;
+    }
+    console.warn('[liveScreen] main engine unavailable:', main.error);
+
+    if (isLinux) {
+      setError(main.error || 'Live screen unavailable (no silent backend).');
+      setLiveScreen(false);
+      setLiveScreenStatus('');
+      return;
+    }
+
+    // Windows / macOS only: getDisplayMedia (usually auto-granted).
+    try {
+      const { label } = await startLiveScreenStream({
+        intervalMs: 2000,
+        onFrame: async (frame) => {
+          if (liveOcrBusyRef.current) return;
+          liveOcrBusyRef.current = true;
+          try {
+            const res = await window.osmos.ocrExtract({ base64: frame.dataUrl });
+            if (res.ok && res.text?.trim()) {
+              const n = applyScreenText(res.text, frame.at, 'live');
+              if (!n) setLiveScreenStatus('👁 watching · no readable text');
+            } else if (res.error && !/no text/i.test(res.error)) {
+              setLiveScreenStatus(`👁 OCR: ${res.error}`);
+            } else {
+              setLiveScreenStatus('👁 watching · no readable text');
+            }
+          } finally {
+            liveOcrBusyRef.current = false;
+          }
+        },
+        onStatus: (text) => setLiveScreenStatus((prev) => (prev.startsWith('👁 screen read') && /unchanged/.test(text) ? prev : text)),
+        onError: (err) => {
+          setError(err);
+          setLiveScreen(false);
+          setLiveScreenStatus('');
+        },
+      });
+      console.log('[liveScreen] stream started on', label);
+      return;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('[liveScreen] stream path unavailable:', msg);
+      // User dismissed the picker — respect it, do not fall into a flashing loop.
+      if (/NotAllowedError|Permission denied|denied|cancel/i.test(msg)) {
+        setError('Screen share was cancelled. Click 👁 again and pick your screen or meeting window.');
         setLiveScreen(false);
+        setLiveScreenStatus('');
         return;
       }
-      if (cancelled) {
-        void window.osmos.stopScreenLive?.();
-        return;
-      }
-      liveTextUnsubRef.current?.();
-      liveTextUnsubRef.current =
-        window.osmos.onScreenLiveText?.((ev) => {
-          if (!ev.text?.trim()) return;
-          lastScreenRef.current = { text: ev.text.trim(), at: ev.at || Date.now() };
-        }) ?? null;
-    })();
-    return () => {
-      cancelled = true;
-      liveTextUnsubRef.current?.();
-      liveTextUnsubRef.current = null;
-      void window.osmos.stopScreenLive?.();
-    };
-  }, [overlay, paused, liveScreen, settings?.continuousScreenAssist]);
+    }
+
+    const res = await window.osmos.startScreenLive({ intervalMs: 2500 });
+    if (!res.ok) {
+      setError(res.error || 'Live screen unavailable on this system.');
+      setLiveScreen(false);
+      setLiveScreenStatus('');
+      return;
+    }
+    setLiveScreenStatus(`👁 watching${res.backend ? ` (${res.backend})` : ''}`);
+    wireMainEngineText();
+  }, [applyScreenText, settings?.continuousScreenAssist, wireMainEngineText]);
+
+  const toggleLiveScreen = useCallback(() => {
+    if (liveScreen) stopLiveScreen();
+    else void startLiveScreen();
+  }, [liveScreen, startLiveScreen, stopLiveScreen]);
+
+  // Leaving the overlay / pausing / unmount always tears the stream down.
+  const stopLiveScreenRef = useRef(stopLiveScreen);
+  stopLiveScreenRef.current = stopLiveScreen;
+  useEffect(() => {
+    if (!overlay || paused) stopLiveScreenRef.current();
+  }, [overlay, paused]);
+  useEffect(() => () => stopLiveScreenRef.current(), []);
 
   useEffect(() => {
     if (overlay && !paused) setContinuousEnabled(true);
@@ -300,10 +452,24 @@ export function ChatPanel({
     const next = [...history, { role: 'user' as const, content: text }];
     setMessages([...next, { role: 'assistant', content: '' }]);
 
-    const stream = window.osmos.askStream({ message: text, history }, (ev: ChatStreamEvent) => {
+    // Attach fresh screen context (📷 or 👁 Live). Main injects it into the
+    // system prompt — the visible user message stays clean.
+    const screen = freshScreen();
+    const stream = window.osmos.askStream(
+      {
+        message: text,
+        history,
+        screenText: screen?.text,
+        screenAt: screen?.at,
+      },
+      (ev: ChatStreamEvent) => {
       if (ev.type === 'meta') {
         setStreamMeta(
-          ev.usedWebSearch ? `Searching… ${ev.searchHits} hits` : 'Thinking…',
+          ev.usedWebSearch
+            ? `Searching… ${ev.searchHits} hits${screen ? ' · with screen' : ''}`
+            : screen
+              ? 'Thinking (with screen)…'
+              : 'Thinking…',
         );
       } else if (ev.type === 'status') {
         setStreamMeta(ev.text);
@@ -414,7 +580,6 @@ export function ChatPanel({
       if (/^\W*(\[(music|applause|laughter|silence|blank_audio|noise)\]|♪+)[\W]*$/i.test(cleaned)) {
         return;
       }
-      setInput(cleaned);
       setTranscript((prev) => [
         ...prev,
         {
@@ -427,7 +592,10 @@ export function ChatPanel({
 
       const mode = settings?.activeMode || 'general';
       const smart = continuousRef.current && overlay && !pausedRef.current;
-      const autoAsk = settings?.autoAskOnFinal || smart;
+      // Auto-answering each transcript chunk is opt-in only (Settings →
+      // "Auto-answer on final transcript"). Default: keep listening and let
+      // the user press Ctrl/Cmd+Enter to ask.
+      const autoAsk = settings?.autoAskOnFinal === true;
       if (!autoAsk) return;
       if (smart && !shouldAutoAssist(cleaned, true)) return;
 
@@ -436,17 +604,11 @@ export function ChatPanel({
       if (key && key === lastAssistRef.current.key && now - lastAssistRef.current.at < 5000) return;
       lastAssistRef.current = { key, at: now };
 
-      const screenFresh =
-        lastScreenRef.current.text && now - lastScreenRef.current.at < SCREEN_CONTEXT_FRESH_MS
-          ? lastScreenRef.current.text
-          : '';
+      // Screen context is attached by sendMessage (system prompt in main) —
+      // do not also paste it into the user message.
       const prompt =
         smart && overlay
-          ? fusedAssistPrompt({
-              transcript: cleaned,
-              screenText: screenFresh || undefined,
-              activeMode: mode,
-            })
+          ? fusedAssistPrompt({ transcript: cleaned, activeMode: mode })
           : cleaned;
       void sendRef.current(prompt);
     },
@@ -461,20 +623,23 @@ export function ChatPanel({
     system.onFinal(ingestFinal);
   }, [system.onFinal, ingestFinal]);
 
+  const liveHeard =
+    (system.partial && !isSttStatusLine(system.partial) ? system.partial : '') ||
+    (mainMic.partial && !isSttStatusLine(mainMic.partial) ? mainMic.partial : '');
+
   useEffect(() => {
-    if (mainMic.partial && !/starting|listening/i.test(mainMic.partial)) {
-      setTranscript((prev) => {
-        const next = [...prev];
-        const last = next[next.length - 1];
-        if (last && !last.isFinal) {
-          next[next.length - 1] = { ...last, text: mainMic.partial };
-        } else {
-          next.push({ id: `p-${Date.now()}`, text: mainMic.partial, timestamp: Date.now(), isFinal: false });
-        }
-        return next;
-      });
-    }
-  }, [mainMic.partial]);
+    if (!liveHeard) return;
+    setTranscript((prev) => {
+      const next = [...prev];
+      const last = next[next.length - 1];
+      if (last && !last.isFinal) {
+        next[next.length - 1] = { ...last, text: liveHeard };
+      } else {
+        next.push({ id: `p-${Date.now()}`, text: liveHeard, timestamp: Date.now(), isFinal: false });
+      }
+      return next;
+    });
+  }, [liveHeard]);
 
   useEffect(() => {
     if (messages.length === 0) return;
@@ -502,43 +667,68 @@ export function ChatPanel({
     busy && messages[messages.length - 1]?.role === 'assistant'
       ? messages[messages.length - 1].content
       : latestAssistant?.content || '';
-      const answerPlaceholder =
-    system.listening || mainMic.listening
-      ? system.partial || mainMic.partial || (system.listening ? 'Listening to meeting audio…' : '🎙 listening…')
-      : 'Answers appear here while you interview, meet, or share your screen.';
+  const answerPlaceholder = 'Answers appear here while you interview, meet, or share your screen.';
 
+  /**
+   * 📷 one-shot screen read. The text is NOT pasted into the composer any more —
+   * it becomes screen context that main injects into the next question's system
+   * prompt (fresh for SCREEN_CONTEXT_FRESH_MS). The status line shows the size.
+   */
   const captureScreen = async () => {
+    setError('');
     setOcrStatus('Capturing screen…');
     try {
-      // Prefer full-screen IPC (CLI tools first). Avoid looping — Wayland portal
-      // is one-shot only; do not call this from a timer.
-      const result = window.osmos.captureFullScreen
-        ? await window.osmos.captureFullScreen()
-        : await window.osmos.captureRegion();
-      if (result.cancelled || !result.dataUrl) {
-        setError(
-          'Screen capture cancelled. On Linux, OSMOS does not take your meeting share — use 📷 only when you want OCR. Install grim or gnome-screenshot to avoid the portal picker.',
-        );
-        setOcrStatus('');
+      let dataUrl = '';
+      let at = Date.now();
+      // Silent main-process grab first on every OS (Mutter / GDI / screencapture).
+      if (window.osmos.grabScreen) {
+        setOcrStatus('Reading screen…');
+        const grabbed = await window.osmos.grabScreen();
+        if (grabbed.ok && grabbed.text) {
+          const n = applyScreenText(grabbed.text, grabbed.at || Date.now(), 'shot');
+          if (!n) {
+            setError('Screen read, but nothing usable remained after removing overlay / chrome text.');
+            return;
+          }
+          if (settings?.autoAskOnFinal === true && overlay && continuousRef.current && !pausedRef.current) {
+            const mode = settings?.activeMode || 'general';
+            void sendRef.current(fusedAssistPrompt({ activeMode: mode }));
+          }
+          return;
+        }
+      }
+
+      // Reuse the live stream's latest frame — no extra portal prompt / flash.
+      const live = liveScreen ? getLatestLiveFrame() : null;
+      if (live) {
+        dataUrl = live.dataUrl;
+        at = live.at;
+      } else {
+        const result = window.osmos.captureFullScreen
+          ? await window.osmos.captureFullScreen()
+          : await window.osmos.captureRegion();
+        if (result.cancelled || !result.dataUrl) {
+          setError(result.error || 'Screen capture cancelled.');
+          return;
+        }
+        dataUrl = result.dataUrl;
+      }
+
+      setOcrStatus('Reading screen…');
+      const ocr = await extractTextFromBase64(dataUrl);
+      if (!ocr.text) {
+        setError(ocr.error || 'OCR returned no text');
         return;
       }
-      setOcrStatus('OCR…');
-      const ocr = await extractTextFromBase64(result.dataUrl);
-      if (ocr.text) {
-        lastScreenRef.current = { text: ocr.text, at: Date.now() };
-        setInput((prev) => (prev ? `${prev}\n\n[Screen]\n${ocr.text}` : `[Screen]\n${ocr.text}`));
-        // In Smart overlay, immediately assist from this one-shot screen read.
-        if (overlay && continuousRef.current && !pausedRef.current) {
-          const mode = settings?.activeMode || 'general';
-          void sendRef.current(
-            fusedAssistPrompt({
-              screenText: ocr.text,
-              activeMode: mode,
-            }),
-          );
-        }
-      } else {
-        setError(ocr.error || 'OCR returned no text');
+      const n = applyScreenText(ocr.text, at, 'shot');
+      if (!n) {
+        setError('Screen read, but nothing usable remained after removing OSMOS’s own overlay text.');
+        return;
+      }
+      // Auto-answer on attach only when the user opted in.
+      if (settings?.autoAskOnFinal === true && overlay && continuousRef.current && !pausedRef.current) {
+        const mode = settings?.activeMode || 'general';
+        void sendRef.current(fusedAssistPrompt({ activeMode: mode }));
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -597,6 +787,7 @@ export function ChatPanel({
         mimeType: capture.mimeType || 'audio/wav',
         fileName: 'system-audio.wav',
         engine: sttEngine(settings),
+        model: settings?.localSttModel,
       });
       if (transcription.ok && transcription.text) {
         setInput((prev) =>
@@ -636,31 +827,62 @@ export function ChatPanel({
           </button>
         </div>
 
-        <div className="overlay-answer" aria-live="polite">
-          {answerText ? (
-            <>
-              <p className="overlay-answer__text">
-                <MarkdownText text={answerText || '▍'} />
-              </p>
-              {latestAssistant?.evidence ? (
-                <EvidencePanel
-                  usedWebSearch={latestAssistant.evidence.usedWebSearch}
-                  searchHits={latestAssistant.evidence.searchHits}
-                  documentCount={latestAssistant.evidence.documentCount}
-                  usedRetrieval={latestAssistant.evidence.usedRetrieval}
-                />
-              ) : null}
-            </>
-          ) : busy ? (
-            <div className="overlay-answer__thinking">
-              <span className="typing-dot" />
-              <span className="typing-dot" />
-              <span className="typing-dot" />
-              <span className="meta">{streamMeta || 'Thinking…'}</span>
+        <div className="overlay-main">
+          <div className="overlay-answer" aria-live="polite">
+            {answerText ? (
+              <>
+                <p className="overlay-answer__text">
+                  <MarkdownText text={answerText || '▍'} />
+                </p>
+                {latestAssistant?.evidence ? (
+                  <EvidencePanel
+                    usedWebSearch={latestAssistant.evidence.usedWebSearch}
+                    searchHits={latestAssistant.evidence.searchHits}
+                    documentCount={latestAssistant.evidence.documentCount}
+                    usedRetrieval={latestAssistant.evidence.usedRetrieval}
+                  />
+                ) : null}
+              </>
+            ) : busy ? (
+              <div className="overlay-answer__thinking">
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+                <span className="meta">{streamMeta || 'Thinking…'}</span>
+              </div>
+            ) : (
+              <p className="overlay-answer__placeholder">{answerPlaceholder}</p>
+            )}
+          </div>
+          <aside className="overlay-listen" aria-label="Live transcript">
+            <div className="overlay-listen__head">
+              <span>Live</span>
+              <span className="meta">
+                {mainMic.listening || system.listening ? 'listening' : 'idle'}
+              </span>
             </div>
-          ) : (
-            <p className="overlay-answer__placeholder">{answerPlaceholder}</p>
-          )}
+            <div className="overlay-listen__body">
+              {transcript.length === 0 && !liveHeard ? (
+                <p className="overlay-listen__empty">
+                  Heard speech shows up here — the bar below stays for what you type.
+                </p>
+              ) : (
+                transcript.slice(-8).map((entry) => {
+                  const t = new Date(entry.timestamp);
+                  const stamp = `${String(t.getMinutes()).padStart(2, '0')}:${String(t.getSeconds()).padStart(2, '0')}`;
+                  return (
+                    <div
+                      key={entry.id}
+                      className={`overlay-listen__line${entry.isFinal ? '' : ' overlay-listen__line--live'}`}
+                    >
+                      <span className="overlay-listen__time">{stamp}</span>
+                      <span className="overlay-listen__text">{entry.text}</span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </aside>
         </div>
 
         <div className="overlay-actions">
@@ -708,15 +930,25 @@ export function ChatPanel({
           >
             Mic
           </button>
-          <button type="button" className="overlay-tool" onClick={() => void captureScreen()} disabled={busy} title="Screen OCR">
+          <button
+            type="button"
+            className="overlay-tool"
+            onClick={() => void captureScreen()}
+            disabled={busy}
+            title="Read the screen once (silent — no share dialog, no screenshot flash)"
+          >
             Screen
           </button>
           <button
             type="button"
             className={`overlay-tool${liveScreen ? ' overlay-tool--live' : ''}`}
-            onClick={() => setLiveScreen((v) => !v)}
+            onClick={toggleLiveScreen}
             disabled={busy}
-            title={liveScreen ? 'Stop background screen reading' : 'Read screen in background — answers see your screen automatically'}
+            title={
+              liveScreen
+                ? `Stop background screen reading${liveScreenStatus ? ` (${liveScreenStatus})` : ''}`
+                : 'Read the screen in the background (no share dialog on GNOME Linux)'
+            }
           >
             {liveScreen ? '👁 Live' : '👁'}
           </button>
@@ -758,7 +990,14 @@ export function ChatPanel({
             </span>
           )}
           {settings?.stealthEnabled && <StealthBadge />}
-          <span className="overlay-tools__status meta">
+          <span
+            className="overlay-tools__status meta"
+            title={
+              screenInfo.chars && Date.now() - screenInfo.at < SCREEN_CONTEXT_FRESH_MS
+                ? `Screen context attached to your next question:\n\n${screenInfo.preview}${screenInfo.chars > screenInfo.preview.length ? '…' : ''}`
+                : undefined
+            }
+          >
             {paused
               ? 'Paused — tap ▶ to resume'
               : (() => {
@@ -769,25 +1008,21 @@ export function ChatPanel({
                   const badge = continuousEnabled
                     ? `⚡ Smart${ears.length ? ` (${ears.join('+')})` : ''} · `
                     : '';
-                  // The spk ear's idle text is informational only — never let it
-                  // mask a live mic ear or active transcriptions.
-                  const sysPartial =
-                    system.partial && !/no laptop audio/i.test(system.partial)
-                      ? system.partial
+                  const screenAge = screenInfo.at ? Date.now() - screenInfo.at : Infinity;
+                  const screenBadge =
+                    screenInfo.chars && screenAge < SCREEN_CONTEXT_FRESH_MS
+                      ? `📄 screen ${screenInfo.chars}ch · `
                       : '';
+                  const listening = mainMic.listening || system.listening;
                   const body =
                     ocrStatus ||
-                    mainMic.partial ||
                     (system.error && !mainMic.listening ? system.error : '') ||
                     mainMic.error ||
-                    sysPartial ||
-                    (mainMic.listening && !mainMic.error
-                      ? ''
-                      : '') ||
                     streamMeta ||
-                    (system.listening && !system.error ? '🔊 waiting for media on this machine' : '') ||
+                    (liveScreen ? liveScreenStatus : '') ||
+                    (listening ? 'Listening…' : '') ||
                     'Ready';
-                  return `${badge}${body}`;
+                  return `${badge}${screenBadge}${body}`;
                 })()}
           </span>
         </div>

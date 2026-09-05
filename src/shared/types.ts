@@ -112,6 +112,8 @@ export type AppSettings = {
   overlayOpacity: number;
   stealthEnabled: boolean;
   sttProvider: SttProvider;
+  /** Local STT model id (transformers.js ONNX) — e.g. moonshine-base-ONNX or whisper-base.en. */
+  localSttModel: string;
   sttLanguage: string;
   micDeviceId: string;
   /** Smart mode: system loopback (default), mic, or both */
@@ -176,12 +178,15 @@ export const DEFAULT_SETTINGS: AppSettings = {
   overlayOpacity: 0.92,
   stealthEnabled: false,
   sttProvider: 'local-whisper',
+  localSttModel: 'onnx-community/moonshine-tiny-ONNX',
   sttLanguage: 'en-US',
   micDeviceId: '',
   assistAudioSource: 'both',
   continuousScreenAssist: true,
   systemAudioDevice: '',
-  autoAskOnFinal: true,
+  // Auto-answer each final transcript chunk — opt-in (was on by default,
+  // which made Smart mode fire an LLM call per sentence).
+  autoAskOnFinal: false,
   transcribeChunkMs: 4000,
   openaiApiKey: '',
   openaiBaseUrl: 'https://api.openai.com/v1',
@@ -213,6 +218,13 @@ export type ChatMessage = {
 export type ChatRequest = {
   message: string;
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  /**
+   * Fresh OCR text from the user's screen (📷 or 👁 Live). Injected into the
+   * system prompt by main `buildChatContext()` — never built in the renderer.
+   */
+  screenText?: string;
+  /** Epoch ms when `screenText` was captured (for freshness hints). */
+  screenAt?: number;
 };
 
 export type ChatStreamEvent =
@@ -234,8 +246,10 @@ export type TranscribeRequest = {
   base64: string;
   mimeType: string;
   fileName?: string;
-  /** local = system Node + Transformers.js Whisper; openai = Whisper API */
+  /** local = system Node + transformers.js (moonshine/whisper); openai = Whisper API */
   engine?: 'local' | 'openai';
+  /** Local STT model id (transformers.js ONNX). Defaults to settings.localSttModel. */
+  model?: string;
 };
 
 export type TranscribeResponse = {
