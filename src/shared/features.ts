@@ -64,6 +64,14 @@ export const FEATURES: FeatureDef[] = [
     platforms: ['linux', 'darwin', 'win32'],
   },
   {
+    id: 'hybrid-routing',
+    name: 'Hybrid LLM routing',
+    description:
+      'Lumen-inspired tiers: short asks → bundled Qwen2.5-0.5B (or Ollama/Lumen); interview/long/screen → quality provider with draft-then-upgrade and API warmup.',
+    status: 'live',
+    platforms: ['linux', 'darwin', 'win32'],
+  },
+  {
     id: 'stt-mic',
     name: 'Microphone STT',
     description: 'Live speech-to-text from the selected mic (Web Speech or Whisper).',

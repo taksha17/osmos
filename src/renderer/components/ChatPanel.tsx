@@ -132,6 +132,12 @@ export function ChatPanel({
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
 
+  // Wake the quality provider (+ fast Ollama model) when the overlay opens.
+  useEffect(() => {
+    if (!overlay) return;
+    void window.osmos.warmupProvider?.().catch(() => {});
+  }, [overlay]);
+
   const assistSource = settings?.assistAudioSource || 'system';
   const wantsSystem =
     continuousEnabled && (assistSource === 'system' || assistSource === 'both');
@@ -464,18 +470,45 @@ export function ChatPanel({
       },
       (ev: ChatStreamEvent) => {
       if (ev.type === 'meta') {
+        const routeBit = ev.route
+          ? ev.route.lane === 'draft-upgrade'
+            ? ` · draft→${ev.route.tier}`
+            : ` · ${ev.route.tier}`
+          : '';
         setStreamMeta(
           ev.usedWebSearch
-            ? `Searching… ${ev.searchHits} hits${screen ? ' · with screen' : ''}`
+            ? `Searching… ${ev.searchHits} hits${screen ? ' · with screen' : ''}${routeBit}`
             : screen
-              ? 'Thinking (with screen)…'
-              : 'Thinking…',
+              ? `Thinking (with screen)…${routeBit}`
+              : `Thinking…${routeBit}`,
         );
       } else if (ev.type === 'status') {
         setStreamMeta(ev.text);
+      } else if (ev.type === 'phase') {
+        if (ev.phase === 'upgrade') {
+          setStreamMeta(ev.text || 'Upgrading answer…');
+          setMessages((prev) => {
+            const copy = [...prev];
+            const last = copy[copy.length - 1];
+            if (!last || last.role !== 'assistant') return prev;
+            copy[copy.length - 1] = { role: 'assistant', content: '' };
+            return copy;
+          });
+        } else {
+          setStreamMeta(ev.text || 'Quick draft…');
+        }
       } else if (ev.type === 'delta') {
         setStreamMeta((m) =>
-          m.startsWith('Searching') || m.startsWith('Model thinking') ? 'Writing…' : m || 'Writing…',
+          m.startsWith('Searching') ||
+          m.startsWith('Model thinking') ||
+          m.startsWith('Quick draft') ||
+          m.startsWith('Upgrading')
+            ? m.startsWith('Quick draft')
+              ? 'Drafting…'
+              : m.startsWith('Upgrading')
+                ? 'Writing…'
+                : 'Writing…'
+            : m || 'Writing…',
         );
         setMessages((prev) => {
           const copy = [...prev];

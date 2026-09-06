@@ -146,6 +146,19 @@ export type AppSettings = {
   documents: DocumentReference[];
   activeProvider: LlmProvider;
   providers: Record<LlmProvider, ProviderConfig>;
+  /**
+   * Hybrid routing (Lumen-inspired): short prompts → local fast model;
+   * interview / long / screen → quality provider. Optional draft-then-upgrade.
+   */
+  hybridRouting: boolean;
+  /** Ollama model tag for the instant lane (e.g. llama3.2:1b). */
+  hybridFastModel: string;
+  /** When true and quality is selected, stream a fast draft then replace with quality. */
+  draftThenUpgrade: boolean;
+  /** Optional Lumen gateway base (e.g. http://127.0.0.1:8080) — OpenAI-compatible /v1. */
+  lumenGatewayUrl: string;
+  /** Prefer Lumen gateway for the fast lane when /v1/health is up. */
+  lumenGatewayEnabled: boolean;
 };
 
 export const DEFAULT_PROFILE: UserProfile = {
@@ -206,6 +219,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
     openrouter: { id: 'openrouter', label: 'OpenRouter', apiKey: '', baseUrl: 'https://openrouter.ai/api/v1', model: 'auto' },
     litellm: { id: 'litellm', label: 'LiteLLM', apiKey: '', baseUrl: 'http://127.0.0.1:4000', model: 'gpt-4o-mini' },
   },
+  hybridRouting: true,
+  hybridFastModel: 'osmos-fast',
+  draftThenUpgrade: true,
+  lumenGatewayUrl: 'http://127.0.0.1:8080',
+  lumenGatewayEnabled: false,
 };
 
 export type ChatMessage = {
@@ -227,11 +245,33 @@ export type ChatRequest = {
   screenAt?: number;
 };
 
+export type ChatRouteMeta = {
+  tier: 'fast' | 'balanced' | 'quality';
+  reason: string;
+  model: string;
+  lane: 'fast' | 'quality' | 'draft-upgrade';
+};
+
 export type ChatStreamEvent =
-  | { requestId: string; type: 'meta'; usedWebSearch: boolean; searchHits: number }
+  | {
+      requestId: string;
+      type: 'meta';
+      usedWebSearch: boolean;
+      searchHits: number;
+      route?: ChatRouteMeta;
+    }
   | { requestId: string; type: 'status'; text: string }
   | { requestId: string; type: 'delta'; text: string }
-  | { requestId: string; type: 'done'; answer: string; usedWebSearch: boolean; searchHits: number }
+  /** Clear the in-progress assistant bubble before the quality upgrade stream. */
+  | { requestId: string; type: 'phase'; phase: 'draft' | 'upgrade'; text?: string }
+  | {
+      requestId: string;
+      type: 'done';
+      answer: string;
+      usedWebSearch: boolean;
+      searchHits: number;
+      route?: ChatRouteMeta;
+    }
   | { requestId: string; type: 'error'; error: string; usedWebSearch?: boolean; searchHits?: number };
 
 export type ChatResponse = {

@@ -87,9 +87,13 @@ coverage/
 *.enc
 .eslintcache
 
-# Vendored native tools (downloaded at pack time — see scripts/ensure-ffmpeg-win.mjs)
+# Vendored native tools (downloaded at pack time — see scripts/ensure-ffmpeg.mjs)
 build/bin/**
 !build/bin/.gitkeep
+
+# Bundled onboard LLM (GGUF + llama-server — see scripts/ensure-bundled-llm.mjs)
+build/llm/
+*.gguf
 
 # Frozen audio worker binaries (built per-platform, not committed)
 binaries/

@@ -61,12 +61,13 @@ Named multi-profiles, each carrying: résumé + job description, company intel (
 Ollama (local) first-class; OpenAI / Anthropic / Groq / OpenRouter / LiteLLM via one OpenAI-compatible surface. Streaming, cancel, markdown rendering sanitized with DOMPurify.
 
 ### 🔇 Zero-dependency installs
-Two runtime pieces are vendored into every installer by CI:
+Runtime pieces vendored into every installer (downloaded at **local pack** time — not committed to git):
 
 - **Whisper audio worker** — frozen standalone binary (PyInstaller bundles Python + NumPy)
-- **ffmpeg** — official **LGPL** builds (BtbN), staged per-platform; LGPL keeps redistribution clean inside an MIT app
+- **ffmpeg** — official **LGPL** builds (BtbN), staged per-platform
+- **Onboard fast LLM** — Qwen2.5-0.5B Instruct (Q4 GGUF) + `llama-server` for instant Assist drafts
 
-Users install nothing manually: no Python, no pip, no PortAudio, no ffmpeg.
+Users install nothing manually: no Python, no pip, no PortAudio, no ffmpeg, no Ollama required for the fast lane.
 
 ---
 
@@ -95,13 +96,13 @@ Key design rule: **all capture lives in the main process** (`src/main/services/m
 ## Install & Run
 
 ### End users
-Grab an installer from [Releases](https://github.com/taksha17/osmos/releases) (built automatically by CI for Windows / macOS / Linux).
+Grab an installer from [Releases](https://github.com/taksha17/osmos/releases) (built offline on each OS and uploaded with `npm run release:upload`).
 
 Every installer is **fully self-contained** — no manual installs on any OS:
 
-- **Windows**: NSIS installer with LGPL ffmpeg + frozen audio worker bundled
-- **macOS**: `.dmg` (unsigned for now — right-click → Open pastes Gatekeeper) with bundled ffmpeg
-- **Linux**: `.deb` / AppImage with bundled ffmpeg; uses your existing PipeWire/Pulse
+- **Windows**: NSIS installer with LGPL ffmpeg + frozen audio worker + onboard LLM
+- **macOS**: `.dmg` (unsigned for now — right-click → Open pastes Gatekeeper) with bundled ffmpeg + LLM
+- **Linux**: `.deb` / AppImage with bundled ffmpeg + LLM; uses your existing PipeWire/Pulse
 
 GNOME Live screen reading uses Mutter ScreenCast (`python3-gi` + GStreamer/PipeWire, default on Ubuntu). macOS needs Screen Recording once in System Settings.
 
@@ -111,13 +112,20 @@ GNOME Live screen reading uses Mutter ScreenCast (`python3-gi` + GStreamer/PipeW
 git clone https://github.com/taksha17/osmos.git
 cd osmos
 npm install
-npm run dev          # Vite :5179 + Electron; auto-builds frozen audio worker once
-npm run typecheck    # strict TS across main/preload/renderer
-npm run build        # renderer + electron bundles
-npm run pack:linux   # deb/AppImage on Linux host (pack:mac / pack:win on their hosts)
+npm run ensure:llm   # once per OS host: ~400MB GGUF + matching llama-server
+npm run dev
+npm run typecheck
+npm run build
+# Package on the matching host — each installer embeds the onboard LLM:
+npm run pack:linux      # Linux x64/arm64
+npm run pack:mac        # must run on macOS
+npm run pack:win        # must run on Windows
+npm run release:upload  # upload release/* via gh (no Actions minutes)
 ```
 
-Pushing a `v*` tag triggers the CI matrix → signed artifacts land on the GitHub Release.
+CI is **typecheck-only** on Ubuntu. Do not push `v*` tags expecting CI to pack — that matrix was removed to save GitHub Actions minutes.
+
+The onboard LLM (Qwen2.5-0.5B) is the **same GGUF on every OS**; only the `llama-server` binary differs (Linux / macOS / Windows, x64 or arm64). `ensure-bundled-llm.mjs` picks the correct runtime for the host automatically.
 
 <details>
 <summary>Configuration highlights (Settings → …)</summary>

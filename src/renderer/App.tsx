@@ -168,6 +168,23 @@ declare global {
         },
         onEvent: (event: ChatStreamEvent) => void,
       ) => { requestId: string; done: Promise<unknown>; cancel: () => Promise<unknown> };
+      warmupProvider: () => Promise<{
+        ok: boolean;
+        providerId: string;
+        model: string;
+        ms: number;
+        error?: string;
+        at: number;
+      }>;
+      warmupStatus: () => Promise<{
+        ok: boolean;
+        providerId: string;
+        model: string;
+        ms: number;
+        error?: string;
+        at: number;
+      } | null>;
+      probeLumenGateway: (url?: string) => Promise<{ ok: boolean; error?: string }>;
       onOverlayEvent: (listener: (event: { type: string }) => void) => () => void;
       onShortcut: (listener: (action: string) => void) => () => void;
       onSettingsChanged: (listener: (settings: AppSettings) => void) => () => void;

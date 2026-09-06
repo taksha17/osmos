@@ -22,7 +22,16 @@ import { stopLocalWhisperWorker, transcribeLocalWhisper } from './services/local
 import { transcribeWithWhisper } from './services/whisper.js';
 import { extractTextFromImage } from './services/ocr.js';
 import { researchCompany } from './services/companyIntel.js';
-import { chatWithProvider, streamWithProvider } from './services/providers.js';
+import { chatWithProvider } from './services/providers.js';
+import {
+  directProvider,
+  planHybridLanes,
+  statusForRoute,
+  streamLane,
+} from './services/hybridChat.js';
+import { warmupProvider, getLastWarmup, probeLumenGateway } from './services/providerWarmup.js';
+import { routeDecision, routeTierLabel } from '../shared/lumenRoute.js';
+import { startBundledLlm, stopBundledLlm } from './services/bundledLlm.js';
 import { loadHistory, saveHistory, upsertSession, deleteSession, clearAllHistory } from './services/history.js';
 import { checkForUpdates } from './services/updates.js';
 import { retrieveChunks } from './services/retrieval.js';
@@ -466,6 +475,10 @@ function registerIpc() {
     if (stealth) overlay.showInactive();
     else overlay.show();
     scheduleOverlayHide(overlayIdleMs());
+    // Wake quality (+ optional fast) provider so Assist isn't cold.
+    const s = getSettings();
+    const provider = s.providers?.[s.activeProvider || 'ollama'] || s.providers?.ollama;
+    void warmupProvider(provider);
     return { visible: true };
   });
 
@@ -799,6 +812,34 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
     return extractTextFromImage(req);
   });
 
+  ipcMain.handle('provider:warmup', async () => {
+    const s = getSettings();
+    const provider = s.providers?.[s.activeProvider || 'ollama'] || s.providers?.ollama;
+    const status = await warmupProvider(provider);
+    // Soft-warm the fast Ollama model in the background when hybrid is on.
+    if (s.hybridRouting !== false && s.providers?.ollama?.baseUrl) {
+      const fastModel = (s.hybridFastModel || 'llama3.2:1b').trim();
+      if (fastModel && fastModel !== provider?.model) {
+        void warmupProvider({
+          ...s.providers.ollama,
+          model: fastModel,
+          label: 'Ollama (fast)',
+        });
+      }
+    }
+    if (s.lumenGatewayEnabled) {
+      void probeLumenGateway(s.lumenGatewayUrl || 'http://127.0.0.1:8080');
+    }
+    return status;
+  });
+
+  ipcMain.handle('provider:warmup-status', async () => getLastWarmup());
+
+  ipcMain.handle('lumen:probe-gateway', async (_e, url?: string) => {
+    const s = getSettings();
+    return probeLumenGateway(url || s.lumenGatewayUrl || 'http://127.0.0.1:8080');
+  });
+
   ipcMain.handle('chat:ask', async (_e, req: ChatRequest): Promise<ChatResponse> => {
     const message = (req?.message || '').trim();
     if (!message) return { ok: false, error: 'Empty message' };
@@ -808,9 +849,16 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
       at: req?.screenAt,
     });
 
+    const decision = routeDecision(message, {
+      mode: s.activeMode || 'general',
+      hasScreen: Boolean((req?.screenText || '').trim()),
+    });
+    const plan = await planHybridLanes(s, decision, provider);
+    const lane = directProvider(plan);
+
     try {
       const answer = await chatWithProvider(
-        provider,
+        lane,
         system,
         [
           ...(req.history || []).slice(-12),
@@ -856,18 +904,40 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
         text: req?.screenText,
         at: req?.screenAt,
       });
-      emit({ requestId, type: 'meta', usedWebSearch, searchHits });
 
-      try {
+      const decision = routeDecision(message, {
+        mode: s.activeMode || 'general',
+        hasScreen: Boolean((req?.screenText || '').trim()),
+      });
+      const plan = await planHybridLanes(s, decision, provider);
+      // Fire-and-forget quality warmup while we may stream a fast draft.
+      void warmupProvider(provider);
+
+      emit({
+        requestId,
+        type: 'meta',
+        usedWebSearch,
+        searchHits,
+        route: plan.route,
+      });
+      emit({ requestId, type: 'status', text: statusForRoute(plan.route) });
+
+      const history = [
+        ...(req.history || []).slice(-12),
+        { role: 'user' as const, content: message },
+      ];
+
+      const pump = async (
+        laneProvider: typeof provider,
+        onThinking?: () => void,
+      ): Promise<string> => {
         let answer = '';
         let sawThinking = false;
-        for await (const chunk of streamWithProvider(provider, system, [
-          ...(req.history || []).slice(-12),
-          { role: 'user', content: message },
-        ], ac.signal)) {
+        for await (const chunk of streamLane(laneProvider, system, history, ac.signal)) {
           if (chunk.kind === 'thinking') {
             if (!sawThinking) {
               sawThinking = true;
+              onThinking?.();
               emit({
                 requestId,
                 type: 'status',
@@ -879,13 +949,65 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
           answer += chunk.text;
           emit({ requestId, type: 'delta', text: chunk.text });
         }
-        const trimmed = answer.trim();
+        return answer.trim();
+      };
+
+      try {
+        let trimmed = '';
+
+        if (plan.useDraftUpgrade && plan.fast) {
+          emit({
+            requestId,
+            type: 'phase',
+            phase: 'draft',
+            text: `Quick draft (${plan.fast.model})…`,
+          });
+          emit({
+            requestId,
+            type: 'status',
+            text: `Quick draft · ${plan.fast.model}`,
+          });
+
+          let draft = '';
+          try {
+            draft = await pump(plan.fast);
+          } catch (e) {
+            if (ac.signal.aborted) throw e;
+            console.warn('[chat] fast draft failed, quality only:', e);
+          }
+
+          if (ac.signal.aborted) {
+            emit({ requestId, type: 'error', error: 'Cancelled', usedWebSearch, searchHits });
+            return { ok: false, error: 'Cancelled' };
+          }
+
+          emit({
+            requestId,
+            type: 'phase',
+            phase: 'upgrade',
+            text: draft
+              ? `Upgrading with ${plan.quality.model}…`
+              : `Answering with ${plan.quality.model}…`,
+          });
+          emit({
+            requestId,
+            type: 'status',
+            text: `${routeTierLabel(plan.decision.tier)} · ${plan.quality.model}`,
+          });
+
+          trimmed = await pump(plan.quality);
+          if (!trimmed && draft) trimmed = draft;
+        } else {
+          const lane = directProvider(plan);
+          trimmed = await pump(lane);
+        }
+
         if (!trimmed) {
           emit({
             requestId,
             type: 'error',
             error:
-              'Ollama returned an empty answer. Try a smaller model (e.g. qwen2.5:1.5b), wait longer, or shorten the profile/JD.',
+              'Model returned an empty answer. Try a smaller/faster model (e.g. llama3.2:1b or qwen2.5:1.5b), wait longer, or shorten the profile/JD.',
             usedWebSearch,
             searchHits,
           });
@@ -897,6 +1019,7 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
           answer: trimmed,
           usedWebSearch,
           searchHits,
+          route: plan.route,
         });
         return { ok: true };
       } catch (e) {
@@ -1155,6 +1278,9 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createLauncher();
   });
+
+  // Start onboard fast LLM in the background (no Ollama required when vendored).
+  void startBundledLlm().catch((e) => console.warn('[bundledLlm] start failed', e));
 });
 
 app.on('will-quit', () => {
@@ -1163,6 +1289,7 @@ app.on('will-quit', () => {
   void getMicStream().stop().catch(() => undefined);
   void getScreenLiveEngine().stop().catch(() => undefined);
   stopLocalWhisperWorker();
+  stopBundledLlm();
 });
 
 app.on('window-all-closed', () => {

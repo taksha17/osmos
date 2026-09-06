@@ -2,7 +2,8 @@
 /**
  * Package for the current OS only.
  * Cross-building mac/win from Linux (or vice versa) is unsupported here —
- * use pack:linux / pack:mac / pack:win on the matching machine, or CI.
+ * use pack:linux / pack:mac / pack:win on the matching machine, then
+ * `npm run release:upload` (no GitHub Actions pack matrix).
  */
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -22,19 +23,21 @@ if (!args) {
   process.exit(1);
 }
 
-async function ensureWinFfmpeg() {
-  if (process.platform !== 'win32') return;
-  await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [path.join(root, 'scripts', 'ensure-ffmpeg-win.mjs')], {
+function runNode(script) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(root, 'scripts', script)], {
       cwd: root,
       stdio: 'inherit',
       shell: false,
     });
-    child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`ensure-ffmpeg-win exited ${code}`))));
+    child.on('exit', (code) =>
+      code === 0 ? resolve() : reject(new Error(`${script} exited ${code}`)),
+    );
   });
 }
 
-await ensureWinFfmpeg();
+await runNode('ensure-ffmpeg.mjs');
+await runNode('ensure-bundled-llm.mjs');
 
 console.log(`[pack] Host=${process.platform} → electron-builder ${args.join(' ')}`);
 

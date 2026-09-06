@@ -1,23 +1,21 @@
 name: CI
 
+# Lightweight only — packaging runs locally (see scripts/release-upload.mjs).
+# Full OS pack matrix burned GitHub Actions minutes; do not re-enable pack jobs.
+
 on:
-  push:
-    branches: [main, master]
-    tags: ['v*']
   pull_request:
+    branches: [main, master]
+  push:
     branches: [main, master]
 
 env:
   ELECTRON_MIRROR: https://registry.npmmirror.com/-/binary/electron/
 
 jobs:
-  typecheck-build:
-    name: Typecheck & build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+  typecheck:
+    name: Typecheck (ubuntu)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,159 +24,3 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      - run: npm run build
-
-  pack-linux:
-    name: Package Linux
-    needs: typecheck-build
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/electron-builder
-            ~/.npm
-          key: electron-builder-linux-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            electron-builder-linux-
-      - run: npm ci
-      - name: Install Python build deps (audio worker)
-        run: python3 -m pip install --user --break-system-packages pyinstaller numpy || python3 -m pip install --user pyinstaller numpy
-      - name: Package Linux with retry
-        uses: nick-fields/retry@v2
-        with:
-          timeout_minutes: 30
-          max_attempts: 3
-          retry_on: error
-          command: npm run pack:linux
-      - uses: actions/upload-artifact@v4
-        with:
-          name: osmos-linux
-          path: |
-            release/*.AppImage
-            release/*.deb
-            release/*.tar.gz
-          if-no-files-found: warn
-
-  pack-windows:
-    name: Package Windows
-    needs: typecheck-build
-    runs-on: windows-latest
-    if: github.event_name == 'push'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-      - uses: actions/cache@v4
-        with:
-          path: |
-            C:\Users\runneradmin\AppData\Local\electron-builder\Cache
-            C:\Users\runneradmin\.cache\electron-builder
-            C:\Users\runneradmin\.npm
-          key: electron-builder-windows-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            electron-builder-windows-
-      - run: npm ci
-      - name: Install Python build deps (audio worker)
-        run: python -m pip install --upgrade pip pyinstaller numpy
-      - name: Package Windows with retry
-        uses: nick-fields/retry@v2
-        with:
-          timeout_minutes: 45
-          max_attempts: 3
-          retry_on: error
-          command: npm run pack:win
-      - uses: actions/upload-artifact@v4
-        with:
-          name: osmos-windows
-          path: |
-            release/*.exe
-            release/*.msi
-          if-no-files-found: error
-
-  pack-macos:
-    name: Package macOS
-    needs: typecheck-build
-    runs-on: macos-latest
-    if: github.event_name == 'push'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/Library/Caches/electron-builder
-            ~/.npm
-          key: electron-builder-macos-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            electron-builder-macos-
-      - run: npm ci
-      - name: Install Python build deps (audio worker)
-        run: python3 -m pip install --user pyinstaller numpy || python3 -m pip install --user --break-system-packages pyinstaller numpy
-      - name: Package macOS with retry
-        uses: nick-fields/retry@v2
-        with:
-          timeout_minutes: 60
-          max_attempts: 3
-          retry_on: error
-          command: npm run pack:mac
-      - uses: actions/upload-artifact@v4
-        with:
-          name: osmos-macos
-          path: |
-            release/*.dmg
-            release/*.pkg
-            release/*.zip
-          if-no-files-found: error
-
-  create-release:
-    name: Create GitHub Release
-    needs: [pack-linux, pack-windows, pack-macos]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: osmos-linux
-          path: ./artifacts/linux
-      - uses: actions/download-artifact@v4
-        with:
-          name: osmos-windows
-          path: ./artifacts/windows
-      - uses: actions/download-artifact@v4
-        with:
-          name: osmos-macos
-          path: ./artifacts/macos
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          body: |
-            OSMOS ${{ github.ref_name }} release
-            
-            ## Installation
-            - **Linux**: Download the AppImage or .deb from the assets below
-            - **Windows**: Run the .exe installer
-            - **macOS**: Open the .dmg and drag OSMOS to Applications
-          files: |
-            artifacts/linux/**/*
-            artifacts/windows/**/*
-            artifacts/macos/**/*

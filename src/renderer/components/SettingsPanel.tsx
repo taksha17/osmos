@@ -631,6 +631,127 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                   </div>
                 </>
               )}
+
+              <header className="settings-section__head" style={{ marginTop: 28 }}>
+                <h3>Hybrid routing</h3>
+                <p className="meta">
+                  Short prompts use a tiny local Ollama model first. Interview / long / screen
+                  questions use your quality provider. Draft-then-upgrade shows a quick answer while
+                  the full model finishes.
+                </p>
+              </header>
+
+              <div className="settings-row">
+                <div className="settings-row__copy">
+                  <strong>Hybrid routing</strong>
+                  <p>Route simple asks to the fast local model</p>
+                </div>
+                <button
+                  type="button"
+                  className={`home-switch${settings.hybridRouting !== false ? ' home-switch--on' : ''}`}
+                  aria-pressed={settings.hybridRouting !== false}
+                  onClick={() => set({ hybridRouting: settings.hybridRouting === false })}
+                >
+                  <span className="home-switch__knob" />
+                </button>
+              </div>
+
+              <div className="field">
+                <label>Fast local model</label>
+                <input
+                  value={settings.hybridFastModel || 'osmos-fast'}
+                  onChange={(e) => set({ hybridFastModel: e.target.value })}
+                  placeholder="osmos-fast"
+                  disabled={settings.hybridRouting === false}
+                />
+                <p className="meta">
+                  Default <code>osmos-fast</code> is the bundled Qwen2.5-0.5B on Linux, macOS, and
+                  Windows (no Ollama). Set an Ollama tag (e.g. <code>llama3.2:1b</code>) only as a
+                  fallback when the bundle is missing.
+                </p>
+              </div>
+
+              <div className="settings-row">
+                <div className="settings-row__copy">
+                  <strong>Draft then upgrade</strong>
+                  <p>Stream a fast draft, then replace with the quality answer</p>
+                </div>
+                <button
+                  type="button"
+                  className={`home-switch${settings.draftThenUpgrade !== false ? ' home-switch--on' : ''}`}
+                  aria-pressed={settings.draftThenUpgrade !== false}
+                  disabled={settings.hybridRouting === false}
+                  onClick={() => set({ draftThenUpgrade: settings.draftThenUpgrade === false })}
+                >
+                  <span className="home-switch__knob" />
+                </button>
+              </div>
+
+              <div className="settings-row">
+                <div className="settings-row__copy">
+                  <strong>Lumen gateway</strong>
+                  <p>Use Lumen-Stream-Lab HTTP gateway for the fast lane when it is running</p>
+                </div>
+                <button
+                  type="button"
+                  className={`home-switch${settings.lumenGatewayEnabled ? ' home-switch--on' : ''}`}
+                  aria-pressed={Boolean(settings.lumenGatewayEnabled)}
+                  disabled={settings.hybridRouting === false}
+                  onClick={() => set({ lumenGatewayEnabled: !settings.lumenGatewayEnabled })}
+                >
+                  <span className="home-switch__knob" />
+                </button>
+              </div>
+
+              <div className="field">
+                <label>Lumen gateway URL</label>
+                <input
+                  value={settings.lumenGatewayUrl || 'http://127.0.0.1:8080'}
+                  onChange={(e) => set({ lumenGatewayUrl: e.target.value })}
+                  placeholder="http://127.0.0.1:8080"
+                  disabled={!settings.lumenGatewayEnabled || settings.hybridRouting === false}
+                />
+              </div>
+
+              <div className="row" style={{ marginBottom: 14, gap: 8 }}>
+                <button
+                  className="ghost"
+                  style={{ height: 38 }}
+                  type="button"
+                  onClick={async () => {
+                    setStatus('Warming provider…');
+                    setError('');
+                    const res = await window.osmos.warmupProvider();
+                    if (!res?.ok) {
+                      setError(res?.error || 'Warmup failed');
+                      setStatus('');
+                      return;
+                    }
+                    setStatus(`Warmed ${res.providerId}/${res.model} in ${res.ms}ms`);
+                  }}
+                >
+                  Warm up provider
+                </button>
+                <button
+                  className="ghost"
+                  style={{ height: 38 }}
+                  type="button"
+                  disabled={!settings.lumenGatewayEnabled}
+                  onClick={async () => {
+                    setStatus('Probing Lumen…');
+                    setError('');
+                    const res = await window.osmos.probeLumenGateway(settings.lumenGatewayUrl);
+                    if (!res?.ok) {
+                      setError(res?.error || 'Lumen gateway not reachable');
+                      setStatus('');
+                      return;
+                    }
+                    setStatus('Lumen gateway OK');
+                  }}
+                >
+                  Probe Lumen
+                </button>
+              </div>
             </div>
           )}
 

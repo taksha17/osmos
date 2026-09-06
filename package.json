@@ -1,7 +1,7 @@
 {
   "name": "osmos",
   "productName": "OSMOS",
-  "version": "0.5.9",
+  "version": "0.6.0",
   "description": "OSMOS — open-source, cross-platform AI interview & meeting copilot for Linux, macOS, and Windows.",
   "author": {
     "name": "OSMOS contributors",
@@ -23,11 +23,16 @@
     "start:release": "node scripts/start-release.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "pack": "npm run build && npm run build:audio-worker && node scripts/pack.mjs",
-    "pack:linux": "node scripts/ensure-ffmpeg.mjs && npm run build && npm run build:audio-worker && electron-builder --linux --publish never",
-    "pack:mac": "node scripts/ensure-ffmpeg.mjs && npm run build && npm run build:audio-worker && electron-builder --mac --publish never",
-    "pack:win": "node scripts/ensure-ffmpeg.mjs && npm run build && npm run build:audio-worker && electron-builder --win --publish never",
+    "pack:linux": "node scripts/ensure-ffmpeg.mjs && node scripts/ensure-bundled-llm.mjs && npm run build && npm run build:audio-worker && electron-builder --linux --publish never",
+    "pack:mac": "node scripts/ensure-ffmpeg.mjs && node scripts/ensure-bundled-llm.mjs && npm run build && npm run build:audio-worker && electron-builder --mac --publish never",
+    "pack:win": "node scripts/ensure-ffmpeg.mjs && node scripts/ensure-bundled-llm.mjs && npm run build && npm run build:audio-worker && electron-builder --win --publish never",
     "ensure:ffmpeg": "node scripts/ensure-ffmpeg.mjs",
-    "pack:all": "node -e \"console.error('pack:all cannot cross-build mac/win from Linux (or vice versa). Use: npm run pack  (current OS), or pack:linux / pack:mac / pack:win on matching hosts / CI.'); process.exit(1)\""
+    "ensure:llm": "node scripts/ensure-bundled-llm.mjs",
+    "ensure:llm:win": "node scripts/ensure-bundled-llm.mjs --platform=win32 --arch=x64",
+    "ensure:llm:mac": "node scripts/ensure-bundled-llm.mjs --platform=darwin --arch=arm64",
+    "ensure:llm:mac-intel": "node scripts/ensure-bundled-llm.mjs --platform=darwin --arch=x64",
+    "release:upload": "node scripts/release-upload.mjs",
+    "pack:all": "node -e \"console.error('pack:all cannot cross-build mac/win from Linux (or vice versa). Use: npm run pack  (current OS), or pack:linux / pack:mac / pack:win on matching hosts. Upload with npm run release:upload (no GitHub Actions).'); process.exit(1)\""
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
@@ -72,6 +77,17 @@
         "to": "bin",
         "filter": [
           "**/*"
+        ]
+      },
+      {
+        "from": "build/llm",
+        "to": "llm",
+        "filter": [
+          "**/*",
+          "!**/_extract/**",
+          "!**/*.partial",
+          "!**/*.tar.gz",
+          "!**/*.zip"
         ]
       }
     ],

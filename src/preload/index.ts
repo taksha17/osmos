@@ -190,6 +190,9 @@ const api = {
       cancel: () => ipcRenderer.invoke('chat:cancel-stream', requestId),
     };
   },
+  warmupProvider: () => ipcRenderer.invoke('provider:warmup'),
+  warmupStatus: () => ipcRenderer.invoke('provider:warmup-status'),
+  probeLumenGateway: (url?: string) => ipcRenderer.invoke('lumen:probe-gateway', url),
   onOverlayEvent: (listener: (event: { type: string }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: { type: string }) => {
       listener(data);

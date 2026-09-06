@@ -10,7 +10,7 @@
 - GitHub: `https://github.com/taksha17/osmos` (public)
 - **Not** a fork or rebrand of Natively. Natively at `/media/taksha/New Volume/natively` is **personal reference only** — study ideas, never copy proprietary/source-available code.
 - License: MIT (`LICENSE`)
-- Current version: **0.5.9** (`package.json`)
+- Current version: **0.6.0** (`package.json`)
 - Reference product: Cluely (real-time interview/meeting copilot). We match core UX: desktop overlay, live transcription, screen context, answer suggestions. We do **not** copy proprietary code or data.
 
 ## Stack
@@ -47,9 +47,10 @@ npm run start:release    # run unpacked Linux build (see Symptom D)
 
 Dev entry: `scripts/dev.mjs` → builds electron → Vite → `electron . --no-sandbox`.
 
-**Cross-platform release workflow:**
-- Push a `v*` tag to trigger GitHub Actions matrix builds on `ubuntu-latest`, `macos-latest`, and `windows-latest`.
-- CI caches electron-builder artifacts, retries on network failure, and uploads all platform installers to the GitHub Release.
+**Cross-platform release workflow (offline — no GitHub Actions pack matrix):**
+- On each OS host: `npm run pack:linux` / `pack:mac` / `pack:win` (downloads ffmpeg + bundled LLM once).
+- Upload installers: `npm run release:upload` (uses `gh release create/upload`).
+- CI only runs typecheck on Ubuntu to save Action minutes.
 
 ## Architecture map
 
@@ -94,7 +95,7 @@ IPC system:audio-chunk  →  useSystemAudioStt  →  stt:transcribe  →  should
 5. Cross-platform: never ship Unix-only or Windows-only commands in shared scripts; prefer Node APIs. Platform OS integration goes behind `src/main/platform/`.
 6. Prefer `@shared/...` imports in renderer; main uses relative `../shared/...` with `.js` extensions in compiled ESM.
 7. Heavy native/WASM work (Whisper, Tesseract) stays in **main or a system Node worker** — not the Electron renderer.
-8. Provider abstraction: chat routes through `chatWithProvider` / `streamWithProvider` in `src/main/services/providers.ts`, not direct Ollama calls.
+8. Provider abstraction: chat routes through `chatWithProvider` / `streamWithProvider` in `src/main/services/providers.ts`, not direct Ollama calls. Hybrid routing (`src/shared/lumenRoute.ts` + `hybridChat.ts`) may pick a fast Ollama lane or draft-then-upgrade before the quality provider — still via that same abstraction.
 9. After **main/preload** changes: `npm run build:electron` and restart `npm run dev` (Vite HMR is not enough).
 10. **Never rely on bare `ffmpeg` in packaged builds.** Always resolve through `getFfmpegPath()` / `resolveFfmpeg()` (bundled `resources/bin` first, then known installs, then PATH). See `FIXES.md` Symptom J.
 11. **Never await LLM inference inline inside a capture loop.** Fire-and-handle; keep capture running independently.
@@ -178,7 +179,7 @@ Documented so the next agent does not reintroduce these bugs:
   - **Fix:** Run Whisper from `app.asar.unpacked` with a real directory cwd (`resolveBin.ts` / `safeSpawnCwd`); asarUnpack `scripts/whisper-worker.mjs` + `@huggingface/transformers` + `onnxruntime-*`; absolute paths for capture tools (incl. bundled `ffmpeg.exe` on Windows).
 - Packaged `files` / `asarUnpack` must include `tesseract.js` (and existing Whisper/ORT deps).
 - Linux main process always appends `no-sandbox` + ozone auto (packaged and unpackaged).
-- **CI packaging:** `publish: []` in electron-builder; `--publish never` on pack scripts; `GH_TOKEN` only in `create-release` job.
+- **CI packaging:** disabled — pack locally and `npm run release:upload`. CI is typecheck-only.
 - **Windows build flakes:** `ELECTRON_MIRROR`, electron-builder cache, retry wrapper in `.github/workflows/ci.yml`.
 - **Linux installer missing audio deps:** `linux-install.sh` installs `pipewire`, `pulseaudio-utils`, and expects **`ffmpeg`** on PATH for loopback.
 
@@ -256,6 +257,7 @@ Documented so the next agent does not reintroduce these bugs:
 ### Multi-provider / RAG / history / question bank
 
 - `providers.ts` + Settings UI for cloud LLMs.
+- **Hybrid routing (Lumen-inspired, MIT reimplementation):** `lumenRoute.ts` tiers (`fast` / `balanced` / `quality`). Fast lane prefers **bundled** Qwen2.5-0.5B via `llama-server` (`resources/llm/`, `ensure-bundled-llm.mjs`) on **Linux, macOS, and Windows** (x64/arm64); optional Lumen gateway or Ollama tag fallback. Quality = `activeProvider`. `draftThenUpgrade` streams a quick draft then replaces with the quality answer. Overlay open / Assist warms the quality provider (`provider:warmup`). Do **not** vendor Lumen-Stream-Lab into the installer; do **not** commit GGUF weights to git. Pack each OS on that OS host so the matching `llama-server` runtime is embedded (`pack:linux` / `pack:mac` / `pack:win`).
 - Document RAG: TF-IDF retrieval in `retrieval.ts` (not full-text paste).
 - Question bank + STAR + company intel + file-backed history — see IPC table.
 
@@ -314,7 +316,8 @@ Remaining symptom: pipe still starves after ~1st chunk on this Zenbook/PipeWire 
 | Channel | Purpose |
 |---|---|
 | `settings:get` / `settings:update` | AppSettings |
-| `chat:ask` / `chat:ask-stream` / `chat:cancel-stream` / event `chat:stream` | Chat; `ChatRequest` may carry `screenText` + `screenAt` (fresh OCR → system prompt) |
+| `chat:ask` / `chat:ask-stream` / `chat:cancel-stream` / event `chat:stream` | Chat; `ChatRequest` may carry `screenText` + `screenAt` (fresh OCR → system prompt). Stream may emit `phase: draft|upgrade` + `route` meta for hybrid routing |
+| `provider:warmup` / `provider:warmup-status` / `lumen:probe-gateway` | Wake quality (+ fast) provider; probe optional Lumen HTTP gateway |
 | `ollama:list-models` | Probe models (optional `baseUrl`) |
 | `searxng:test` / `websearch:test` | Probe search |
 | `stt:transcribe` | Whisper API or local worker (`engine: 'local' \| 'openai'`) |
