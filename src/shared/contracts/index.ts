@@ -34,6 +34,17 @@ export type {
   OcrResult,
 } from './ocr.ts';
 export type {
+  CallOpts,
+  CallPurpose,
+  Page,
+  SearchHit,
+  WebAccessProvider,
+  WebCapability,
+  WebHealth,
+  WebPrivacy,
+  WebTier,
+} from './web.ts';
+export type {
   SttCapabilities,
   SttFinal,
   SttPartial,
