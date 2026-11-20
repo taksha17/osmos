@@ -12,7 +12,7 @@
 <p align="center">
   <a href="#license"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <a href="#install--run"><img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue"></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.5.9-orange">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.6.0-orange">
 </p>
 
 ---
@@ -65,7 +65,7 @@ Runtime pieces vendored into every installer (downloaded at **local pack** time 
 
 - **Whisper audio worker** — frozen standalone binary (PyInstaller bundles Python + NumPy)
 - **ffmpeg** — official **LGPL** builds (BtbN), staged per-platform
-- **Onboard fast LLM** — Qwen2.5-0.5B Instruct (Q4 GGUF) + `llama-server` for instant Assist drafts
+- **Onboard fast LLM** — Qwen2.5-1.5B Instruct (Q4 GGUF) + `llama-server` for instant Assist drafts and profile-grounded easy answers
 
 Users install nothing manually: no Python, no pip, no PortAudio, no ffmpeg, no Ollama required for the fast lane.
 
@@ -125,7 +125,7 @@ npm run release:upload  # upload release/* via gh (no Actions minutes)
 
 CI is **typecheck-only** on Ubuntu. Do not push `v*` tags expecting CI to pack — that matrix was removed to save GitHub Actions minutes.
 
-The onboard LLM (Qwen2.5-0.5B) is the **same GGUF on every OS**; only the `llama-server` binary differs (Linux / macOS / Windows, x64 or arm64). `ensure-bundled-llm.mjs` picks the correct runtime for the host automatically.
+The onboard LLM (Qwen2.5-1.5B) is the **same GGUF on every OS**; only the `llama-server` binary differs (Linux / macOS / Windows, x64 or arm64). `ensure-bundled-llm.mjs` picks the correct runtime for the host automatically.
 
 <details>
 <summary>Configuration highlights (Settings → …)</summary>

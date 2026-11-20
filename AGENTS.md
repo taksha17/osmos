@@ -36,6 +36,7 @@ npm run dev              # Vite :5179 + Electron (OSMOS_DEV=1)
 npm run build            # renderer + electron bundles
 npm run build:electron   # main/preload only (fast after main/preload edits)
 npm run typecheck
+npm test                 # pure shared unit tests (router + question bank)
 npm run pack             # package for **current OS only** → release/
 npm run pack:linux       # AppImage + deb + tar.gz (Linux host)
 npm run pack:mac         # dmg (must run on macOS host)
@@ -137,11 +138,12 @@ Optional CLI tools for quieter screenshots: `gnome-screenshot`, `grim`, `spectac
 
 Renderer hook: `src/renderer/stt/useSystemAudioStt.ts` — prefers stream on Linux, else chunked `captureSystemAudio`.
 
-## What is live (v0.5.1)
+## What is live (v0.6.0)
 
 - **Launcher hub** (`launcher-shell`): full-bleed home dashboard — search, Low-profile toggle, Start Osmos, sessions; Profile + Settings open as **modals** (`hub-modal`), not a permanent sidebar
 - Frameless overlay (`#/overlay`) — always-on-top, translucent, draggable
 - Streaming LLM chat + cancel (Ollama + cloud providers)
+- Hybrid routing: bundled Qwen2.5-1.5B fast lane, question-bank/easy-question grounding, draft-then-upgrade, provider warmup
 - SearXNG / DuckDuckGo / Tavily grounding (skipped in **interview** mode unless query looks like research)
 - Profile + **named multi-profiles** + modes (interview / meeting / general) → injected into system prompt
 - **Profile Intelligence** modal (left nav: Identity, Resume/JD upload, company intel, docs, question bank)
@@ -257,7 +259,7 @@ Documented so the next agent does not reintroduce these bugs:
 ### Multi-provider / RAG / history / question bank
 
 - `providers.ts` + Settings UI for cloud LLMs.
-- **Hybrid routing (Lumen-inspired, MIT reimplementation):** `lumenRoute.ts` tiers (`fast` / `balanced` / `quality`). Fast lane prefers **bundled** Qwen2.5-0.5B via `llama-server` (`resources/llm/`, `ensure-bundled-llm.mjs`) on **Linux, macOS, and Windows** (x64/arm64); optional Lumen gateway or Ollama tag fallback. Quality = `activeProvider`. `draftThenUpgrade` streams a quick draft then replaces with the quality answer. Overlay open / Assist warms the quality provider (`provider:warmup`). Do **not** vendor Lumen-Stream-Lab into the installer; do **not** commit GGUF weights to git. Pack each OS on that OS host so the matching `llama-server` runtime is embedded (`pack:linux` / `pack:mac` / `pack:win`).
+- **Hybrid routing (Lumen-inspired, MIT reimplementation):** `lumenRoute.ts` tiers (`fast` / `balanced` / `quality`). Fast lane prefers **bundled** Qwen2.5-1.5B via `llama-server` (`resources/llm/`, `ensure-bundled-llm.mjs`) on **Linux, macOS, and Windows** (x64/arm64); optional Lumen gateway or Ollama tag fallback. Quality = `activeProvider`. `draftThenUpgrade` streams a quick draft then replaces with the quality answer. Overlay open / Assist warms the quality provider (`provider:warmup`). Do **not** vendor Lumen-Stream-Lab into the installer; do **not** commit GGUF weights to git. Pack each OS on that OS host so the matching `llama-server` runtime is embedded (`pack:linux` / `pack:mac` / `pack:win`).
 - Document RAG: TF-IDF retrieval in `retrieval.ts` (not full-text paste).
 - Question bank + STAR + company intel + file-backed history — see IPC table.
 

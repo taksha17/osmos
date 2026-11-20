@@ -50,9 +50,10 @@ Open-source, free alternative to Cluely: real-time desktop AI copilot for interv
 - [x] Stealth / screen-share safer overlay (Win/macOS OS capture exclusion, skip taskbar, faster idle dim; Linux share-tab guidance)
 - [x] Hybrid routing (Lumen-inspired): bundled Qwen2.5-0.5B fast lane + quality provider, draft-then-upgrade, provider warmup, optional Lumen gateway
 - [x] Offline packaging + GitHub Release upload (`release:upload`) — no Actions pack matrix
-- [ ] Signed builds + notarization (CI matrix builds unsigned artifacts today)
+- [ ] Signed builds + notarization (installers are unsigned today; no CI pack matrix)
+- [x] Profile-harnessed routing: question-bank grounding + easy-question local lane (Qwen2.5-1.5B, < 2 GB RAM)
 - [x] Branding pass (name lock, icon, landing)
-- [x] CI typecheck + build matrix (unsigned Linux / macOS / Windows installers on `v*` tags)
+- [x] CI typecheck-only on Ubuntu (packaging runs on each OS host; the Actions pack matrix was removed to save minutes)
 
 ## Design rules
 

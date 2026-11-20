@@ -16,7 +16,8 @@ export type AudioCaptureBackend =
 export type ScreenCaptureBackend =
   | 'gdi-powershell' // Windows loop-safe
   | 'screencapture-cli' // macOS loop-safe
-  | 'cli-grim-gnome' // Linux loop-safe
+  | 'mutter-screencast' // GNOME compositor API — silent, no portal dialog
+  | 'cli-grim-gnome' // Linux CLI fallback (spectacle / grim / scrot)
   | 'desktop-capturer' // on-demand last resort (may portal on Wayland)
   | 'none';
 
@@ -96,10 +97,11 @@ export function getCaptureStrategy(
         notes: 'ffmpeg -f pulse on sink *.monitor; never parec on PipeWire.',
       },
       screen: {
-        onDemand: 'desktop-capturer',
-        continuous: 'cli-grim-gnome',
+        onDemand: 'mutter-screencast',
+        continuous: 'mutter-screencast',
         loopSafeOnly: true,
-        notes: 'Continuous = grim/gnome-screenshot/spectacle/scrot only. Never loop portal.',
+        notes:
+          'GNOME: org.gnome.Mutter.ScreenCast (screen_worker.py + GStreamer/PipeWire) — no dialog, no flash. Non-GNOME falls back to spectacle/grim/scrot. Never loop the portal.',
       },
       answerMode: 'keybind-only',
     };
