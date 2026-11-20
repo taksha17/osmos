@@ -519,11 +519,25 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > streams with a visible status line). The STT worker now launches on the bundled
 > runtime, falling back to system Node only when asked.
 > Escapes: `OSMOS_CAPTURE_WORKERS=0`, `OSMOS_WORKER_RUNTIME=system`,
-> `OSMOS_NODE_BINARY=…`. Verified: unit tests on Linux and Windows, capture smoke
-> against a real PipeWire monitor on both runtimes, and `onnxruntime-node` +
-> transformers loading under Electron's Node (Linux). Still open: the Windows and
-> macOS bundled-runtime spike (no Electron binary on the Windows test box yet) and
-> the 30-minute soak.
+> `OSMOS_NODE_BINARY=…`.
+>
+> **Exit evidence (measured 2026-11-20):**
+>
+> | Check | Result |
+> |---|---|
+> | 30-minute soak, real monitor, 2 s chunks | 899 chunks / 1 799 beats, max gap **2 040 ms** (2 000 ms chunk + frame), **0 errors, 0 restarts** |
+> | No `node`, no `ffmpeg` on PATH (Linux, shims that fail if called) | PASS — worker on bundled runtime, 5 chunks/12 s, 0 errors |
+> | Windows bundled runtime (`ELECTRON_RUN_AS_NODE`) | PASS — worker `ready`+`pong` on Electron 34.5.8 / Node 20.19.1 with `onnxruntime-node` 1.24.3 loading |
+> | Supervisor kill/restart | PASS — 2 chunks → kill → restart logged → 2 more chunks |
+> | Capture smoke, system Node + bundled runtime | PASS — valid WAV both ways |
+> | Unit tests | Linux 80/80, Windows 66/66 |
+>
+> Still open (environmental, not code): a **true clean-VM installer test** — this host
+> has no Windows/macOS VM and `pack:linux` was not run, so the asar-unpacked worker
+> path is verified by config + `resolveWorkerScript` review only — and **macOS**, which
+> has no host on this project at all. Both are one command away for whoever has the VM:
+> install the built artefact, then check that mic/Smart transcribe still works with
+> Node and Python absent.
 
 - Move STT into a `utilityProcess` using the bundled Node; remove the system-Node dependency.
 - Add the worker supervisor with health checks and restart.

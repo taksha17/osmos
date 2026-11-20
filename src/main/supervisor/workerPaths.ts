@@ -1,9 +1,9 @@
 /**
  * Worker script resolution — Architecture v2, §15 (zero-dependency runtime).
  *
- * Workers are plain `.mjs` files shipped with the app, not bundled by esbuild,
- * so they must be unpacked next to `app.asar` (Windows/macOS) or found in the
- * repo during development. Mirrors the whisper-worker lookup in
+ * Workers are `.mjs` bundles produced by `scripts/build-workers.mjs`, so they
+ * must be unpacked next to `app.asar` (Windows/macOS) or found in the repo
+ * during development. Mirrors the whisper-worker lookup in
  * `services/localWhisper.ts` on purpose: one rule, one place to get wrong.
  */
 
