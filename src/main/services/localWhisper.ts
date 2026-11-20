@@ -19,6 +19,7 @@ import { app } from 'electron';
 import type { TranscribeRequest, TranscribeResponse } from '../../shared/types.js';
 import readline from 'node:readline';
 import { findOnPath, isExecutableFile, resolveFfmpeg, safeSpawnCwd } from './resolveBin.js';
+import { planWorkerCommand } from '../../shared/policy/workerRuntime.js';
 import { getSettings } from './settingsStore.js';
 
 /** Default local STT model when settings/env don't specify one. */
@@ -78,20 +79,45 @@ function resolveWorkerScript(): string {
   return path.join(projectRoot(), 'scripts', 'whisper-worker.mjs');
 }
 
-function resolveNodeBinary(): string {
-  const fromEnv = [
+/**
+ * Runtime for the STT worker (Architecture v2 §5.3 / §15).
+ *
+ * Bundled first: the Electron binary with `ELECTRON_RUN_AS_NODE=1`, so a clean
+ * machine without Node still transcribes. System Node stays available for dev
+ * hosts and for `OSMOS_WORKER_RUNTIME=system` / OSMOS_NODE_BINARY escapes.
+ */
+let cachedRuntime: { command: string; env: Record<string, string>; mode: string } | null = null;
+
+function workerRuntime(): { command: string; env: Record<string, string>; mode: string } {
+  if (cachedRuntime) return cachedRuntime;
+
+  const override = [
     process.env.OSMOS_NODE_BINARY,
     process.env.UNCON_NODE_BINARY,
     process.env.NODE_BINARY,
-    // Only trust npm's path when it is a real file (packaged apps often inherit junk).
+    // Only trust npm's path when it is a real file (packaged apps inherit junk).
     process.env.npm_node_execpath,
-  ];
-  for (const c of fromEnv) {
-    if (c && isExecutableFile(c)) return c;
-  }
-  const onPath = findOnPath('node');
-  if (onPath) return onPath;
-  return process.platform === 'win32' ? 'node.exe' : 'node';
+  ].find((c) => c && isExecutableFile(c));
+
+  const launch: { command: string; env: Record<string, string>; mode: string } = override
+    ? { command: override, env: {}, mode: 'system' }
+    : (planWorkerCommand({
+        isElectron: Boolean(process.versions.electron),
+        execPath: process.execPath,
+        systemNode: findOnPath('node'),
+        preferBundled: process.env.OSMOS_WORKER_RUNTIME !== 'system',
+      }) ?? {
+        command: process.platform === 'win32' ? 'node.exe' : 'node',
+        env: {},
+        mode: 'system',
+      });
+
+  cachedRuntime = launch;
+  return launch;
+}
+
+function resolveNodeBinary(): string {
+  return workerRuntime().command;
 }
 
 function spawnErrorHint(err: NodeJS.ErrnoException, nodeBin: string, worker: string, cwd: string): string {
@@ -175,6 +201,7 @@ function ensureServe(): Promise<void> {
         cwd,
         env: {
           ...process.env,
+          ...workerRuntime().env,
           OSMOS_ROOT: root,
           UNCON_ROOT: root,
           OSMOS_WHISPER_MODEL: process.env.OSMOS_WHISPER_MODEL || 'onnx-community/moonshine-tiny-ONNX',
@@ -299,6 +326,7 @@ function runOneShot(
         cwd,
         env: {
           ...process.env,
+          ...workerRuntime().env,
           OSMOS_ROOT: root,
           UNCON_ROOT: root,
           OSMOS_WHISPER_MODEL: process.env.OSMOS_WHISPER_MODEL || 'Xenova/whisper-base.en',

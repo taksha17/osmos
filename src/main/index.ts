@@ -40,6 +40,11 @@ import { assembleInterviewPrep } from './services/profilePrep.js';
 import { listAudioDevices } from './services/audioDevices.js';
 import { getLinuxLoopbackStream } from './services/linuxLoopbackStream.js';
 import { getMicStream } from './services/micStream.js';
+import {
+  captureWorkersEnabled,
+  getCaptureWorkerClient,
+  stopCaptureWorkers,
+} from './services/captureWorkerClient.js';
 import { getScreenLiveEngine } from './services/screenLive.js';
 import { listAudioDevicesPython, stopPythonAudioWorker, startAudioCapturePython, stopAudioCapturePython, getAudioDeviceInfoPython } from './services/pythonAudio.js';
 import { CONTINUOUS_CHUNK_MS } from '../shared/continuousAssist.js';
@@ -629,9 +634,45 @@ function registerIpc() {
       if (process.platform !== 'linux') {
         return { ok: true, mode: 'fallback' };
       }
+      const sender = e.sender;
+
+      // v2 Phase 1: capture runs in a supervised worker. If it cannot start,
+      // fall through to the in-process stream and say so in the status line.
+      if (captureWorkersEnabled()) {
+        const client = getCaptureWorkerClient('loopback');
+        client.removeAllListeners('chunk');
+        client.removeAllListeners('error');
+        client.removeAllListeners('status');
+        client.on('chunk', (chunk) => {
+          if (!sender.isDestroyed()) sender.send('system:audio-chunk', chunk);
+        });
+        client.on('error', (error: string) => {
+          if (!sender.isDestroyed()) sender.send('system:audio-chunk', { ok: false, error });
+        });
+        client.on('status', (text: string) => {
+          if (!sender.isDestroyed()) sender.send('system:audio-status', { text });
+        });
+        const isolated = await client.start({
+          device: req?.device,
+          chunkMs: req?.chunkMs || CONTINUOUS_CHUNK_MS,
+        });
+        if (isolated.ok) {
+          return {
+            ok: true,
+            monitor: isolated.monitor,
+            mode: 'stream',
+            backend: isolated.backend,
+          };
+        }
+        if (!sender.isDestroyed()) {
+          sender.send('system:audio-status', {
+            text: `Capture worker unavailable (${isolated.error}) — using inline capture`,
+          });
+        }
+      }
+
       try {
         const stream = getLinuxLoopbackStream();
-        const sender = e.sender;
         stream.removeAllListeners('chunk');
         stream.removeAllListeners('error');
         stream.removeAllListeners('status');
@@ -666,6 +707,7 @@ function registerIpc() {
   );
 
   ipcMain.handle('system:listen-stop', async (): Promise<{ ok: boolean }> => {
+    await getCaptureWorkerClient('loopback').stop();
     if (process.platform === 'linux') {
       await getLinuxLoopbackStream().stop();
     }
@@ -714,9 +756,36 @@ function registerIpc() {
       e,
       req?: { device?: string; chunkMs?: number },
     ): Promise<{ ok: boolean; error?: string; source?: string }> => {
+      const sender = e.sender;
+
+      if (captureWorkersEnabled()) {
+        const client = getCaptureWorkerClient('mic');
+        client.removeAllListeners('chunk');
+        client.removeAllListeners('error');
+        client.removeAllListeners('status');
+        client.on('chunk', (chunk) => {
+          if (!sender.isDestroyed()) sender.send('mic:audio-chunk', chunk);
+        });
+        client.on('error', (error: string) => {
+          if (!sender.isDestroyed()) sender.send('mic:audio-chunk', { ok: false, error });
+        });
+        client.on('status', (text: string) => {
+          if (!sender.isDestroyed()) sender.send('mic:audio-status', { text });
+        });
+        const isolated = await client.start({
+          device: req?.device,
+          chunkMs: req?.chunkMs || CONTINUOUS_CHUNK_MS,
+        });
+        if (isolated.ok) return { ok: true, source: isolated.source };
+        if (!sender.isDestroyed()) {
+          sender.send('mic:audio-status', {
+            text: `Mic worker unavailable (${isolated.error}) — using inline capture`,
+          });
+        }
+      }
+
       try {
         const stream = getMicStream();
-        const sender = e.sender;
         stream.removeAllListeners('chunk');
         stream.removeAllListeners('error');
         stream.removeAllListeners('status');
@@ -743,11 +812,13 @@ function registerIpc() {
   );
 
   ipcMain.handle('mic:listen-stop', async (): Promise<{ ok: boolean }> => {
+    await getCaptureWorkerClient('mic').stop();
     await getMicStream().stop();
     return { ok: true };
   });
 
   ipcMain.handle('mic:diagnostics', async () => {
+    if (captureWorkersEnabled()) return getCaptureWorkerClient('mic').getLastError();
     return getMicStream().getLastError();
   });
 
@@ -1350,6 +1421,7 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  void stopCaptureWorkers().catch(() => undefined);
   void getLinuxLoopbackStream().stop().catch(() => undefined);
   void getMicStream().stop().catch(() => undefined);
   void getScreenLiveEngine().stop().catch(() => undefined);
