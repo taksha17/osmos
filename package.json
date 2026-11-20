@@ -118,13 +118,7 @@
       "scripts/whisper-worker.mjs",
       "src/python/**/*",
       "dist-electron/workers/**/*",
-      "node_modules/@huggingface/transformers/**/*",
-      "node_modules/onnxruntime-node/**/*",
-      "node_modules/onnxruntime-common/**/*",
-      "node_modules/sharp/**/*",
-      "node_modules/tesseract.js/**/*",
-      "node_modules/protobufjs/**/*",
-      "node_modules/onnxruntime-web/**/*"
+      "node_modules/**/*"
     ],
     "linux": {
       "target": [

@@ -531,13 +531,18 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > | Supervisor kill/restart | PASS — 2 chunks → kill → restart logged → 2 more chunks |
 > | Capture smoke, system Node + bundled runtime | PASS — valid WAV both ways |
 > | Unit tests | Linux 80/80, Windows 66/66 |
+> | Windows NSIS install, clean PATH | PASS — `OSMOS Setup 0.6.0.exe` (1.26 GB) installed silently to `%LOCALAPPDATA%\Programs\OSMOS`; with `node`, `python`, `ffmpeg` and `npm` absent from PATH the installed worker produced valid WAV chunks, Moonshine transcribed a SAPI sentence, and the packaged app booted with its renderer and `llama-server` children |
 >
-> Still open (environmental, not code): a **true clean-VM installer test** — this host
-> has no Windows/macOS VM and `pack:linux` was not run, so the asar-unpacked worker
-> path is verified by config + `resolveWorkerScript` review only — and **macOS**, which
-> has no host on this project at all. Both are one command away for whoever has the VM:
-> install the built artefact, then check that mic/Smart transcribe still works with
-> Node and Python absent.
+> The installer run also caught a bug that config review had missed:
+> `app.asar.unpacked` workers run under plain Node, which never looks inside
+> `app.asar`, so the per-package `asarUnpack` list dropped transitive modules
+> (`detect-libc`, `@img/colour`) and packaged Whisper died with
+> `Cannot find module 'detect-libc'`. `asarUnpack` now unpacks all of `node_modules`.
+>
+> Still open: **macOS**, which has no host on this project at all, and live-device
+> capture on the Windows test box, which exposes no DirectShow audio endpoints — that
+> check drives the same worker and bundled ffmpeg from a `lavfi` tone instead. The
+> Ubuntu installer (`pack:linux`) has still not been run on a clean machine.
 
 - Move STT into a `utilityProcess` using the bundled Node; remove the system-Node dependency.
 - Add the worker supervisor with health checks and restart.

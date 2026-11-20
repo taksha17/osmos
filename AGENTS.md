@@ -137,6 +137,7 @@ Capture and STT run in **supervised external processes**, never inline in main.
 - Capture worker: `src/workers/capture/capture-worker.mjs`. **Main resolves the backend** (`pactl` / `dshow` / AVFoundation) and passes ffmpeg args; the worker owns the pipe, chunk slicing, overlap tail and RMS gate.
 - Client: `src/main/services/captureWorkerClient.ts` keeps the old `chunk` / `status` / `error` surface, so `src/main/index.ts` and the renderer did not change.
 - Worker scripts must appear in **both** `build.files` and `build.asarUnpack` (`src/workers/**/*`), like `scripts/whisper-worker.mjs`.
+- **Unpack everything a worker can `require`.** `build.asarUnpack` carries `node_modules/**/*`. Workers run under plain Node from `app.asar.unpacked`, and Node never looks inside `app.asar`, so a per-package unpack list silently drops transitive modules — that is how packaged Whisper lost `detect-libc`/`@img/colour` (`Cannot find module` on a clean Windows install, 2026-11-20).
 - Runtime: bundled Electron (`ELECTRON_RUN_AS_NODE=1`) first, system Node second. Never add a new dependency on `node` being on PATH.
 - Kill switches: `OSMOS_CAPTURE_WORKERS=0` (inline streams), `OSMOS_WORKER_RUNTIME=system`, `OSMOS_NODE_BINARY=<path>`.
 - A worker must never import `electron`; it has to run under plain Node too, which is what makes the bench and smoke tests possible.
@@ -233,6 +234,14 @@ Documented so the next agent does not reintroduce these bugs:
 - **Symptom E:** Overlay audio / Local Whisper fails with `spawn ENOTDIR` (Ubuntu packaged) or vague ffmpeg/spawn errors.
   - **Cause:** Packaged Whisper used `app.getAppPath()` (`…/app.asar`, a *file*) as `spawn` cwd; bare tools on a dirty PATH can also ENOTDIR.
   - **Fix:** Run Whisper from `app.asar.unpacked` with a real directory cwd (`resolveBin.ts` / `safeSpawnCwd`); asarUnpack `scripts/whisper-worker.mjs` + `@huggingface/transformers` + `onnxruntime-*`; absolute paths for capture tools (incl. bundled `ffmpeg.exe` on Windows).
+- **Symptom F:** Packaged Windows app transcribes nothing; the whisper worker exits with
+  `Cannot find module 'detect-libc'` (or another transitive package) while the same
+  source tree works in dev.
+  - **Cause:** `whisper-worker.mjs` runs under plain Node in `app.asar.unpacked`. Its
+    resolution walks the unpacked tree only, so anything left inside `app.asar` —
+    including `sharp`'s deps and other transitive packages — is invisible.
+  - **Fix:** `build.asarUnpack` unpacks `node_modules/**/*` rather than a package
+    whitelist. Verify with the installed-tree probe (below), not just the config.
 - Packaged `files` / `asarUnpack` must include `tesseract.js` (and existing Whisper/ORT deps).
 - Linux main process always appends `no-sandbox` + ozone auto (packaged and unpackaged).
 - **CI packaging:** disabled — pack locally and `npm run release:upload`. CI is typecheck-only.

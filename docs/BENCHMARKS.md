@@ -29,10 +29,13 @@ Host: Linux Zenbook, PipeWire/GNOME Wayland, sink monitor, 2 s chunks, room quie
 | Worker with `node`+`ffmpeg` shimmed off PATH | pass — bundled Electron runtime, 5 chunks / 12 s, 0 errors |
 | Windows `ELECTRON_RUN_AS_NODE` spike | pass — worker `ready`+`pong`, `onnxruntime-node` 1.24.3, Electron 34.5.8 / Node 20.19.1 |
 | Supervisor restart | pass — kill → restart logged → capture resumed |
+| Windows NSIS install, clean PATH | pass — installer 1.26 GB → silent install; with `node`/`python`/`ffmpeg`/`npm` absent from PATH: capture WAV chunks + Moonshine transcript from `resources/app.asar.unpacked`, app booted with `llama-server` child |
 | Endpoint latency (Phase 2 slice 1) | 431 ms on a 1.2 s tone (hangover budget 450 ms) |
 
 Not measured: STT word error rate and end-to-end transcript timing (no audio fixture
-set yet), and a clean-VM installer run on Windows/macOS (no VM host, `pack` not run).
+set yet), macOS packaging (no host), and live-device capture on the Windows box — it
+enumerates no DirectShow audio endpoints, so that check drives the same worker and
+bundled ffmpeg from a `lavfi` tone source instead.
 
 CI runs the deterministic subset (unit tests) only; the benchmark is a local
 and nightly tool.
