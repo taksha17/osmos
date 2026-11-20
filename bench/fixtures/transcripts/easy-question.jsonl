@@ -1,0 +1,5 @@
+# Easy-question replay fixture — exercises the fast-lane rules (v0.6 routing).
+{"t":"session.start","tsMs":0,"mode":"interview","logVersion":1}
+{"t":"utterance.final","channel":"them","text":"What does JVM stand for?","startMs":4020,"endMs":5310}
+{"t":"utterance.final","channel":"them","text":"What is a mutex?","startMs":8100,"endMs":9200}
+{"t":"utterance.final","channel":"them","text":"What is 12 * 12?","startMs":12050,"endMs":12990}

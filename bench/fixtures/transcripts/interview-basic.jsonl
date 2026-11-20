@@ -1,0 +1,8 @@
+# Interview, Phase 0 replay fixture — hand-written from Architecture v2 Appendix B.
+{"t":"session.start","tsMs":0,"mode":"interview","logVersion":1}
+{"t":"utterance.final","channel":"them","text":"Tell me about a time you led a project.","startMs":10320,"endMs":13180}
+{"t":"trigger.fire","tsMs":13640,"reason":"direct-question"}
+{"t":"answer.delta","tsMs":14100,"requestId":"r1","text":"At my last role","phase":"draft"}
+{"t":"answer.done","tsMs":15200,"requestId":"r1","stats":{"firstTokenMs":980,"totalMs":1560,"lane":"fast-local"}}
+{"t":"utterance.final","channel":"them","text":"Tell me about yourself","startMs":21100,"endMs":22800}
+{"t":"utterance.final","channel":"them","text":"Why do you want to work here?","startMs":30120,"endMs":31840}

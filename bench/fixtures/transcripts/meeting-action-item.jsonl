@@ -1,0 +1,5 @@
+# Meeting replay fixture — action items and self-speech, no answers expected on "me".
+{"t":"session.start","tsMs":0,"mode":"meeting","logVersion":1}
+{"t":"utterance.final","channel":"them","text":"Can you send the deck by Friday?","startMs":5400,"endMs":7120}
+{"t":"utterance.final","channel":"me","text":"Sure, that works for me","startMs":9100,"endMs":10100}
+{"t":"utterance.final","channel":"them","text":"We should probably revisit the pricing page copy before launch.","startMs":15300,"endMs":17890}

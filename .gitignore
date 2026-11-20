@@ -7,6 +7,7 @@ jspm_packages/
 dist/
 dist-electron/
 .test-build/
+.bench-build/
 release/
 out/
 *.asar
@@ -87,6 +88,7 @@ temp/
 # Test / coverage
 coverage/
 .nyc_output/
+bench/results/
 
 # Encrypted / local scratch
 *.enc

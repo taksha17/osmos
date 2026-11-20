@@ -23,6 +23,7 @@
     "start:release": "node scripts/start-release.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test": "node scripts/run-shared-tests.mjs",
+    "bench": "node bench/run.mjs",
     "pack": "npm run build && npm run build:audio-worker && node scripts/pack.mjs",
     "pack:linux": "node scripts/ensure-ffmpeg.mjs && node scripts/ensure-bundled-llm.mjs && npm run build && npm run build:audio-worker && electron-builder --linux --publish never",
     "pack:mac": "node scripts/ensure-ffmpeg.mjs && node scripts/ensure-bundled-llm.mjs && npm run build && npm run build:audio-worker && electron-builder --mac --publish never",
