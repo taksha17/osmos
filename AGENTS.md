@@ -140,6 +140,14 @@ Capture and STT run in **supervised external processes**, never inline in main.
 - Runtime: bundled Electron (`ELECTRON_RUN_AS_NODE=1`) first, system Node second. Never add a new dependency on `node` being on PATH.
 - Kill switches: `OSMOS_CAPTURE_WORKERS=0` (inline streams), `OSMOS_WORKER_RUNTIME=system`, `OSMOS_NODE_BINARY=<path>`.
 - A worker must never import `electron`; it has to run under plain Node too, which is what makes the bench and smoke tests possible.
+- Workers are **bundled** (`scripts/build-workers.mjs` → `dist-electron/workers/*.mjs`) so they can import tested shared policy. `build:electron` rebuilds both. Point `workerPaths.ts` at the bundle, and keep `dist-electron/workers/**` in `asarUnpack`.
+
+### Endpointing (Phase 2)
+
+- `src/shared/policy/vadEndpoint.ts` owns the utterance state machine (§5.2). One implementation, used by the capture worker — never re-implement silence detection in a hook or a component.
+- The worker emits `{type:'utterance'}` with the pre-roll included; main forwards it as `mic:utterance` / `system:audio-utterance` (preload: `onMicUtterance` / `onSystemAudioUtterance`).
+- Fixed-size `chunk` messages still ship for the current hooks. When you move a hook to utterances, delete its chunk path rather than running both.
+- Silero VAD replaces only the per-frame voice test; keep `EndpointDetector` as the timing layer.
 
 ### Web access (v3, `docs/ARCHITECTURE-V3.md`)
 

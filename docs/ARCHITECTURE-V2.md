@@ -531,6 +531,20 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 - **Exit:** clean-VM install on Win/macOS/Ubuntu transcribes without Node installed; 30-minute soak with zero capture stalls.
 
 ### Phase 2: Real-time audio (2–3 weeks)
+
+> **Phase 2 status (slice 1):** utterance endpointing is in and measured.
+> `src/shared/policy/vadEndpoint.ts` implements the §5.2 state machine
+> (silence → speech → hangover → endpoint, 250/450/25 000/300 ms defaults, pre-roll ring)
+> with 10 unit tests; the capture worker (now TypeScript, bundled by
+> `scripts/build-workers.mjs` so it shares that one implementation) emits
+> `utterance` messages next to the legacy fixed chunks.
+> Measured on the Zenbook: a 1.2 s tone through the sink monitor produced an
+> utterance with `speechMs=1220`, 1 760 ms of audio (300 ms pre-roll + hangover)
+> and **431 ms endpoint latency** against the 450 ms hangover budget.
+> Remaining for Phase 2: swap the energy test for Silero VAD (same state
+> machine), switch `useSystemAudioStt` / `useMainMicStt` to transcribe utterances
+> instead of fixed chunks, and add the audio fixture set + WER harness.
+
 - Silero VAD + utterance endpointing.
 - Streaming STT engine chosen by benchmark; Moonshine kept as fallback.
 - Replace fixed chunking in `useSystemAudioStt` / `useMainMicStt`.
