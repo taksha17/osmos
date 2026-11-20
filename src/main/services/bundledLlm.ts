@@ -51,7 +51,7 @@ export function bundledLlmPaths(): {
   } catch {
     meta = null;
   }
-  const modelRel = meta?.file || 'models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf';
+  const modelRel = meta?.file || 'models/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf';
   const model = path.join(root, modelRel);
   const serverCandidates = [
     meta?.server ? path.join(root, meta.server) : '',
@@ -151,7 +151,7 @@ export function startBundledLlm(): Promise<boolean> {
         '-c',
         '2048',
         '-n',
-        '256',
+        '512',
         '--alias',
         BUNDLED_LLM_MODEL_ID,
       ],

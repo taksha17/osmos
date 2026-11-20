@@ -6,7 +6,7 @@
  * the llama.cpp runtime is host-specific and is selected automatically.
  *
  * Downloads (idempotent — skips when already present):
- *   - Qwen2.5-0.5B-Instruct Q4_K_M GGUF (~400 MB, Apache-2.0)
+ *   - Qwen2.5-1.5B-Instruct Q4_K_M GGUF (~986 MB, Apache-2.0)
  *   - llama.cpp runtime dir (llama-server + shared libs/DLLs) for this OS/arch (MIT)
  *
  * Staged under build/llm/ → electron-builder extraResources → resources/llm/
@@ -30,9 +30,9 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outRoot = path.join(root, 'build', 'llm');
 const modelDir = path.join(outRoot, 'models');
-const MODEL_FILE = 'Qwen2.5-0.5B-Instruct-Q4_K_M.gguf';
+const MODEL_FILE = 'Qwen2.5-1.5B-Instruct-Q4_K_M.gguf';
 const MODEL_URL =
-  'https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf';
+  'https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf';
 
 /** Pinned llama.cpp release with CPU binaries for win/mac/linux. */
 const LLAMA_TAG = 'b10826';
@@ -308,13 +308,13 @@ async function main() {
       JSON.stringify(
         {
           id: 'osmos-fast',
-          label: 'OSMOS Fast (Qwen2.5-0.5B)',
+          label: 'OSMOS Fast (Qwen2.5-1.5B)',
           file: `models/${MODEL_FILE}`,
           server: `runtime/${serverNameFor(targetPlatform)}`,
           platform: targetPlatform,
           arch,
           license: 'Apache-2.0',
-          source: 'bartowski/Qwen2.5-0.5B-Instruct-GGUF',
+          source: 'bartowski/Qwen2.5-1.5B-Instruct-GGUF',
           llamaCppTag: LLAMA_TAG,
         },
         null,
