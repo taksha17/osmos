@@ -12,7 +12,8 @@ import {
   isBundledLlmReady,
   startBundledLlm,
 } from './bundledLlm.js';
-import { streamWithProvider, type ProviderStreamChunk } from './providers.js';
+import type { ProviderStreamChunk } from './providers.js';
+import { llmProviderFromConfig } from '../providers/llm/config.js';
 
 export type LanePlan = {
   decision: RouteDecision;
@@ -158,13 +159,25 @@ export function statusForRoute(route: ChatRouteMeta): string {
   return `${routeTierLabel(route.tier)} · ${route.model}`;
 }
 
+/**
+ * Stream one lane. Goes through the v2 `LlmProvider` adapter so the Phase 3
+ * router rewrite only has to change the adapter, not call sites. Chunk mapping
+ * is 1:1 with v0.6: content → content, thinking → thinking, done → nothing.
+ */
 export async function* streamLane(
   provider: ProviderConfig,
   system: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   signal?: AbortSignal,
 ): AsyncGenerator<ProviderStreamChunk, void, unknown> {
-  yield* streamWithProvider(provider, system, messages, signal);
+  for await (const chunk of llmProviderFromConfig(provider).stream({
+    system,
+    messages,
+    signal,
+  })) {
+    if (chunk.kind === 'delta') yield { kind: 'content', text: chunk.text };
+    else if (chunk.kind === 'thinking') yield { kind: 'thinking', text: chunk.text };
+  }
 }
 
 /** Provider to use for a non-upgrade (direct) stream given the plan. */
