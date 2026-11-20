@@ -129,6 +129,18 @@ The v1.0 restructuring is specified in `docs/ARCHITECTURE-V2.md`. It ships in se
 5. `src/shared/policy/triggerPolicy.ts` and `routerV2.ts` currently delegate to the v0.6 heuristics. Their parity tests must keep passing until the replacement lands with a benchmark.
 6. Packaging stays on each OS host (`pack:linux` / `pack:mac` / `pack:win`). CI has no pack jobs.
 
+### Workers (Phase 1)
+
+Capture and STT run in **supervised external processes**, never inline in main.
+
+- Supervisor: `src/main/supervisor/workerSupervisor.ts` (spawn, JSON-lines channel, stderr tail, stall watchdog, restart-with-backoff). Decisions live in `src/shared/policy/workerRuntime.ts` and are unit-tested.
+- Capture worker: `src/workers/capture/capture-worker.mjs`. **Main resolves the backend** (`pactl` / `dshow` / AVFoundation) and passes ffmpeg args; the worker owns the pipe, chunk slicing, overlap tail and RMS gate.
+- Client: `src/main/services/captureWorkerClient.ts` keeps the old `chunk` / `status` / `error` surface, so `src/main/index.ts` and the renderer did not change.
+- Worker scripts must appear in **both** `build.files` and `build.asarUnpack` (`src/workers/**/*`), like `scripts/whisper-worker.mjs`.
+- Runtime: bundled Electron (`ELECTRON_RUN_AS_NODE=1`) first, system Node second. Never add a new dependency on `node` being on PATH.
+- Kill switches: `OSMOS_CAPTURE_WORKERS=0` (inline streams), `OSMOS_WORKER_RUNTIME=system`, `OSMOS_NODE_BINARY=<path>`.
+- A worker must never import `electron`; it has to run under plain Node too, which is what makes the bench and smoke tests possible.
+
 ### Web access (v3, `docs/ARCHITECTURE-V3.md`)
 
 W0 is in: `src/shared/contracts/web.ts`, the pure capability router in `src/shared/policy/webAccess.ts`, the T0 adapter in `src/main/providers/web/builtin.ts`, and the Web Access Manager registry in `src/main/services/webAccess.ts`. Chat still calls `searchWeb()`, so nothing has changed yet.
@@ -310,6 +322,8 @@ Documented so the next agent does not reintroduce these bugs:
 - macOS: prefer app/tab share (ScreenCaptureKit full-desktop may still include overlay).
 
 ### Smart-listen mic stream — PARKED (2026-08-24, Linux)
+
+> **Moved in v2 Phase 1:** continuous mic capture now runs in the supervised capture worker, which logs ffmpeg close codes + stderr tail to `~/.config/OSMOS/logs/mic-stream.log` and restarts with backoff. The history below is kept because the original wedge is still the acceptance test (30-minute soak, see `docs/ARCHITECTURE-V2.md` §17 Phase 1).
 
 State when paused: **first transcription works, then capture pipe dies**. Verified working stages (do not re-litigate):
 - dmic `_6__source` hears room audio (rms 2254 measured); loopback monitors healthy

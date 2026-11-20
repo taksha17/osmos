@@ -508,6 +508,23 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 - **Exit:** baseline report committed; CI green; no behaviour change.
 
 ### Phase 1: Runtime and isolation (2 weeks)
+
+> **Phase 1 status:** implemented behind kill switches.
+> `src/shared/policy/workerRuntime.ts` (bundled `ELECTRON_RUN_AS_NODE` runtime,
+> restart backoff, stall rules — tested), `src/main/supervisor/workerSupervisor.ts`
+> (spawn / JSON-lines channel / stderr tail / watchdog / supervised restart),
+> `src/workers/capture/capture-worker.mjs` (ffmpeg pipe + WAV chunking outside
+> main) and `src/main/services/captureWorkerClient.ts` (backend selection stays in
+> main; `mic:listen-*` and `system:listen-*` use it, falling back to the inline
+> streams with a visible status line). The STT worker now launches on the bundled
+> runtime, falling back to system Node only when asked.
+> Escapes: `OSMOS_CAPTURE_WORKERS=0`, `OSMOS_WORKER_RUNTIME=system`,
+> `OSMOS_NODE_BINARY=…`. Verified: unit tests on Linux and Windows, capture smoke
+> against a real PipeWire monitor on both runtimes, and `onnxruntime-node` +
+> transformers loading under Electron's Node (Linux). Still open: the Windows and
+> macOS bundled-runtime spike (no Electron binary on the Windows test box yet) and
+> the 30-minute soak.
+
 - Move STT into a `utilityProcess` using the bundled Node; remove the system-Node dependency.
 - Add the worker supervisor with health checks and restart.
 - Move mic/loopback capture into the capture worker; fix the parked mic-stream bug with supervised restart and logging of close codes + stderr tail.
