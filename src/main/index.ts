@@ -60,6 +60,7 @@ import { modeDef } from '../shared/modes.js';
 import { resolveAgent, effectiveProvider } from '../shared/agents.js';
 import { executeAgentTools } from './services/agentMcp.js';
 import { activeSavedProfile } from '../shared/profiles.js';
+import { matchQuestionBank } from '../shared/questionBank.js';
 import {
   DEFAULT_PROFILE,
   type AssemblePrepResponse,
@@ -144,6 +145,12 @@ async function buildChatContext(
   const provider = s.providers?.[effective] || s.providers?.ollama;
   const providerModel = effectiveModel || provider?.model;
 
+  // Profile-harnessed routing: if this question was anticipated in the user's
+  // bank, the local lane may answer it from their own material. Matching runs in
+  // every mode, before routing, so both handlers can pass the hint.
+  const bank = active.questions?.length ? active.questions : loadQuestionBank();
+  const bankMatch = matchQuestionBank(message, bank);
+
   // Interview answers should ground in the saved profile — not random web hits.
   // Web search still runs for meeting/general, or when the user clearly asks for research.
   const wantsResearch = /\b(search|news|latest|today|company|salary|stock|who is|what is)\b/i.test(
@@ -179,6 +186,14 @@ async function buildChatContext(
     if (t.length <= max) return t;
     return `${t.slice(0, max)}\n…[truncated]`;
   };
+
+  const bankBlock = bankMatch
+    ? `\n\n# Anticipated question\nThe incoming question matches one saved in the user's question bank (${bankMatch.item.companyName} · ${bankMatch.item.category}).${
+        bankMatch.item.answer?.trim()
+          ? `\nPrepared answer:\n${clip(bankMatch.item.answer, 1_500)}`
+          : ''
+      }\nAnswer with the user's own details above; do not invent.`
+    : '';
 
   const profileParts: string[] = [];
   if (profile.displayName.trim()) profileParts.push(`Name: ${profile.displayName.trim()}`);
@@ -300,6 +315,7 @@ async function buildChatContext(
     agentBlock,
     toolBlock,
     prepBlock,
+    bankBlock,
     docBlock,
     screenBlock,
     webBlock ? `\n\n# Live web research\n${webBlock}` : '',
@@ -310,6 +326,7 @@ async function buildChatContext(
     system,
     usedWebSearch,
     searchHits,
+    bankMatch,
     provider: {
       ...provider,
       model: providerModel || provider?.model || '',
@@ -844,29 +861,44 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
     const message = (req?.message || '').trim();
     if (!message) return { ok: false, error: 'Empty message' };
 
-    const { s, system, usedWebSearch, searchHits, provider } = await buildChatContext(message, {
-      text: req?.screenText,
-      at: req?.screenAt,
-    });
+    const { s, system, usedWebSearch, searchHits, provider, bankMatch } =
+      await buildChatContext(message, {
+        text: req?.screenText,
+        at: req?.screenAt,
+      });
 
     const decision = routeDecision(message, {
       mode: s.activeMode || 'general',
       hasScreen: Boolean((req?.screenText || '').trim()),
+      bankMatch: Boolean(bankMatch),
     });
     const plan = await planHybridLanes(s, decision, provider);
     const lane = directProvider(plan);
+    const messages = [
+      ...(req.history || []).slice(-12),
+      { role: 'user' as const, content: message },
+    ];
 
     try {
-      const answer = await chatWithProvider(
-        lane,
-        system,
-        [
-          ...(req.history || []).slice(-12),
-          { role: 'user', content: message },
-        ],
-      );
+      const answer = await chatWithProvider(lane, system, messages);
       return { ok: true, answer, usedWebSearch, searchHits };
     } catch (e) {
+      // The local fast lane can be cold or wedged (llama-server crash) — one
+      // retry on the quality provider beats failing the turn.
+      if (plan.route.lane === 'fast' && plan.fast) {
+        console.warn('[chat] fast lane failed, retrying quality lane:', e);
+        try {
+          const answer = await chatWithProvider(plan.quality, system, messages);
+          return { ok: true, answer, usedWebSearch, searchHits };
+        } catch (retryErr) {
+          return {
+            ok: false,
+            error: retryErr instanceof Error ? retryErr.message : String(retryErr),
+            usedWebSearch,
+            searchHits,
+          };
+        }
+      }
       return {
         ok: false,
         error: e instanceof Error ? e.message : String(e),
@@ -900,14 +932,16 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
       const ac = new AbortController();
       streamAbortControllers.set(requestId, ac);
 
-      const { s, system, usedWebSearch, searchHits, provider } = await buildChatContext(message, {
-        text: req?.screenText,
-        at: req?.screenAt,
-      });
+      const { s, system, usedWebSearch, searchHits, provider, bankMatch } =
+        await buildChatContext(message, {
+          text: req?.screenText,
+          at: req?.screenAt,
+        });
 
       const decision = routeDecision(message, {
         mode: s.activeMode || 'general',
         hasScreen: Boolean((req?.screenText || '').trim()),
+        bankMatch: Boolean(bankMatch),
       });
       const plan = await planHybridLanes(s, decision, provider);
       // Fire-and-forget quality warmup while we may stream a fast draft.
@@ -954,6 +988,7 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
 
       try {
         let trimmed = '';
+        let qualityRetried = false;
 
         if (plan.useDraftUpgrade && plan.fast) {
           emit({
@@ -999,7 +1034,37 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
           if (!trimmed && draft) trimmed = draft;
         } else {
           const lane = directProvider(plan);
-          trimmed = await pump(lane);
+          try {
+            trimmed = await pump(lane);
+          } catch (e) {
+            // Local fast lane died mid-answer — fall back once to the quality
+            // provider instead of surfacing an error to the user.
+            if (ac.signal.aborted || plan.route.lane !== 'fast' || !plan.fast) throw e;
+            console.warn('[chat] fast lane failed, retrying quality lane:', e);
+            emit({
+              requestId,
+              type: 'status',
+              text: 'Local model unavailable — answering with the full model…',
+            });
+            qualityRetried = true;
+            trimmed = await pump(plan.quality);
+          }
+        }
+
+        if (!trimmed && !qualityRetried && plan.route.lane === 'fast') {
+          // Empty local answer (cold/misconfigured GGUF) — one retry on quality.
+          emit({
+            requestId,
+            type: 'status',
+            text: 'Local model returned nothing — answering with the full model…',
+          });
+          qualityRetried = true;
+          try {
+            trimmed = await pump(plan.quality);
+          } catch (e) {
+            if (ac.signal.aborted) throw e;
+            console.warn('[chat] quality retry after empty local answer failed:', e);
+          }
         }
 
         if (!trimmed) {
