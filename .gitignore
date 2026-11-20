@@ -6,6 +6,7 @@ jspm_packages/
 # Build outputs (renderer, Electron bundle, electron-builder)
 dist/
 dist-electron/
+.test-build/
 release/
 out/
 *.asar

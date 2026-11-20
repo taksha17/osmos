@@ -16,6 +16,8 @@ export type QuestionBankItem = {
   id: string;
   companyName: string;
   question: string;
+  /** Optional prepared answer — injected when an incoming question matches this entry. */
+  answer?: string;
   category: 'behavioral' | 'technical' | 'system-design' | 'product' | 'leadership' | 'other';
   difficulty: 'easy' | 'medium' | 'hard';
   tags: string[];
