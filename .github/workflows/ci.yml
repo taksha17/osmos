@@ -1,7 +1,9 @@
 name: CI
 
-# Lightweight only — packaging runs locally (see scripts/release-upload.mjs).
-# Full OS pack matrix burned GitHub Actions minutes; do not re-enable pack jobs.
+# Typecheck + unit tests on every PR, on all three target OSes.
+# Packaging stays on each OS host (npm run pack:linux / pack:mac / pack:win,
+# then npm run release:upload). Do not re-enable pack jobs — the full matrix
+# burned GitHub Actions minutes.
 
 on:
   pull_request:
@@ -14,8 +16,12 @@ env:
 
 jobs:
   typecheck:
-    name: Typecheck (ubuntu)
-    runs-on: ubuntu-latest
+    name: Typecheck (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,3 +30,19 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+
+  test:
+    name: Unit tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
