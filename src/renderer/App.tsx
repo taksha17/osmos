@@ -26,6 +26,17 @@ type Info = {
   shortcutsRegistered?: boolean;
 };
 
+type UtterancePayload = {
+  ok: boolean;
+  base64?: string;
+  mimeType?: string;
+  startMs?: number;
+  endMs?: number;
+  speechMs?: number;
+  reason?: string;
+  error?: string;
+};
+
 declare global {
   interface Window {
     osmos: {
@@ -77,6 +88,12 @@ declare global {
       startSystemAudioListen: (payload?: { device?: string; chunkMs?: number }) =>
         Promise<{ ok: boolean; error?: string; monitor?: string; mode?: 'stream' | 'fallback' }>;
       stopSystemAudioListen: () => Promise<{ ok: boolean }>;
+      /** VAD-endpointed meeting utterances (Architecture v2 §5.2). */
+      onSystemAudioUtterance: (
+        listener: (ev: UtterancePayload) => void,
+      ) => () => void;
+      /** VAD-endpointed microphone utterances (Architecture v2 §5.2). */
+      onMicUtterance: (listener: (ev: UtterancePayload) => void) => () => void;
       onSystemAudioChunk: (
         listener: (chunk: {
           ok: boolean;

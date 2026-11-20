@@ -43,4 +43,12 @@ export function resolveWorkerScript(relative: string): string | null {
   return null;
 }
 
-export const CAPTURE_WORKER_REL = path.join('src', 'workers', 'capture', 'capture-worker.mjs');
+/**
+ * Workers import tested shared policy, so they are bundled by
+ * `scripts/build-workers.mjs` rather than shipped as loose source.
+ */
+export const CAPTURE_WORKER_REL = path.join(
+  'dist-electron',
+  'workers',
+  'capture-worker.mjs',
+);

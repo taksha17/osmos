@@ -197,6 +197,8 @@ export class CaptureWorkerClient extends EventEmitter {
       backend: this.backend,
       overlapMs: this.channel === 'mic' ? 250 : 0,
       cwd: safeSpawnCwd(),
+      // Phase 2: the worker endpoints utterances next to the samples (§5.2).
+      vad: true,
     };
 
     const supervisor = new WorkerSupervisor({
@@ -249,6 +251,19 @@ export class CaptureWorkerClient extends EventEmitter {
         backend: String(message.backend ?? this.backend),
       };
       this.emit('chunk', chunk);
+      return;
+    }
+
+    if (message.type === 'utterance') {
+      this.emit('utterance', {
+        ok: true,
+        base64: String(message.base64 ?? ''),
+        mimeType: 'audio/wav',
+        startMs: Number(message.startMs ?? 0),
+        endMs: Number(message.endMs ?? 0),
+        speechMs: Number(message.speechMs ?? 0),
+        reason: String(message.reason ?? 'endpoint'),
+      });
       return;
     }
 

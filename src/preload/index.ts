@@ -1,6 +1,21 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { ChatStreamEvent } from '../shared/types';
 
+/**
+ * VAD-endpointed utterance (Architecture v2 §5.2): one complete question /
+ * statement whose audio the STT worker can transcribe as a unit.
+ */
+type UtteranceEvent = {
+  ok: boolean;
+  base64?: string;
+  mimeType?: string;
+  startMs?: number;
+  endMs?: number;
+  speechMs?: number;
+  reason?: string;
+  error?: string;
+};
+
 const api = {
   getInfo: () => ipcRenderer.invoke('app:get-info'),
   getSettings: () => ipcRenderer.invoke('settings:get'),
@@ -83,6 +98,12 @@ const api = {
     ipcRenderer.on('mic:audio-status', handler);
     return () => ipcRenderer.removeListener('mic:audio-status', handler);
   },
+  /** VAD-endpointed microphone utterances (Architecture v2 §5.2). */
+  onMicUtterance: (listener: (ev: UtteranceEvent) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, ev: UtteranceEvent) => listener(ev);
+    ipcRenderer.on('mic:utterance', handler);
+    return () => ipcRenderer.removeListener('mic:utterance', handler);
+  },
   listAudioDevicesPython: () => ipcRenderer.invoke('audio:list-devices-python'),
   startAudioCapturePython: (payload?: {
     sampleRate?: number;
@@ -121,6 +142,12 @@ const api = {
     const handler = (_e: Electron.IpcRendererEvent, ev: { text: string }) => listener(ev);
     ipcRenderer.on('system:audio-status', handler);
     return () => ipcRenderer.removeListener('system:audio-status', handler);
+  },
+  /** VAD-endpointed meeting utterances (Architecture v2 §5.2). */
+  onSystemAudioUtterance: (listener: (ev: UtteranceEvent) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, ev: UtteranceEvent) => listener(ev);
+    ipcRenderer.on('system:audio-utterance', handler);
+    return () => ipcRenderer.removeListener('system:audio-utterance', handler);
   },
   listAudioDevices: () => ipcRenderer.invoke('audio:list-devices'),
   captureMicAudio: (payload?: { durationMs?: number; device?: string }) =>

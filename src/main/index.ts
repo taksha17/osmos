@@ -652,6 +652,9 @@ function registerIpc() {
         client.on('status', (text: string) => {
           if (!sender.isDestroyed()) sender.send('system:audio-status', { text });
         });
+        client.on('utterance', (utterance: Record<string, unknown>) => {
+          if (!sender.isDestroyed()) sender.send('system:audio-utterance', utterance);
+        });
         const isolated = await client.start({
           device: req?.device,
           chunkMs: req?.chunkMs || CONTINUOUS_CHUNK_MS,
@@ -771,6 +774,9 @@ function registerIpc() {
         });
         client.on('status', (text: string) => {
           if (!sender.isDestroyed()) sender.send('mic:audio-status', { text });
+        });
+        client.on('utterance', (utterance: Record<string, unknown>) => {
+          if (!sender.isDestroyed()) sender.send('mic:utterance', utterance);
         });
         const isolated = await client.start({
           device: req?.device,

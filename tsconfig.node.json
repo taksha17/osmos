@@ -12,5 +12,5 @@
     "strict": true,
     "types": ["node"]
   },
-  "include": ["src/main", "src/preload", "src/shared", "scripts", "vite.config.ts"]
+  "include": ["src/main", "src/preload", "src/shared", "src/workers", "scripts", "vite.config.ts"]
 }
