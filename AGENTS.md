@@ -244,6 +244,7 @@ Documented so the next agent does not reintroduce these bugs:
     whitelist. Verify with the installed-tree probe (below), not just the config.
 - Packaged `files` / `asarUnpack` must include `tesseract.js` (and existing Whisper/ORT deps).
 - Linux main process always appends `no-sandbox` + ozone auto (packaged and unpackaged).
+- **Verify a build from the artefact, not the config.** Build, install it, then run the installed binary with `ELECTRON_RUN_AS_NODE=1` against a probe that resolves the worker, captures audio and transcribes with `node`/`python`/`ffmpeg` removed from `PATH`. On Windows start the packaged exe with `Start-Process -Wait`: it is a GUI-subsystem binary, so `&` returns immediately and `$LASTEXITCODE` stays stale (a passing-looking check that never ran).
 - **CI packaging:** disabled — pack locally and `npm run release:upload`. CI is typecheck-only.
 - **Windows build flakes:** `ELECTRON_MIRROR`, electron-builder cache, retry wrapper in `.github/workflows/ci.yml`.
 - **Linux installer missing audio deps:** `linux-install.sh` installs `pipewire`, `pulseaudio-utils`, and expects **`ffmpeg`** on PATH for loopback.

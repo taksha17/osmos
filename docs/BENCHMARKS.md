@@ -30,6 +30,7 @@ Host: Linux Zenbook, PipeWire/GNOME Wayland, sink monitor, 2 s chunks, room quie
 | Windows `ELECTRON_RUN_AS_NODE` spike | pass — worker `ready`+`pong`, `onnxruntime-node` 1.24.3, Electron 34.5.8 / Node 20.19.1 |
 | Supervisor restart | pass — kill → restart logged → capture resumed |
 | Windows NSIS install, clean PATH | pass — installer 1.26 GB → silent install; with `node`/`python`/`ffmpeg`/`npm` absent from PATH: capture WAV chunks + Moonshine transcript from `resources/app.asar.unpacked`, app booted with `llama-server` child |
+| Linux packaged tree, empty PATH | pass — `release/linux-unpacked` (AppImage 1.5 GB): real sink monitor through bundled ffmpeg + Moonshine transcript, 8/8 checks |
 | Endpoint latency (Phase 2 slice 1) | 431 ms on a 1.2 s tone (hangover budget 450 ms) |
 
 Not measured: STT word error rate and end-to-end transcript timing (no audio fixture

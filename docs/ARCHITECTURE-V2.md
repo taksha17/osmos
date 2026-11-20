@@ -532,6 +532,7 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > | Capture smoke, system Node + bundled runtime | PASS — valid WAV both ways |
 > | Unit tests | Linux 80/80, Windows 66/66 |
 > | Windows NSIS install, clean PATH | PASS — `OSMOS Setup 0.6.0.exe` (1.26 GB) installed silently to `%LOCALAPPDATA%\Programs\OSMOS`; with `node`, `python`, `ffmpeg` and `npm` absent from PATH the installed worker produced valid WAV chunks, Moonshine transcribed a SAPI sentence, and the packaged app booted with its renderer and `llama-server` children |
+> | Linux packaged tree, empty PATH | PASS — `release/linux-unpacked` (AppImage 1.5 GB) with `PATH=/tmp/nobin` captured from the real sink monitor through its bundled ffmpeg and transcribed on the bundled runtime, 8/8 checks |
 >
 > The installer run also caught a bug that config review had missed:
 > `app.asar.unpacked` workers run under plain Node, which never looks inside
@@ -541,8 +542,10 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 >
 > Still open: **macOS**, which has no host on this project at all, and live-device
 > capture on the Windows test box, which exposes no DirectShow audio endpoints — that
-> check drives the same worker and bundled ffmpeg from a `lavfi` tone instead. The
-> Ubuntu installer (`pack:linux`) has still not been run on a clean machine.
+> check drives the same worker and bundled ffmpeg from a `lavfi` tone instead. Ubuntu
+> was verified from the packaged tree (`linux-unpacked`, AppImage built; the real sink
+> monitor captured through the bundled ffmpeg) rather than a fresh install, so the
+> `.deb` path still needs a clean machine.
 
 - Move STT into a `utilityProcess` using the bundled Node; remove the system-Node dependency.
 - Add the worker supervisor with health checks and restart.
