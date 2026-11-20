@@ -74,6 +74,10 @@ Desktop.ini
 *.swp
 *.swo
 
+# Agent workspaces (SDD scratch + harness worktrees) — never commit
+.superpowers/
+.qwen/
+
 # Temp
 tmp/
 temp/
