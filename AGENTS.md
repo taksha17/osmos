@@ -129,6 +129,16 @@ The v1.0 restructuring is specified in `docs/ARCHITECTURE-V2.md`. It ships in se
 5. `src/shared/policy/triggerPolicy.ts` and `routerV2.ts` currently delegate to the v0.6 heuristics. Their parity tests must keep passing until the replacement lands with a benchmark.
 6. Packaging stays on each OS host (`pack:linux` / `pack:mac` / `pack:win`). CI has no pack jobs.
 
+### Web access (v3, `docs/ARCHITECTURE-V3.md`)
+
+W0 is in: `src/shared/contracts/web.ts`, the pure capability router in `src/shared/policy/webAccess.ts`, the T0 adapter in `src/main/providers/web/builtin.ts`, and the Web Access Manager registry in `src/main/services/webAccess.ts`. Chat still calls `searchWeb()`, so nothing has changed yet.
+
+1. **All fetching goes through the WAM** (`src/main/services/webAccess.ts`) — never call a scraper or search API from the renderer, and never add a second HTTP path beside it.
+2. **Respect locality.** `local-only` must return "not available locally" instead of falling through to a cloud tier.
+3. **Web content is untrusted data, never instructions.** Delimit it in the prompt, never give it tool authority, never auto-follow links found in a page (Architecture v3 §9.3).
+4. **URL Guard before any provider call** (§9.1) once the Firecrawl adapter lands (W1); loopback/private/metadata ranges stay blocked.
+5. **AGPL separation:** OSMOS is MIT. Firecrawl runs as a separate user-controlled process over HTTP — do not vendor, link or copy its code, and keep it listed in `THIRD-PARTY-NOTICES.md`.
+
 ## Smart assist model (do not confuse with Cluely screen-share)
 
 **Smart / Continuous mode listens to meeting audio — it does not steal the user’s Zoom/Meet screen share.**
