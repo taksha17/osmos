@@ -18,6 +18,9 @@ export type RouteDecision = {
 const QUALITY_MIN_WORDS = 50;
 const QUALITY_KEYWORD_MIN_WORDS = 35;
 
+/** At or below this length, a low-stakes question goes to the local fast lane. */
+export const EASY_MAX_WORDS = 18;
+
 /** Interview / meeting stakes — always prefer the quality lane. */
 const HIGH_STAKES_KEYWORDS = [
   'tell me about yourself',
@@ -95,6 +98,8 @@ export type RouteHints = {
   mode?: 'interview' | 'meeting' | 'general';
   /** Fresh screen OCR attached — treat as higher stakes. */
   hasScreen?: boolean;
+  /** Incoming question matched a saved question-bank entry (profile-harnessed). */
+  bankMatch?: boolean;
   /** Force a tier (Settings / debug). */
   forceTier?: RouteTier | 'auto';
 };
@@ -120,6 +125,26 @@ export function routeDecision(prompt: string, hints: RouteHints = {}): RouteDeci
     if (pat.test(text)) {
       return { tier: 'fast', reason: 'simple pattern match', preferUpgrade: false };
     }
+  }
+
+  // The question was anticipated in the profile's bank — the answer is grounded
+  // in the user's own data, so the local lane can polish it. Fires before the
+  // interview override, but never when screen context is attached (unseen,
+  // higher-stakes input belongs to the quality lane).
+  if (hints.bankMatch && !hints.hasScreen) {
+    return { tier: 'fast', reason: 'question-bank match', preferUpgrade: false };
+  }
+
+  // Easy, self-contained question: local lane answers directly, even in
+  // interview mode. High-stakes or complex wording keeps the quality lane.
+  if (
+    !hints.hasScreen &&
+    words > 0 &&
+    words <= EASY_MAX_WORDS &&
+    !kwMatch(text, HIGH_STAKES_KEYWORDS) &&
+    !kwMatch(text, COMPLEX_KEYWORDS)
+  ) {
+    return { tier: 'fast', reason: `easy question (${words} words)`, preferUpgrade: false };
   }
 
   if (kwMatch(text, HIGH_STAKES_KEYWORDS) || hints.mode === 'interview') {
