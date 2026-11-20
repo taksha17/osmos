@@ -437,6 +437,7 @@ See `docs/ROADMAP.md` and `src/shared/features.ts`.
 ## Session notes (human machine)
 
 - Dev machine: Linux Zenbook (PipeWire / GNOME Wayland); Ollama often on LAN `192.168.4.31:11434`
+- **Windows test box:** `192.168.1.4`, user `Taksh` (`TAKSHA-DESKTOP`, Win 11 Home, Node 24, git 2.54). OpenSSH is up but password auth is required — `Taksh` is an administrator, so keys must go in `C:\ProgramData\ssh\administrators_authorized_keys`, not the user's home. Run PowerShell over SSH with `-EncodedCommand` (base64 UTF-16LE) to avoid quoting issues; use bare `git`, not `git.cmd`. Keep one clone at `C:\Users\taksh\osmos-ci` for PR checks.
 - Default sink monitor: `alsa_output.pci-…HiFi__hw_sofhdadsp__sink.monitor`; mic often `…_6__source` (laptop digital)
 - **Verified:** `ffmpeg -f pulse` + `pw-record --target=…monitor` capture ~64KB/2s; **`parec` records 0 bytes** on this host
 - SearXNG often at `http://127.0.0.1/searxng` with limiter disabled for private JSON
