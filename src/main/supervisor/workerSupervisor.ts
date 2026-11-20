@@ -188,10 +188,15 @@ export class WorkerSupervisor extends EventEmitter {
         } catch {
           return;
         }
-        if (message.type === 'ready' && this.state === 'starting') {
-          this.restarts = 0;
-          this.lastError = '';
-          this.setState('ready');
+        if (message.type === 'ready') {
+          if (this.state === 'starting') {
+            this.restarts = 0;
+            this.lastError = '';
+            this.setState('ready');
+          }
+          // Always forward: the client re-sends its start command after every
+          // supervised restart, so swallowing this would leave capture dead.
+          this.emit('message', message);
         } else if (this.state === 'ready' || this.state === 'starting') {
           if (message.type === 'error' && typeof message.error === 'string') {
             this.lastError = message.error;
