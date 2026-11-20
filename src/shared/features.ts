@@ -67,7 +67,7 @@ export const FEATURES: FeatureDef[] = [
     id: 'hybrid-routing',
     name: 'Hybrid LLM routing',
     description:
-      'Lumen-inspired tiers: short asks → bundled Qwen2.5-0.5B (or Ollama/Lumen); interview/long/screen → quality provider with draft-then-upgrade and API warmup.',
+      'Lumen-inspired tiers: short asks → bundled Qwen2.5-1.5B (or Ollama/Lumen); interview/long/screen → quality provider with draft-then-upgrade and API warmup.',
     status: 'live',
     platforms: ['linux', 'darwin', 'win32'],
   },

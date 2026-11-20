@@ -105,6 +105,30 @@ IPC system:audio-chunk  →  useSystemAudioStt  →  stt:transcribe  →  should
 15. **Never call `setOpacity` on Linux expecting it to work** — it is a no-op there. Strip overlay self-echo from OCR in the renderer instead.
 13. **Ship third-party license notices** (`THIRD-PARTY-NOTICES.md`) when bundling GPL/LGPL binaries such as ffmpeg.
 
+## v2 migration (`docs/ARCHITECTURE-V2.md`)
+
+The v1.0 restructuring is specified in `docs/ARCHITECTURE-V2.md`. It ships in seven phases; each keeps v0.6 behaviour as the fallback until its exit criteria are measured in `docs/BENCHMARKS.md`. Phase 0 (foundations) is in: contracts, an event vocabulary, a delegating trigger/router policy with parity tests, the `bench/` replay harness, and a 3-OS typecheck + test CI matrix.
+
+**Where new code goes:**
+
+| Concern | Path |
+|---|---|
+| Event vocabulary + replay log | `src/shared/events.ts` |
+| Provider interfaces (types only) | `src/shared/contracts/*` |
+| Trigger policy, router v2, context budget | `src/shared/policy/*` (pure, unit-tested) |
+| Prompt assets | `src/shared/prompts/*` (Phase 3) |
+| LLM / OCR / STT adapters | `src/main/providers/{llm,ocr,stt}/*` |
+| Benchmarks + fixtures | `bench/` → `npm run bench` |
+
+**Rules:**
+
+1. **Do not add logic to `src/main/index.ts`** (~1.3k lines). Put behaviour in a service or policy module and call it from the handler; splitting that file is Phase 1–3 work.
+2. Contracts are types only — never import `electron` from `src/shared/contracts/*`, so `bench/` can drive them from plain Node.
+3. Platform behaviour stays behind `src/main/platform/index.ts`. New code must degrade cleanly on Linux, macOS and Windows — CI runs typecheck + tests on all three.
+4. Routing, prompt or trigger changes need a `npm run bench` before/after in the PR description.
+5. `src/shared/policy/triggerPolicy.ts` and `routerV2.ts` currently delegate to the v0.6 heuristics. Their parity tests must keep passing until the replacement lands with a benchmark.
+6. Packaging stays on each OS host (`pack:linux` / `pack:mac` / `pack:win`). CI has no pack jobs.
+
 ## Smart assist model (do not confuse with Cluely screen-share)
 
 **Smart / Continuous mode listens to meeting audio — it does not steal the user’s Zoom/Meet screen share.**
