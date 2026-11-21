@@ -713,6 +713,33 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 - **Exit:** screen fixtures meet recall target; screenshot → first token ≤ 3 s with a cloud vision model.
 
 ### Phase 5: Memory and reports (2 weeks)
+
+> **Phase 5 status (2026-11-21, slice 1 — pure layer):** the half that needs no
+> database is in. `shared/policy/memoryMigration.ts` turns `chat-history.json` and
+> the profile blobs into typed records with **derived ids** (session, message,
+> question, star, document) so a second run upserts instead of duplicating, sorts
+> them oldest first, and reports every unusable item in `skipped` with a reference
+> and a reason rather than dropping it. Timestamp-less profile items take a `now`
+> argument, so the plan is reproducible in a test. `shared/policy/sessionReport.ts`
+> builds the `SessionReport` (questions paired to their answers, with latencies,
+> plus `empty` / `unanswered` / `orphanAnswers` counts and duration) and renders the
+> markdown export with a character cap.
+>
+> **Real-data dry run:** `node --experimental-strip-types scripts/memory-dry-run.mjs`
+> plans the migration against the live user files (auto-detects `%APPDATA%\osmos`,
+> `~/Library/Application Support/osmos`, `~/.config/osmos`). On the test box it reads
+> `osmos-settings.json` with one seeded profile and **no `chat-history.json`**, so it
+> plans 0 records and 0 skips. That proves the harness end to end but **does not meet
+> the exit row** — a real §"migration tested on real v0.6 data" check needs a machine
+> that has actually used the app, or an exported data folder from one.
+>
+> Still to come in this phase: the store itself (SQLite + `sqlite-vec`) behind these
+> two pure modules, hybrid retrieval fused with the existing TF-IDF path in
+> `main/services/retrieval.ts`, and the exit rows — migration against **real** v0.6
+> data, and a 30-minute transcript summarised in ≤ 60 s locally. The store is where
+> the packaging risk sits (native module under Electron/asar), so it gets a packaged
+> smoke test before the schema is frozen.
+
 - SQLite + sqlite-vec, hybrid retrieval, data migration from JSON.
 - SessionReport and exports.
 - **Exit:** migration tested on real v0.6 data; summary generated for a 30-minute transcript in ≤ 60 s locally (or provider-dependent for cloud).
