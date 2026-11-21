@@ -74,7 +74,7 @@ export function markToolWindow(win: BrowserWindow): void {
     const child = spawn(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', scriptPath, hwnd],
-      { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], detached: true },
+      { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] },
     );
     let diagnostics = '';
     child.stdout?.on('data', (buf: Buffer) => {
@@ -94,7 +94,9 @@ export function markToolWindow(win: BrowserWindow): void {
         /* diagnostics only */
       }
     });
-    child.unref();
+    // Deliberately not detached: a detached child in a new process group was
+    // observed to exit 0 without its output reaching us, which hid the failure.
+    // This process is short-lived and hidden.
   } catch {
     /* style is best-effort; skipTaskbar still hides the taskbar button */
   }
