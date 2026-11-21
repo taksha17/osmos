@@ -819,10 +819,44 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 - **Exit:** migration tested on real v0.6 data; summary generated for a 30-minute transcript in ≤ 60 s locally (or provider-dependent for cloud).
 
 ### Phase 6: Stealth and polish (2 weeks)
-- Non-activating overlay, task-switcher hiding, click-through toggle.
-- Stealth verification matrix completed and published.
-- Speaker labels level 2.
-- **Exit:** matrix filled for Win/macOS with Zoom/Teams/Meet/Webex/OBS; overlay never takes focus in the focus-loss test.
+
+> **Phase 6 status (2026-11-21): implemented on Windows, matrix published with
+> its gaps labelled.** `src/main/services/stealthWindow.ts` owns the §11 policy
+> (non-activating show, focus on click, passive on blur, click-through, Windows
+> tool-window style) and `npm run probe:stealth` drives that shipped module under
+> Electron, printing one JSON line per check and exiting non-zero on failure.
+> `docs/STEALTH-MATRIX.md` records every row with its evidence.
+>
+> | Check | Windows result |
+> |---|---|
+> | Overlay does not steal focus when shown | **pass** |
+> | Underlying window keeps focus | **pass** |
+> | Focus granted on click, passive again after blur | **pass** |
+> | `WS_EX_TOOLWINDOW` (out of Alt-Tab) | **pass** — ex-style `0x8080008` |
+> | Click-through leaves the window non-focusable | **pass** |
+> | Capture exclusion (`WDA_EXCLUDEFROMCAPTURE`) | **mechanism wired, unverified on this host** |
+> | Zoom / Teams / Meet / Webex / OBS | **untested** — none installed on the box |
+>
+> **Three findings came from measuring, not from reading the docs.** (1)
+> Electron's `skipTaskbar` does not set `WS_EX_TOOLWINDOW`, so the overlay stayed
+> in Alt-Tab; the helper now sets it through Win32 rather than adding a native
+> module. (2) `SetWindowDisplayAffinity` only succeeds on a *layered* window — an
+> opaque probe window can never observe the flag, which is why the probe uses a
+> transparent one. (3) A detached PowerShell child exited 0 without applying the
+> style and without output, so the helper no longer detaches.
+>
+> **Why the exclusion row is still open.** An SSH-attached desktop is not
+> composited: `GetWindowDisplayAffinity` returns 0, GDI capture is black and the
+> GPU process exits, so neither the flag nor a pixel test can be observed. Running
+> `npm run probe:stealth` from the machine's own console session closes it.
+>
+> **Speaker labels level 2 is explicitly v2.1** (§5.4) and is not part of the v2.0
+> exit; it needs an embedding model and a clustering pass on the `them` channel.
+>
+> - Non-activating overlay, task-switcher hiding, click-through toggle.
+> - Stealth verification matrix completed and published.
+> - Speaker labels level 2.
+> - **Exit:** matrix filled for Win/macOS with Zoom/Teams/Meet/Webex/OBS; overlay never takes focus in the focus-loss test.
 
 ### Phase 7: Distribution (ongoing, parallel)
 - Code signing, notarization, update feed, full/lite installers, restored CI pack matrix.

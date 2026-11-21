@@ -98,7 +98,7 @@ export const FEATURES: FeatureDef[] = [
     id: 'stealth',
     name: 'Low-profile (stealth)',
     description:
-      'Windows WDA_EXCLUDEFROMCAPTURE + macOS NSWindowSharingNone via setContentProtection; skip taskbar; Linux share-tab tips.',
+      'Non-activating overlay (focus only on click), Windows tool-window style + WDA_EXCLUDEFROMCAPTURE / macOS NSWindowSharingNone, click-through toggle, skip taskbar; Linux share-tab tips.',
     status: 'live',
     platforms: ['linux', 'darwin', 'win32'],
   },

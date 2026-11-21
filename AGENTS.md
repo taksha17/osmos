@@ -374,6 +374,22 @@ Documented so the next agent does not reintroduce these bugs:
 - Win/macOS: `setContentProtection`; re-apply on overlay show/focus.
 - Linux: no OS exclusion API — skip taskbar + always-on-top; share a **tab/window**, not full desktop.
 - macOS: prefer app/tab share (ScreenCaptureKit full-desktop may still include overlay).
+- **Presentation policy lives in `src/main/services/stealthWindow.ts`** (Phase 6):
+  `presentOverlay` (never activates), `focusOverlay` (the click path), `releaseOverlayFocus`
+  (blur path), `setClickThrough`, `markToolWindow`. Do not call `show()`/`focus()` on the
+  overlay from `src/main/index.ts` or the renderer — call these.
+- Electron's `skipTaskbar` does **not** set `WS_EX_TOOLWINDOW`, so the overlay stays in
+  Alt-Tab; `markToolWindow` sets it through a short-lived PowerShell helper. Do not detach
+  that child (a detached one exited 0 with no effect and no output) and do not cache its
+  script file by existence.
+- `SetWindowDisplayAffinity` only succeeds on a **layered** window and only while DWM is
+  composing. Any probe of the exclusion flag must use a transparent window and run in an
+  interactive session; an SSH session reports affinity 0 and a black GDI capture.
+- Verify with `npm run probe:stealth` (exits non-zero on a failed check) and record the row
+  in `docs/STEALTH-MATRIX.md`. Unmeasured combinations stay labelled **untested**; the UI
+  must not claim them.
+- Click-through (`Cmd/Ctrl+Shift+X`) must always be registered: a click-through window
+  cannot be clicked to escape.
 
 ### Smart-listen mic stream — PARKED (2026-08-24, Linux)
 
