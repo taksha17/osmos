@@ -533,6 +533,7 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > | Unit tests | Linux 80/80, Windows 66/66 |
 > | Windows NSIS install, clean PATH | PASS — `OSMOS Setup 0.6.0.exe` (1.26 GB) installed silently to `%LOCALAPPDATA%\Programs\OSMOS`; with `node`, `python`, `ffmpeg` and `npm` absent from PATH the installed worker produced valid WAV chunks, Moonshine transcribed a SAPI sentence, and the packaged app booted with its renderer and `llama-server` children |
 > | Linux packaged tree, empty PATH | PASS — `release/linux-unpacked` (AppImage 1.5 GB) with `PATH=/tmp/nobin` captured from the real sink monitor through its bundled ffmpeg and transcribed on the bundled runtime, 8/8 checks |
+> | Windows audio endpoints (interactive session) | environment gap — 0 present `AudioEndpoint` devices; bundled ffmpeg's dshow enumeration lists the NVIDIA Broadcast **camera** and prints `Could not enumerate audio only devices (or none found)`, so no live mic source exists on that box |
 >
 > The installer run also caught a bug that config review had missed:
 > `app.asar.unpacked` workers run under plain Node, which never looks inside
@@ -540,10 +541,17 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > (`detect-libc`, `@img/colour`) and packaged Whisper died with
 > `Cannot find module 'detect-libc'`. `asarUnpack` now unpacks all of `node_modules`.
 >
+> The Windows endpoint probe also found a real defect that config review had missed:
+> the dshow fallback named `Win32_SoundDevice` adapters, which can report `OK` while
+> exposing no endpoint (Realtek/AMD/NVIDIA cards on that box), so the app offered
+> microphones ffmpeg could not open. It now lists `AudioEndpoint` PnP devices, returns
+> nothing on that box, and the UI says no DirectShow microphone is available instead
+> of naming an unopenable device (`AGENTS.md`, Symptom J2).
+>
 > Still open: **macOS**, which has no host on this project at all, and live-device
-> capture on the Windows test box, which exposes no DirectShow audio endpoints — that
-> check drives the same worker and bundled ffmpeg from a `lavfi` tone instead. Ubuntu
-> was verified from the packaged tree (`linux-unpacked`, AppImage built; the real sink
+> capture on the Windows box, which is an environment gap rather than a code gap — the
+> same worker and bundled ffmpeg are driven from a `lavfi` tone there. Ubuntu was
+> verified from the packaged tree (`linux-unpacked`, AppImage built; the real sink
 > monitor captured through the bundled ffmpeg) rather than a fresh install, so the
 > `.deb` path still needs a clean machine.
 

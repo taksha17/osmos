@@ -327,8 +327,12 @@ export function listDshowAudioInputs(): Promise<string[]> {
   };
 
   /** Fallback when ffmpeg dshow probing yields nothing (privacy block, odd
-   * builds): Win32_SoundDevice friendly names usually match dshow labels. */
-  const psSoundDevices = (): Promise<string[]> =>
+   * builds): enumerate *audio endpoints*, which are the labels DirectShow
+   * accepts. Never use Win32_SoundDevice here — those are sound cards
+   * ("Realtek High Definition Audio"), and passing one makes ffmpeg fail with
+   * "Could not find audio only device" long after the real cause (no
+   * microphone attached) is diagnosable. */
+  const psAudioEndpoints = (): Promise<string[]> =>
     new Promise((resolve) => {
       try {
         execFile(
@@ -336,7 +340,7 @@ export function listDshowAudioInputs(): Promise<string[]> {
           [
             '-NoProfile',
             '-Command',
-            "Get-CimInstance Win32_SoundDevice | Where-Object { $_.Status -eq 'OK' } | ForEach-Object { $_.Name }",
+            "Get-PnpDevice -Class AudioEndpoint -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'OK' } | ForEach-Object { $_.FriendlyName }",
           ],
           { windowsHide: true, timeout: 8000 },
           (err: Error | null, stdout: string | Buffer) => {
@@ -369,8 +373,8 @@ export function listDshowAudioInputs(): Promise<string[]> {
       settled = true;
       let names = parseDshow(stderr);
       if (!names.length) {
-        console.warn('[dshow] no audio devices parsed from ffmpeg stderr; trying PowerShell fallback');
-        names = await psSoundDevices();
+        console.warn('[dshow] no audio devices parsed from ffmpeg stderr; trying audio-endpoint fallback');
+        names = await psAudioEndpoints();
       }
       resolve(names);
     };

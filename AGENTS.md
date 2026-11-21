@@ -297,6 +297,17 @@ Documented so the next agent does not reintroduce these bugs:
 - **Symptom J:** Windows “system audio needs ffmpeg / WASAPI…” at overlay / Smart start.
   - **Cause:** Mainline ffmpeg **has no WASAPI demuxer**; older OSMOS code assumed `-f wasapi -i loopback`.
   - **Fix:** Windows Smart listen uses **Chromium desktop loopback** (`electronLoopback.ts` + `desktop:list-sources`). ffmpeg bundling remains optional for other tools.
+- **Symptom J2:** Windows mic capture fails with ffmpeg's “Could not find audio only device”
+  even though the machine clearly has audio.
+  - **Cause:** `listDshowAudioInputs()` falls back to `Win32_SoundDevice` when ffmpeg
+    cannot enumerate dshow audio. Those are sound *cards* (“Realtek High Definition
+    Audio”), not DirectShow input labels, so the fallback returns names ffmpeg rejects.
+  - **Fix:** The fallback enumerates **audio endpoints**
+    (`Get-PnpDevice -Class AudioEndpoint -PresentOnly`, `Status -eq 'OK'`) — the labels
+    dshow actually accepts — so a machine with no attached endpoint reaches the honest
+    “No DirectShow microphones found” path instead of a late ffmpeg error.
+    A box with only inactive endpoints (NVIDIA Broadcast / TV) is an environment gap,
+    not a code bug.
 - **Symptom K:** Screen reader captures once then stops / auto-answers continuously.
   - **Cause:** One-shot path or continuous OCR fired LLM on every frame change.
   - **Fix:** Persistent poll loop + frame hash for context; **answers only on Ctrl/Cmd+Enter / Assist / hotkeys** (overlay never auto-sends).
