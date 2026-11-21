@@ -94,6 +94,27 @@ not a real recording; the model runs CPU-only on this box; the row is one pass w
 retries and no cloud provider. The summary budget is a target, not a gate — the screen
 kinds remain the only gated row.
 
+## Phase 7 — distribution (2026-11-21)
+
+Host: Windows test box (Win 11, Node 24.16). Packed from the same commit that the
+typecheck and 235 tests ran against.
+
+| Check | Result |
+|---|---|
+| Full installer (`npm run pack`) | `OSMOS Setup 0.6.0.exe` — **1198.5 MB**, weights included |
+| **Lite installer (`npm run pack:lite`)** | `OSMOS-0.6.0-lite-win-x64.exe` — **284.4 MB** (−76 %), `artifactName` marked `-lite` |
+| Lite packaged tree | `resources/llm/model.json` present with `url`, `sha256`, `bytes`; **`resources/llm/models` absent** |
+| **First-run download, real weights** | resumed a seeded 564.2 MB `.partial` of the **940.4 MB** GGUF with `Range`, finished **986,048,768 bytes**, SHA-256 `1adf0b11…c3370` matched, `.partial` removed, **1.8 s** over loopback |
+| Downloader edge cases (local server) | fresh, resume, server ignoring `Range`, hash mismatch (deletes the file), HTTP 404, partial-status read — 6 tests |
+| Test suite | 235/235 (6 downloader, 1 export name) |
+| Signing | **not configured** — `signing is skipped  cscInfo=null` in both builds; no certificate exists, so the installer row cannot pass Gatekeeper/SmartScreen |
+
+Caveats: the first-run download was served from the local file over loopback, which
+proves the HTTP/Range/hash path but not Hugging Face's behaviour under a real
+network (its CDN does honour `Range`). A lite install on a clean VM was not
+performed — the packaged tree was inspected instead. macOS and Linux lite builds
+were not produced here (no hosts); CI does them per tag.
+
 ## Run 2026-11-20T19-16-34-035Z
 
 - Platform: `linux-x64` · Node v20.20.2 · provider: `bench-fake` (deterministic fake)

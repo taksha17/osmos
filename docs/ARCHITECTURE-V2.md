@@ -863,14 +863,17 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > **Phase 7 status (2026-11-21): lite/full installers and the tag-only pack matrix
 > are in; signing is blocked on certificates and is not faked.**
 >
-> - **Full installer:** `npm run pack` (existing), weights included.
+> - **Full installer:** `npm run pack` (existing), weights included — measured
+>   **1198.5 MB** on the Windows box.
 > - **Lite installer:** `npm run pack:lite` (or `node scripts/pack.mjs --lite`) ships
 >   the `llama-server` runtime but no GGUF. `build/llm/model.json` now carries
 >   `url`, `sha256` and `bytes` (written by `ensure-bundled-llm.mjs` from the staged
 >   file), and `src/main/services/modelPackService.ts` downloads on first run —
 >   resumable via `Range`, written to `.partial`, SHA-256-verified, then renamed.
 >   The decisions (state, resume vs restart, size formatting) are pure and tested in
->   `shared/policy/modelPack.ts`.
+>   `shared/policy/modelPack.ts`. Measured: lite **284.4 MB** vs 1198.5 MB full
+>   (−76 %); a real 940.4 MB GGUF resumed from a 564 MB partial and verified its
+>   SHA-256 in 1.8 s (`docs/BENCHMARKS.md`, Phase 7).
 > - **Pack matrix:** `.github/workflows/release.yml` runs typecheck + tests + pack on
 >   Ubuntu, macOS and Windows **for `v*` tags only**, uploading full and lite
 >   artefacts. Pull-request CI stays typecheck/test, so the minutes that made the
