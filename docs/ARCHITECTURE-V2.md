@@ -677,11 +677,20 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > `scripts/run-shared-tests.mjs` also walks `src/main/providers` now, because those
 > adapters must stay Electron-free for `bench/` — 142/142 tests pass.
 >
-> Still open: the capture plumbing that puts a real image into `ChatRequest` (the
-> screen path still sends OCR text, so `includeImage` has no producer); coding mode
-> with a rolling snapshot history; and the exit row **screenshot → first token ≤ 3 s
-> with a cloud vision model**, which cannot be measured without a provider key on the
-> test box.
+> **Image path (slice 3):** a screenshot now reaches the provider. `screenLive.ts`
+> remembers the bytes of every silent grab it OCRs (`services/screenImageCache.ts`,
+> memory only, 60 s retention), so the renderer keeps sending just OCR text and its
+> timestamp — no image crosses the preload boundary and nothing is written to disk.
+> `shared/policy/screenImage.ts` decides whether the grab may travel: it must be
+> under 45 s old *and* within 5 s of the OCR text it came from, so a fresh image can
+> never pair with old text. `buildChatContext` attaches it only when the snapshot
+> needs vision, the lane accepts images, and a paired grab exists, then passes it to
+> `chatWithProvider` / `streamLane` as `LlmImageInput`.
+>
+> Still open: coding mode with a rolling snapshot history; the exit row **screenshot
+> → first token ≤ 3 s with a cloud vision model**, which cannot be measured without a
+> provider key on the test box; and a real-device check that a vision lane returns a
+> correct answer from a code screenshot (unit tests cover the decision, not the answer).
 
 - Frame grabber with change detection and overlay masking.
 - Multimodal provider support; OCR as async text path.

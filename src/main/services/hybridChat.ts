@@ -13,6 +13,7 @@ import {
   startBundledLlm,
 } from './bundledLlm.js';
 import type { ProviderStreamChunk } from './providers.js';
+import type { LlmImageInput } from '../../shared/contracts/llm.js';
 import { llmProviderFromConfig } from '../providers/llm/config.js';
 
 export type LanePlan = {
@@ -169,11 +170,13 @@ export async function* streamLane(
   system: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   signal?: AbortSignal,
+  images?: LlmImageInput[],
 ): AsyncGenerator<ProviderStreamChunk, void, unknown> {
   for await (const chunk of llmProviderFromConfig(provider).stream({
     system,
     messages,
     signal,
+    ...(images?.length ? { images } : {}),
   })) {
     if (chunk.kind === 'delta') yield { kind: 'content', text: chunk.text };
     else if (chunk.kind === 'thinking') yield { kind: 'thinking', text: chunk.text };

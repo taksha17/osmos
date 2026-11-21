@@ -41,6 +41,8 @@ export type AnswerContext = {
   /** True when the snapshot was classified as code (§12 hard rule). */
   hasCodeScreen: boolean;
   hasScreen: boolean;
+  /** §6.4: the lane takes images and the text is not enough, so send the picture too. */
+  attachImage: boolean;
 };
 
 /**
@@ -84,6 +86,10 @@ export function buildAnswerContext(
     { thresholds: options.thresholds },
   );
 
+  // §6.4: a code/problem snapshot goes to the vision lane; when that lane exists
+  // the image travels with the request, otherwise the OCR text is the whole answer.
+  const attachImage = hasScreen && plan.requiresVision && !plan.visionFallback;
+
   const packet = buildContextPacket(
     {
       mode: sources.mode,
@@ -97,7 +103,7 @@ export function buildAnswerContext(
         ? {
             screen: {
               snapshotId: sources.screen.snapshotId,
-              includeImage: sources.screen.includeImage === true,
+              includeImage: attachImage,
               ocrText: screenText,
             },
           }
@@ -117,7 +123,7 @@ export function buildAnswerContext(
     options.budget,
   );
 
-  return { packet, plan, snapshot, hasScreen, hasCodeScreen };
+  return { packet, plan, snapshot, hasScreen, hasCodeScreen, attachImage };
 }
 
 /**

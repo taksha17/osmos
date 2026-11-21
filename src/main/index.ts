@@ -32,6 +32,9 @@ import {
 import { warmupProvider, getLastWarmup, probeLumenGateway } from './services/providerWarmup.js';
 import { routeTierLabel } from '../shared/lumenRoute.js';
 import { routeDecisionFor } from '../shared/policy/answerContext.js';
+import { freshScreenImage } from '../shared/policy/screenImage.js';
+import { providerAcceptsVision } from './providers/llm/vision.js';
+import { lastScreenGrab } from './services/screenImageCache.js';
 import { answerContextForChat } from './services/answerContext.js';
 import { startBundledLlm, stopBundledLlm } from './services/bundledLlm.js';
 import { loadHistory, saveHistory, upsertSession, deleteSession, clearAllHistory } from './services/history.js';
@@ -161,9 +164,20 @@ async function buildChatContext(
   // Phase 3 seam (§7.2 packet + §8.2 lanes): one call decides the lane plan and
   // the token-budgeted context for this request. `routeDecisionFor` applies the
   // code-snapshot hard rule on top of the v0.6 decision.
+  // §6.4: only offer the picture to a lane that can take one; the OCR text in
+  // the packet is the whole answer when it cannot.
+  const visionAvailable = providerAcceptsVision({
+    id: effective,
+    model: providerModel || provider?.model,
+  });
   const context = answerContextForChat(s, message, screen, {
     bankMatch: Boolean(bankMatch),
+    visionAvailable,
   });
+  // The renderer sends OCR text and its timestamp; main keeps the bytes of the grab
+  // they came from, so no image ever has to cross the preload boundary.
+  const screenImage = context.attachImage ? freshScreenImage(lastScreenGrab(), screen?.at) : null;
+  const images = screenImage ? [screenImage] : [];
 
   // Interview answers should ground in the saved profile — not random web hits.
   // Web search still runs for meeting/general, or when the user clearly asks for research.
@@ -343,6 +357,7 @@ async function buildChatContext(
     searchHits,
     bankMatch,
     context,
+    images,
     provider: {
       ...provider,
       model: providerModel || provider?.model || '',
@@ -949,7 +964,7 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
     const message = (req?.message || '').trim();
     if (!message) return { ok: false, error: 'Empty message' };
 
-    const { s, system, usedWebSearch, searchHits, provider, context } =
+    const { s, system, usedWebSearch, searchHits, provider, context, images } =
       await buildChatContext(message, {
         text: req?.screenText,
         at: req?.screenAt,
@@ -964,7 +979,7 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
     ];
 
     try {
-      const answer = await chatWithProvider(lane, system, messages);
+      const answer = await chatWithProvider(lane, system, messages, undefined, images);
       return { ok: true, answer, usedWebSearch, searchHits };
     } catch (e) {
       // The local fast lane can be cold or wedged (llama-server crash) — one
@@ -972,7 +987,7 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
       if (plan.route.lane === 'fast' && plan.fast) {
         console.warn('[chat] fast lane failed, retrying quality lane:', e);
         try {
-          const answer = await chatWithProvider(plan.quality, system, messages);
+          const answer = await chatWithProvider(plan.quality, system, messages, undefined, images);
           return { ok: true, answer, usedWebSearch, searchHits };
         } catch (retryErr) {
           return {
@@ -1016,7 +1031,7 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
       const ac = new AbortController();
       streamAbortControllers.set(requestId, ac);
 
-      const { s, system, usedWebSearch, searchHits, provider, context } =
+      const { s, system, usedWebSearch, searchHits, provider, context, images } =
         await buildChatContext(message, {
           text: req?.screenText,
           at: req?.screenAt,
@@ -1047,7 +1062,7 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
       ): Promise<string> => {
         let answer = '';
         let sawThinking = false;
-        for await (const chunk of streamLane(laneProvider, system, history, ac.signal)) {
+        for await (const chunk of streamLane(laneProvider, system, history, ac.signal, images)) {
           if (chunk.kind === 'thinking') {
             if (!sawThinking) {
               sawThinking = true;

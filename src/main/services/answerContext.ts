@@ -21,7 +21,7 @@ export function answerContextForChat(
   settings: AppSettings,
   message: string,
   screen?: ChatScreenSource,
-  hints: { bankMatch?: boolean } = {},
+  hints: { bankMatch?: boolean; visionAvailable?: boolean } = {},
 ): AnswerContext {
   const active = activeSavedProfile(settings.profiles, settings.activeProfileId);
   const profile = settings.profile;
@@ -33,6 +33,7 @@ export function answerContextForChat(
     // The bank entry itself reaches the prompt from `buildChatContext`; the packet
     // only needs to know the question was anticipated (§8.2 routing hint).
     ...(hints.bankMatch ? { bankMatch: { questionId: 'active-bank', answer: '', score: 1 } } : {}),
+    ...(hints.visionAvailable === undefined ? {} : { visionAvailable: hints.visionAvailable }),
     ...(screenText
       ? { screen: { snapshotId: `screen-${screen?.at ?? 0}`, ocrText: screenText } }
       : {}),

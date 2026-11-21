@@ -8,7 +8,6 @@
  * Imports no Electron APIs, so `bench/run.mjs` can drive it from plain Node.
  */
 
-import fs from 'node:fs';
 import type { ProviderConfig } from '../../../shared/types.js';
 import type {
   LlmCapabilities,
@@ -17,7 +16,7 @@ import type {
   LlmStreamRequest,
 } from '../../../shared/contracts/llm.js';
 import { chatWithProvider, streamWithProvider } from '../../services/providers.js';
-import { providerAcceptsVision, resolveImage } from './vision.js';
+import { providerAcceptsVision } from './vision.js';
 
 const LOOPBACK = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])/i;
 
@@ -46,16 +45,13 @@ export function llmProviderFromConfig(provider: ProviderConfig): LlmProvider {
         );
       }
       // §6.4: an image the provider cannot take is an error, never a silent drop.
-      const images = (req.images ?? []).map((image) =>
-        resolveImage(image, (path) => fs.readFileSync(path)),
-      );
-
+      // Resolution to base64 happens at the wire boundary in providers.ts.
       for await (const chunk of streamWithProvider(
         provider,
         req.system,
         req.messages,
         req.signal,
-        images,
+        req.images,
       )) {
         if (chunk.kind === 'content') yield { kind: 'delta', text: chunk.text };
         else yield { kind: 'thinking', text: chunk.text };

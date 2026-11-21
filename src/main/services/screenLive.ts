@@ -23,6 +23,7 @@ import { EventEmitter } from 'node:events';
 import type { BrowserWindow } from 'electron';
 import { capturePrimaryScreen, describeLoopSafeCapture } from './screenCapture.js';
 import { extractTextFromImage } from './ocr.js';
+import { rememberScreenGrab } from './screenImageCache.js';
 import {
   MutterScreenCastBackend,
   probeMutterScreenCast,
@@ -96,6 +97,7 @@ class ScreenLiveEngine extends EventEmitter {
 
   private async onMutterFrame(frame: MutterFrame) {
     if (!this.running || this.mutterBusy) return; // backpressure: one OCR at a time
+    this.rememberFrame(frame);
     this.mutterBusy = true;
     try {
       const res = await extractTextFromImage({ base64: frame.dataUrl });
@@ -183,7 +185,16 @@ class ScreenLiveEngine extends EventEmitter {
     });
   }
 
+  /**
+   * Keep the grabbed bytes for the vision path (§6.4): the renderer only gets the
+   * OCR text and its timestamp, so main is where the image has to live.
+   */
+  private rememberFrame(frame: MutterFrame): void {
+    rememberScreenGrab({ dataUrl: frame.dataUrl, at: frame.at });
+  }
+
   private async ocrFrame(frame: MutterFrame): Promise<{ ok: boolean; text?: string; at?: number; error?: string }> {
+    this.rememberFrame(frame);
     try {
       const res = await extractTextFromImage({ base64: frame.dataUrl });
       if (res.ok && res.text?.trim()) {
@@ -223,6 +234,7 @@ class ScreenLiveEngine extends EventEmitter {
         }
         return;
       }
+      this.rememberFrame({ dataUrl: cap.dataUrl, at: Date.now() });
       const res = await extractTextFromImage({ base64: cap.dataUrl });
       if (!this.running) return;
       if (res.ok && res.text && res.text.trim()) {

@@ -1,6 +1,18 @@
+import fs from 'node:fs';
 import { chatOllama, streamChatOllama } from './ollama.js';
 import type { ProviderConfig } from '../../shared/types.js';
-import { ollamaImages, openAiMessagesWithImages, type ResolvedImage } from '../providers/llm/vision.js';
+import type { LlmImageInput } from '../../shared/contracts/llm.js';
+import {
+  ollamaImages,
+  openAiMessagesWithImages,
+  resolveImage,
+  type ResolvedImage,
+} from '../providers/llm/vision.js';
+
+/** §6.4: a path or data URL becomes base64 once, at the wire boundary. */
+function resolveImages(images: readonly LlmImageInput[] = []): ResolvedImage[] {
+  return images.map((image) => resolveImage(image, (path) => fs.readFileSync(path)));
+}
 
 export type ProviderStreamChunk =
   | { kind: 'thinking'; text: string }
@@ -98,8 +110,9 @@ export async function chatWithProvider(
   system: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   signal?: AbortSignal,
-  images: readonly ResolvedImage[] = [],
+  images: readonly LlmImageInput[] = [],
 ): Promise<string> {
+  const resolved = resolveImages(images);
   if (provider.id === 'ollama') {
     return chatOllama({
       baseUrl: provider.baseUrl,
@@ -107,12 +120,12 @@ export async function chatWithProvider(
       system,
       messages,
       signal,
-      images: ollamaImages(images),
+      images: ollamaImages(resolved),
     });
   }
 
   if (isOpenAICompatible(provider)) {
-    const { text } = await chatOpenAICompatible(provider, system, messages, signal, images);
+    const { text } = await chatOpenAICompatible(provider, system, messages, signal, resolved);
     return text;
   }
 
@@ -124,8 +137,9 @@ export async function* streamWithProvider(
   system: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   signal?: AbortSignal,
-  images: readonly ResolvedImage[] = [],
+  images: readonly LlmImageInput[] = [],
 ): AsyncGenerator<ProviderStreamChunk, void, unknown> {
+  const resolved = resolveImages(images);
   if (provider.id === 'ollama') {
     yield* streamChatOllama({
       baseUrl: provider.baseUrl,
@@ -133,13 +147,13 @@ export async function* streamWithProvider(
       system,
       messages,
       signal,
-      images: ollamaImages(images),
+      images: ollamaImages(resolved),
     });
     return;
   }
 
   if (isOpenAICompatible(provider)) {
-    yield* streamOpenAICompatible(provider, system, messages, signal, images);
+    yield* streamOpenAICompatible(provider, system, messages, signal, resolved);
     return;
   }
 
