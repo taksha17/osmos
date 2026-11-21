@@ -15,7 +15,7 @@ only runs from the same machine.
 | End-of-speech → utterance handed to STT (p50 ≤ 600 ms) | measured 431 ms (Phase 2 slice 1); transcript timing needs `bench/fixtures/audio` |
 | STT word error rate (≤ 12 %) | Phase 2 |
 | Trigger precision ≥ 0.9 / recall ≥ 0.85 | measured 1.000 / 1.000 on 43 labelled utterances (Phase 3) |
-| End-of-question → first token (≤ 1.5 s p50 / 2.5 s p95) | plumbing measured through the fake provider; real-provider run still open (Phase 3) |
+| End-of-question → first token (≤ 1.5 s p50 / 2.5 s p95) | measured on the bundled 1.5B fast lane: p50 49 ms / p95 348 ms (Phase 3); cloud lane still open |
 | Vision key-fact recall | Phase 4 — needs `bench/fixtures/screens` |
 | Idle CPU / RAM while listening | measured (Phase 1) |
 
@@ -54,12 +54,19 @@ provider (`BENCH_FAKE_FIRST_TOKEN_MS=120`).
 | Imperative asks | stems such as `name`, `list`, `show me` now fire without a `?` or interrogative word |
 | Answerable utterances in the replay set | 7 (2 skipped: one meeting cue, one self-speech) |
 | First token through the deterministic provider | p50 127 ms / p95 130 ms — harness plumbing only, not model latency |
+| **First token, real model** (bundled Qwen2.5-1.5B Q4_K_M via `llama-server`, 7 samples) | **p50 49 ms / p95 348 ms** — fast lane on the Windows box, `BENCH_PROVIDER_BASE_URL=http://127.0.0.1:8091/v1` |
 | Unit tests | 110/110 on Windows (30 new for §7.2–§7.4) |
 
 The first run of this set scored 0.952 (1 false positive, 1 false negative: the two rows
 above). Both were fixed by the classifier rules listed, so 1.000 on this hand-written set
 is expected rather than independent evidence — the eval set still needs utterances written
 without reading the rules before the number can be trusted.
+
+The real-model run uses the same seven replay utterances against the packaged
+`llama-server` + 1.5B GGUF (`C:\Users\taksh\AppData\Local\Programs\OSMOS\resources\llm`).
+The clone's copy of `llama-server.exe` is blocked by Application Control on that box, so
+the probe runs the installed tree's binary. This measures the local fast lane only: the
+cloud/quality lane needs a provider key and is not represented here.
 
 The §17 gate is **end-of-question → first token p50 ≤ 1.5 s / p95 ≤ 2.5 s**. That is not
 measured here: the deterministic provider answers in ~120 ms by construction. It needs a

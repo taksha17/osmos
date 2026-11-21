@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppSettings, ChatStreamEvent, StarTemplate } from '../../shared/types';
-import {
-  fusedAssistPrompt,
-  SCREEN_CONTEXT_FRESH_MS,
-  shouldAutoAssist,
-} from '@shared/continuousAssist';
+import { fusedAssistPrompt, SCREEN_CONTEXT_FRESH_MS } from '@shared/continuousAssist';
+import { createOrchestrator } from '@shared/policy/orchestrator';
 import { prepareScreenContext, SCREEN_CONTEXT_MAX_CHARS } from '@shared/screenContext';
 import { useMainMicStt } from '../stt/useMainMicStt';
 import { useSystemAudioStt } from '../stt/useSystemAudioStt';
@@ -121,7 +118,10 @@ export function ChatPanel({
   const systemStartRef = useRef(system.start);
   systemStopRef.current = system.stop;
   systemStartRef.current = system.start;
-  const lastAssistRef = useRef({ key: '', at: 0 });
+  // Phase 3 (§7.3/§7.4): one orchestrator decides whether a final transcript
+  // becomes an answer — channel-aware, 10 s dedupe, cancel-on-supersede.
+  const orchestratorRef = useRef(createOrchestrator());
+  const activeAnswerRef = useRef<string | null>(null);
   const lastScreenRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
   const transcriptRef = useRef<TranscriptEntry[]>([]);
   transcriptRef.current = transcript;
@@ -568,6 +568,10 @@ export function ChatPanel({
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       cancelRef.current = null;
+      if (activeAnswerRef.current) {
+        orchestratorRef.current.complete(activeAnswerRef.current);
+        activeAnswerRef.current = null;
+      }
       setBusy(false);
       setStreamMeta('');
       if (!overlay || !continuousRef.current || pausedRef.current || !settings) return;
@@ -604,7 +608,7 @@ export function ChatPanel({
   }, [overlay]);
 
   const ingestFinal = useCallback(
-    (text: string) => {
+    (text: string, channel: 'me' | 'them' = 'them') => {
       const cleaned = text.trim();
       if (!cleaned) return;
       if (pausedRef.current) return;
@@ -630,12 +634,22 @@ export function ChatPanel({
       // the user press Ctrl/Cmd+Enter to ask.
       const autoAsk = settings?.autoAskOnFinal === true;
       if (!autoAsk) return;
-      if (smart && !shouldAutoAssist(cleaned, true)) return;
 
-      const key = cleaned.toLowerCase().slice(0, 80);
-      const now = Date.now();
-      if (key && key === lastAssistRef.current.key && now - lastAssistRef.current.at < 5000) return;
-      lastAssistRef.current = { key, at: now };
+      // §7.3: only a direct question fires. Meeting cues become notes, the
+      // user's own mic channel never fires, and a repeat inside 10 s is a
+      // duplicate — the ad-hoc 5 s prefix check this replaced could not tell
+      // those cases apart.
+      const actions = orchestratorRef.current.final({
+        text: cleaned,
+        channel,
+        mode,
+        smartMode: smart,
+        nowMs: Date.now(),
+      });
+      const start = actions.find(
+        (action) => action.type === 'start' || action.type === 'restart',
+      );
+      if (!start) return;
 
       // Screen context is attached by sendMessage (system prompt in main) —
       // do not also paste it into the user message.
@@ -643,17 +657,32 @@ export function ChatPanel({
         smart && overlay
           ? fusedAssistPrompt({ transcript: cleaned, activeMode: mode })
           : cleaned;
-      void sendRef.current(prompt);
+
+      const send = () => {
+        activeAnswerRef.current = start.requestId;
+        void sendRef.current(prompt);
+      };
+
+      if (actions.some((action) => action.type === 'cancel')) {
+        // A newer question supersedes the answer still streaming (§7.4). The
+        // cancel resolves asynchronously, so the replacement waits one tick.
+        cancelRef.current?.();
+        window.setTimeout(send, 300);
+      } else {
+        send();
+      }
     },
     [overlay, settings?.activeMode, settings?.autoAskOnFinal],
   );
 
   useEffect(() => {
-    mainMic.onFinal(ingestFinal);
+    // The user's own voice is the `me` channel: it updates context and never
+    // triggers an answer (§7.3 self-speech).
+    mainMic.onFinal((text) => ingestFinal(text, 'me'));
   }, [mainMic.onFinal, ingestFinal]);
 
   useEffect(() => {
-    system.onFinal(ingestFinal);
+    system.onFinal((text) => ingestFinal(text, 'them'));
   }, [system.onFinal, ingestFinal]);
 
   const liveHeard =
