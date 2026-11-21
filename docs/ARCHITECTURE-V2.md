@@ -583,6 +583,37 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 - **Exit:** end-of-question → final transcript ≤ 600 ms p50 on the audio set; WER within target.
 
 ### Phase 3: Orchestrator, trigger policy, speculative generation (2 weeks)
+
+> **Phase 3 status (policy layer, 2026-11-21):** implemented and measured, not yet
+> wired to `src/main/index.ts`, so app behaviour is unchanged.
+> `src/shared/policy/triggerPolicy.ts` now implements the §7.3 table — hotkey, direct
+> question, coding screen (offer, auto-fire only when enabled), meeting cue as a
+> **note**, self-speech never, 10 s dedupe, speculative partials at classifier
+> confidence ≥ 0.8. `src/shared/policy/orchestrator.ts` is the §7.4 lifecycle as a pure
+> action-returning state machine: speculative start, reconcile-or-restart at 20 % edit
+> distance, cancel on a newer question, 15 s deadline. `src/shared/policy/contextBudget.ts`
+> builds the §7.2 `ContextPacket` with per-section token budgets and relevance-based
+> trimming. `src/shared/policy/routerV2.ts` adds the §8.2 hard rules (code snapshot →
+> vision lane, no vision model → OCR text), an explicit threshold input in place of the
+> `EASY_MAX_WORDS` constant, and a fallback chain that ends at the quality lane after a
+> 2.5 s first-token budget.
+>
+> **Exit evidence (measured 2026-11-21, Windows box):**
+>
+> | Check | Result |
+> |---|---|
+> | Trigger precision / recall, 40 labelled utterances | **0.952 / 0.952** (gate ≥ 0.9 / ≥ 0.85; 1 false positive, 1 false negative) |
+> | Unit tests | 108/108, 28 of them new for §7.2–§7.4 |
+> | Replay set through `npm run bench` | 7 answerable utterances; 2 correctly skipped (one meeting cue, one self-speech) |
+>
+> Still open: wiring the orchestrator and context packet into main (§7.1's event bus
+> is still unused there); the **end-of-question → first-token** gate, which needs a real
+> provider run (`BENCH_PROVIDER_BASE_URL` + `BENCH_PROVIDER_MODEL`) — the deterministic
+> provider answers in ~120 ms by construction; and an accuracy set for
+> `pickEasyMaxWords`, so the boundary stays at the v0.6 default of 18 words. The two
+> trigger misses are recorded in `docs/BENCHMARKS.md`: a rhetorical question fires, and
+> an imperative phrasing with no stem ("Name three ways…") is missed.
+
 - Implement Orchestrator, Context Engine, Trigger Policy, request cancellation/deadlines.
 - Router v2 with eval-driven thresholds and fallback chain.
 - **Exit:** end-of-question → first token ≤ 1.5 s p50 / ≤ 2.5 s p95 on replay set; trigger precision ≥ 0.9, recall ≥ 0.85 on labelled transcripts.

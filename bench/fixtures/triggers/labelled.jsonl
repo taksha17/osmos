@@ -1,0 +1,45 @@
+# Labelled trigger eval set — Architecture v2 §7.3 / §13.2.
+# One utterance per line. `expect` is the answer this pipeline owes:
+#   answer = a direct question addressed to the user (fire)
+#   note   = action item / decision / ownership (meeting cue, note only)
+#   none   = small talk, narration, or the user's own speech (never answer)
+{"channel":"them","text":"What does JVM stand for?","expect":"answer"}
+{"channel":"them","text":"What is a mutex?","expect":"answer"}
+{"channel":"them","text":"How does HTTPS work?","expect":"answer"}
+{"channel":"them","text":"Explain database indexing","expect":"answer"}
+{"channel":"them","text":"Tell me about yourself","expect":"answer"}
+{"channel":"them","text":"Tell me about a time you led a project.","expect":"answer"}
+{"channel":"them","text":"Walk me through your last system design.","expect":"answer"}
+{"channel":"them","text":"Why do you want to work here?","expect":"answer"}
+{"channel":"them","text":"What is your greatest strength?","expect":"answer"}
+{"channel":"them","text":"Where do you see yourself in five years?","expect":"answer"}
+{"channel":"them","text":"Have you worked with Kubernetes before?","expect":"answer"}
+{"channel":"them","text":"Do you have any questions for us?","expect":"answer"}
+{"channel":"them","text":"Can you send the deck by Friday?","expect":"answer"}
+{"channel":"them","text":"Is there a staging environment?","expect":"answer"}
+{"channel":"them","text":"Are there any blockers on the migration?","expect":"answer"}
+{"channel":"them","text":"Could you walk me through the deployment flow?","expect":"answer"}
+{"channel":"them","text":"Summarize the trade-offs of CRDTs versus operational transforms","expect":"answer"}
+{"channel":"them","text":"Compare SQLite and Postgres for this workload","expect":"answer"}
+{"channel":"them","text":"How would you design a rate limiter at this scale","expect":"answer"}
+{"channel":"them","text":"What would you do if the queue backed up during a deploy","expect":"answer"}
+{"channel":"them","text":"Name three ways to avoid a deadlock","expect":"answer"}
+{"channel":"them","text":"We should probably revisit the pricing page copy","expect":"note"}
+{"channel":"them","text":"Let us schedule the retro for Monday","expect":"note"}
+{"channel":"them","text":"We decided to delay the launch by two weeks","expect":"note"}
+{"channel":"them","text":"I will send the notes after the call","expect":"note"}
+{"channel":"them","text":"That is the action item for Priya","expect":"note"}
+{"channel":"them","text":"Absolutely, we can take that offline and follow up later","expect":"note"}
+{"channel":"them","text":"Good morning everyone, thanks for joining the call","expect":"none"}
+{"channel":"them","text":"Okay so the plan is to ship on Thursday afternoon","expect":"none"}
+{"channel":"them","text":"That is a really interesting point about latency budgets","expect":"none"}
+{"channel":"them","text":"Right, that covers the status update for this week","expect":"none"}
+{"channel":"them","text":"The meeting starts in about ten minutes","expect":"none"}
+{"channel":"them","text":"Wasn't that demo great?","expect":"none"}
+{"channel":"them","text":"hi","expect":"none"}
+{"channel":"them","text":"thanks","expect":"none"}
+{"channel":"them","text":"No worries at all","expect":"none"}
+{"channel":"me","text":"Sure, that works for me","expect":"none"}
+{"channel":"me","text":"What is a mutex?","expect":"none"}
+{"channel":"me","text":"Tell me about a time you led a project.","expect":"none"}
+{"channel":"me","text":"We should revisit the pricing page","expect":"none"}

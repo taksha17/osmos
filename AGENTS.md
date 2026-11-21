@@ -150,6 +150,14 @@ Capture and STT run in **supervised external processes**, never inline in main.
 - Fixed-size `chunk` messages still ship for the current hooks. When you move a hook to utterances, delete its chunk path rather than running both.
 - Silero VAD replaces only the per-frame voice test; keep `EndpointDetector` as the timing layer.
 
+### Orchestrator, trigger policy and lanes (Phase 3)
+
+- `src/shared/policy/triggerPolicy.ts` is the only place that decides *whether* to answer (§7.3). Only a direct question or a hotkey fires; meeting cues return `notes: true` and must never produce a model request; a repeat inside the 10 s window is `duplicate`; the user's own channel never fires. Do **not** reintroduce "answer anything long" — that v0.6 heuristic is what Phase 3 replaced.
+- `src/shared/policy/orchestrator.ts` owns the request lifecycle (§7.4) as a pure state machine: speculative start on a partial with confidence ≥ 0.8, `keep` when the final is within 20 % edit distance, `restart` when it is not, cancel when a newer question arrives, cancel at the 15 s deadline. It **returns actions** and never spawns or cancels a request itself — keep the provider calls in the caller.
+- Lane choice is `src/shared/policy/routerV2.ts`: hard rules (code snapshot → vision lane; no vision model → OCR text), a `easyMaxWords` threshold input (default `EASY_MAX_WORDS`), and a fallback chain ending at the quality lane after the 2.5 s first-token budget. `decision` stays the v0.6 result so status lines and parity tests keep working.
+- `src/shared/policy/contextBudget.ts` builds the §7.2 `ContextPacket` and is the only place section budgets are applied; trimming is by relevance (recency + question overlap, retrieval score), never arbitrary slicing.
+- Trigger quality is re-measured by `npm run bench` from `bench/fixtures/triggers/labelled.jsonl`. When a trigger rule changes, add a labelled case for it rather than editing an existing label.
+
 ### Web access (v3, `docs/ARCHITECTURE-V3.md`)
 
 W0 is in: `src/shared/contracts/web.ts`, the pure capability router in `src/shared/policy/webAccess.ts`, the T0 adapter in `src/main/providers/web/builtin.ts`, and the Web Access Manager registry in `src/main/services/webAccess.ts`. Chat still calls `searchWeb()`, so nothing has changed yet.

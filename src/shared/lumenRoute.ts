@@ -105,10 +105,24 @@ export type RouteHints = {
 };
 
 /**
+ * Tunable boundaries (Architecture v2 §8.2). Defaults keep v0.6 behaviour; the
+ * benchmark can hand router v2 a measured `easyMaxWords` instead.
+ */
+export type RouteThresholds = {
+  /** Questions at or below this length may answer on the local fast lane. */
+  easyMaxWords?: number;
+};
+
+/**
  * Decide which lane should answer this prompt.
  * Pure function — safe to call from main or renderer.
  */
-export function routeDecision(prompt: string, hints: RouteHints = {}): RouteDecision {
+export function routeDecision(
+  prompt: string,
+  hints: RouteHints = {},
+  thresholds: RouteThresholds = {},
+): RouteDecision {
+  const easyMaxWords = thresholds.easyMaxWords ?? EASY_MAX_WORDS;
   const text = (prompt || '').trim();
   const words = text ? text.split(/\s+/).length : 0;
   const force = hints.forceTier && hints.forceTier !== 'auto' ? hints.forceTier : null;
@@ -140,7 +154,7 @@ export function routeDecision(prompt: string, hints: RouteHints = {}): RouteDeci
   if (
     !hints.hasScreen &&
     words > 0 &&
-    words <= EASY_MAX_WORDS &&
+    words <= easyMaxWords &&
     !kwMatch(text, HIGH_STAKES_KEYWORDS) &&
     !kwMatch(text, COMPLEX_KEYWORDS)
   ) {

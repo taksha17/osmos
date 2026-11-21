@@ -22,6 +22,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const buildDir = path.join(root, '.bench-build');
 const fixturesDir = path.join(root, 'bench', 'fixtures', 'transcripts');
+const triggerFixturesDir = path.join(root, 'bench', 'fixtures', 'triggers');
 const resultsDir = path.join(root, 'bench', 'results');
 const benchDoc = path.join(root, 'docs', 'BENCHMARKS.md');
 
@@ -75,6 +76,64 @@ function realProvider(llmModule) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Trigger quality — Architecture v2 §7.3 / §13.2.
+ *
+ * Replays the labelled utterances through the same `decideTrigger` main uses and
+ * reports precision/recall of "should answer". `note` labels count as
+ * not-answer: a meeting cue must produce a note, never a model request.
+ */
+function evaluateTriggers(trigger) {
+  const file = path.join(triggerFixturesDir, 'labelled.jsonl');
+  if (!fs.existsSync(file)) return null;
+
+  const labelled = fs
+    .readFileSync(file, 'utf8')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'))
+    .map((line) => JSON.parse(line));
+  if (labelled.length === 0) return null;
+
+  let truePositives = 0;
+  let falsePositives = 0;
+  let falseNegatives = 0;
+  let trueNegatives = 0;
+  const misses = [];
+
+  for (const item of labelled) {
+    const decision = trigger.decideTrigger({
+      text: item.text,
+      channel: item.channel ?? 'them',
+      smartMode: true,
+    });
+    const expected = item.expect === 'answer';
+    if (decision.fire && expected) {
+      truePositives += 1;
+    } else if (decision.fire) {
+      falsePositives += 1;
+      misses.push({ ...item, predicted: 'answer', reason: decision.reason });
+    } else if (expected) {
+      falseNegatives += 1;
+      misses.push({ ...item, predicted: decision.reason, reason: decision.reason });
+    } else {
+      trueNegatives += 1;
+    }
+  }
+
+  const round = (value) => Math.round(value * 1000) / 1000;
+  return {
+    labels: labelled.length,
+    truePositives,
+    falsePositives,
+    falseNegatives,
+    trueNegatives,
+    precision: round(truePositives / Math.max(1, truePositives + falsePositives)),
+    recall: round(truePositives / Math.max(1, truePositives + falseNegatives)),
+    misses,
+  };
 }
 
 function percentile(values, p) {
@@ -139,6 +198,7 @@ async function main() {
   const llm = await bundle('src/main/providers/llm/config.ts', 'llm.mjs');
 
   const provider = hasRealProvider ? realProvider(llm) : fakeProvider();
+  const triggerEval = evaluateTriggers(trigger);
   const samples = [];
   const skipped = [];
 
@@ -205,6 +265,7 @@ async function main() {
     node: process.version,
     provider: provider.id,
     deterministic: !hasRealProvider,
+    trigger: triggerEval,
     summary,
     samples,
     skipped,
@@ -231,6 +292,11 @@ async function main() {
       `- Platform: \`${report.platform}\` · Node ${report.node} · provider: \`${report.provider}\`${report.deterministic ? ' (deterministic fake)' : ''}`,
       `- Samples: ${summary.samples} · skipped by trigger policy: ${summary.skipped} · first token p50 **${summary.firstTokenP50} ms** / p95 ${summary.firstTokenP95} ms`,
       `- Lanes: ${JSON.stringify(summary.lanes)}`,
+      ...(triggerEval
+        ? [
+            `- Trigger quality: precision **${triggerEval.precision}** · recall **${triggerEval.recall}** on ${triggerEval.labels} labelled utterances (tp ${triggerEval.truePositives} / fp ${triggerEval.falsePositives} / fn ${triggerEval.falseNegatives} / tn ${triggerEval.trueNegatives})`,
+          ]
+        : []),
       '',
       table,
       '',
@@ -242,6 +308,11 @@ async function main() {
     `[bench] ${summary.samples} samples via ${report.provider} (${summary.skipped} skipped by trigger policy)`,
   );
   console.log(`[bench] first token p50=${summary.firstTokenP50}ms p95=${summary.firstTokenP95}ms`);
+  if (triggerEval) {
+    console.log(
+      `[bench] trigger precision=${triggerEval.precision} recall=${triggerEval.recall} (${triggerEval.labels} labels, ${triggerEval.misses.length} misses)`,
+    );
+  }
   console.log(`[bench] report → ${path.relative(root, resultPath)}`);
   if (writeDoc) console.log(`[bench] appended → ${path.relative(root, benchDoc)}`);
 }
