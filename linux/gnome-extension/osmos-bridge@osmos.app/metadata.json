@@ -1,0 +1,9 @@
+{
+  "uuid": "osmos-bridge@osmos.app",
+  "name": "OSMOS Stealth Bridge",
+  "description": "Hides the OSMOS overlay while the screen is being shared or recorded and keeps it pinned on top. Reads only the number of active share sessions.",
+  "shell-version": ["46"],
+  "settings-schema": "org.gnome.shell.extensions.osmos-bridge",
+  "version": 1,
+  "url": "https://github.com/taksha17/osmos"
+}

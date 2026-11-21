@@ -10,10 +10,27 @@ function engineFor(settings: AppSettings | null): 'local' | 'openai' {
  * (mic:listen-start → mic:audio-chunk). The renderer only transcribes chunks,
  * so React lifecycle changes can never kill the capture itself.
  */
+/**
+ * Mic failures the Smart watchdog must not retry: no capture device exists, so
+ * every restart fails the same way and keeps the UI claiming to listen.
+ */
+function isFatalMicError(message: string): boolean {
+  return /no directshow microphones|no microphone|no default source|no such device|device not found|cannot open audio device|no laptop/i.test(
+    message,
+  )
+    // ffmpeg problems and missing main-process plumbing cannot be fixed by
+    // retrying — restarting only spawns the same broken child again.
+    || /ffmpeg (is|was) (present|not found|required)|will not run|blocked by device policy|needs linux build/i.test(
+      message,
+    );
+}
+
 export function useMainMicStt(settings: AppSettings | null) {
   const [listening, setListening] = useState(false);
   const [partial, setPartial] = useState('');
   const [error, setError] = useState('');
+  /** Set when no capture device exists — see isFatalMicError. */
+  const [fatal, setFatal] = useState(false);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const finalRef = useRef<((text: string) => void) | null>(null);
@@ -21,6 +38,8 @@ export function useMainMicStt(settings: AppSettings | null) {
   const unsubsRef = useRef<Array<() => void>>([]);
   const lastChunkAt = useRef(0);
   const restartingRef = useRef(false);
+  /** Guards the window between start() entry and startMicListen resolving. */
+  const startingRef = useRef(false);
   /** True once the VAD path has delivered an utterance this session (§5.2). */
   const utterancePathRef = useRef(false);
 
@@ -31,11 +50,17 @@ export function useMainMicStt(settings: AppSettings | null) {
   const start = useCallback(async (): Promise<void> => {
     if (typeof window.osmos.startMicListen !== 'function') {
       setError('Main-process mic streaming unavailable (needs Linux build).');
+      setFatal(true);
       return;
     }
+    // The Smart watchdog and an explicit Smart toggle can both ask for a start
+    // in the same tick; only the first may tear down and rebuild the stream.
+    if (startingRef.current) return;
+    startingRef.current = true;
     const gen = ++genRef.current;
     utterancePathRef.current = false;
     setError('');
+    setFatal(false);
     setListening(true);
     setPartial('🎙 starting mic…');
     try {
@@ -44,9 +69,12 @@ export function useMainMicStt(settings: AppSettings | null) {
         device: settingsRef.current?.micDeviceId || undefined,
         chunkMs: settingsRef.current?.transcribeChunkMs || 4000,
       });
+      startingRef.current = false;
       if (genRef.current !== gen) return;
       if (!res.ok) {
-        setError(res.error || 'Mic listen failed');
+        const message = res.error || 'Mic listen failed';
+        setError(message);
+        if (isFatalMicError(message)) setFatal(true);
         setListening(false);
         setPartial('');
         return;
@@ -101,7 +129,24 @@ export function useMainMicStt(settings: AppSettings | null) {
       const unsubChunk = window.osmos.onMicChunk?.(async (chunk) => {
         if (genRef.current !== gen) return;
         if (!chunk.ok) {
-          setError(chunk.error || 'Mic stream error');
+          const message = chunk.error || 'Mic stream error';
+          setError(message);
+          if (isFatalMicError(message)) {
+            setFatal(true);
+            setListening(false);
+            setPartial('');
+            // Stop the main-process stream too: leaving it up makes it respawn
+            // a capture child that can never succeed.
+            genRef.current += 1;
+            for (const u of unsubsRef.current.splice(0)) {
+              try {
+                u();
+              } catch {
+                /* ignore */
+              }
+            }
+            void window.osmos.stopMicListen?.().catch(() => undefined);
+          }
           return;
         }
         lastChunkAt.current = Date.now();
@@ -142,6 +187,7 @@ export function useMainMicStt(settings: AppSettings | null) {
       });
       if (unsubChunk) unsubsRef.current.push(unsubChunk);
     } catch (e) {
+      startingRef.current = false;
       if (genRef.current !== gen) return;
       setError(e instanceof Error ? e.message : String(e));
       setListening(false);
@@ -224,5 +270,5 @@ export function useMainMicStt(settings: AppSettings | null) {
     [],
   );
 
-  return { listening, partial, error, start, stop, toggle, onFinal };
+  return { listening, partial, error, fatal, start, stop, toggle, onFinal };
 }

@@ -8,7 +8,9 @@ dist/
 dist-electron/
 .test-build/
 .bench-build/
+.bench-build-web/
 .stealth-probe/
+.ubuntu-bridge-probe/
 electron-builder.lite.json
 release/
 out/
@@ -80,6 +82,9 @@ Desktop.ini
 # Agent workspaces (SDD scratch + harness worktrees) — never commit
 .superpowers/
 .qwen/
+
+# Local UI checks (CDP scratch scripts + screenshots)
+.ui-check/
 
 # Temp
 tmp/

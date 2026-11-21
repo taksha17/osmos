@@ -59,7 +59,7 @@ export const FEATURES: FeatureDef[] = [
   {
     id: 'providers',
     name: 'Multi-provider LLMs',
-    description: 'OpenAI, Anthropic, Groq, OpenRouter, LiteLLM (+ local Ollama).',
+    description: 'OpenAI, Anthropic, Groq, OpenRouter, NVIDIA NIM, LiteLLM (+ local Ollama).',
     status: 'live',
     platforms: ['linux', 'darwin', 'win32'],
   },
@@ -98,7 +98,7 @@ export const FEATURES: FeatureDef[] = [
     id: 'stealth',
     name: 'Low-profile (stealth)',
     description:
-      'Non-activating overlay (focus only on click), Windows tool-window style + WDA_EXCLUDEFROMCAPTURE / macOS NSWindowSharingNone, click-through toggle, skip taskbar; Linux share-tab tips.',
+      'Non-activating overlay (focus only on click), Windows tool-window style + WDA_EXCLUDEFROMCAPTURE / macOS NSWindowSharingNone, click-through toggle, skip taskbar. Ubuntu/GNOME: optional Stealth Bridge extension hides every OSMOS window while a share or recording is active (auto-hide, not per-window capture exclusion).',
     status: 'live',
     platforms: ['linux', 'darwin', 'win32'],
   },
@@ -177,6 +177,13 @@ export const FEATURES: FeatureDef[] = [
     name: 'Continuous meeting assistant',
     description: 'Smart mode: auto-listen, segment audio, detect questions, and suggest answers in the overlay.',
     status: 'live',
+    platforms: ['linux', 'darwin', 'win32'],
+  },
+  {
+    id: 'web-access',
+    name: 'Self-hosted web access (v3)',
+    description: 'Optional Firecrawl-compatible fetch (T1/T2 on :3002) + URL Guard + sanitizer; chat still uses built-in search until the WAM swap.',
+    status: 'scaffold',
     platforms: ['linux', 'darwin', 'win32'],
   },
 ];

@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppSettings } from '../../shared/types';
 import { CONTINUOUS_MAX_IN_FLIGHT } from '@shared/continuousAssist';
-import { captureElectronLoopback, isWindowsPlatform } from './electronLoopback';
+import {
+  captureElectronLoopback,
+  isFatalLoopbackError,
+  isWindowsPlatform,
+} from './electronLoopback';
 
 function engineForSettings(settings: AppSettings | null): 'local' | 'openai' {
   if (!settings) return 'local';
@@ -19,6 +23,12 @@ export function useSystemAudioStt(settings: AppSettings | null) {
   const [listening, setListening] = useState(false);
   const [partial, setPartial] = useState('');
   const [error, setError] = useState('');
+  /**
+   * Set when capture cannot succeed until the user fixes a device. The Smart
+   * watchdog must not restart such a listener: a loop of failing captures
+   * floods the console and keeps the UI claiming to listen.
+   */
+  const [fatal, setFatal] = useState(false);
   const activeRef = useRef(false);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -72,6 +82,7 @@ export function useSystemAudioStt(settings: AppSettings | null) {
     utterancePathRef.current = false;
     setListening(true);
     setError('');
+    setFatal(false);
     setPartial('Starting meeting audio…');
 
     const pending = new Set<Promise<void>>();
@@ -234,7 +245,18 @@ export function useSystemAudioStt(settings: AppSettings | null) {
               });
           if (!activeRef.current || generationRef.current !== gen) break;
           if (!capture.ok || !capture.base64) {
-            setError(capture.error || 'System audio capture failed');
+            const message = capture.error || 'System audio capture failed';
+            setError(message);
+            // A missing playback endpoint never fixes itself — stop instead of
+            // retrying every few seconds and leave the UI honest.
+            if (isFatalLoopbackError(message)) {
+              setFatal(true);
+              activeRef.current = false;
+              generationRef.current += 1;
+              setListening(false);
+              setPartial('');
+              break;
+            }
             await new Promise((r) => setTimeout(r, 2000));
             continue;
           }
@@ -266,5 +288,5 @@ export function useSystemAudioStt(settings: AppSettings | null) {
 
   useEffect(() => () => stop(), [stop]);
 
-  return { listening, partial, error, start, stop, toggle, onFinal };
+  return { listening, partial, error, fatal, start, stop, toggle, onFinal };
 }

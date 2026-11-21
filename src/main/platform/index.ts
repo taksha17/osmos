@@ -73,6 +73,12 @@ export function applyOsCaptureExclusion(win: BrowserWindow, enabled: boolean, pl
 export type StealthStatus = {
   ok: boolean;
   supported: boolean;
+  /**
+   * Which mechanism backs the claim. Windows/macOS use a real OS capture-
+   * exclusion flag; Ubuntu/GNOME uses the Shell bridge's auto-hide instead, and
+   * the UI must not describe that as "verified invisible".
+   */
+  mechanism?: 'capture-exclusion' | 'gnome-bridge';
   detail: string;
   checkedAt: number;
 };

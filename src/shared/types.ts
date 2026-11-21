@@ -63,7 +63,7 @@ export type SavedProfile = UserProfile & {
   agent?: AgentConfig;
 };
 
-export type LlmProvider = 'ollama' | 'openai' | 'anthropic' | 'groq' | 'openrouter' | 'litellm';
+export type LlmProvider = 'ollama' | 'openai' | 'anthropic' | 'groq' | 'openrouter' | 'nvidia' | 'litellm';
 
 export type WebSearchProvider = 'off' | 'duckduckgo' | 'tavily' | 'searxng';
 
@@ -73,6 +73,8 @@ export type ProviderConfig = {
   apiKey: string;
   baseUrl: string;
   model: string;
+  /** Optional model for image/vision requests. Blank means use `model`. */
+  visionModel?: string;
 };
 
 export type AgentSkill =
@@ -161,6 +163,11 @@ export type AppSettings = {
   lumenGatewayUrl: string;
   /** Prefer Lumen gateway for the fast lane when /v1/health is up. */
   lumenGatewayEnabled: boolean;
+  /**
+   * Self-hosted web access (Architecture v3, Appendix A). OPTIONAL so v0.6
+   * settings files load unchanged; `resolveWebAccessConfig()` fills defaults.
+   */
+  webAccess?: import('./webAccessConfig.js').WebAccessConfig;
 };
 
 export const DEFAULT_PROFILE: UserProfile = {
@@ -219,6 +226,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
     anthropic: { id: 'anthropic', label: 'Anthropic', apiKey: '', baseUrl: 'https://api.anthropic.com', model: 'claude-3-5-haiku-latest' },
     groq: { id: 'groq', label: 'Groq', apiKey: '', baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' },
     openrouter: { id: 'openrouter', label: 'OpenRouter', apiKey: '', baseUrl: 'https://openrouter.ai/api/v1', model: 'auto' },
+    nvidia: {
+      id: 'nvidia',
+      label: 'NVIDIA NIM',
+      apiKey: '',
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
+      model: 'nvidia/nemotron-3.5-bolt-e4b',
+      visionModel: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
+    },
     litellm: { id: 'litellm', label: 'LiteLLM', apiKey: '', baseUrl: 'http://127.0.0.1:4000', model: 'gpt-4o-mini' },
   },
   hybridRouting: true,
@@ -226,6 +241,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   draftThenUpgrade: true,
   lumenGatewayUrl: 'http://127.0.0.1:8080',
   lumenGatewayEnabled: false,
+  webAccess: undefined,
 };
 
 export type ChatMessage = {

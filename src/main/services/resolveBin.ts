@@ -86,10 +86,14 @@ export function findBundledFfmpeg(): string | null {
       candidates.push(path.join(path.dirname(app.getPath('exe')), name));
       candidates.push(path.join(path.dirname(app.getPath('exe')), 'resources', 'bin', name));
     } else {
-      // Dev: vendored pack binary checked into build/bin/<platform>
+      // Dev: vendored pack binary checked into build/bin/<platform>. `current`
+      // is the staging copy ensure-ffmpeg.mjs also writes (and extraResources
+      // ships), so a dev run sees the same binary as the packaged app.
       const platformDir = process.platform === 'win32' ? 'win32' : process.platform;
-      candidates.push(path.join(app.getAppPath(), 'build', 'bin', platformDir, name));
-      candidates.push(path.join(process.cwd(), 'build', 'bin', platformDir, name));
+      for (const dir of [platformDir, 'current']) {
+        candidates.push(path.join(app.getAppPath(), 'build', 'bin', dir, name));
+        candidates.push(path.join(process.cwd(), 'build', 'bin', dir, name));
+      }
     }
   } catch {
     /* ignore */
@@ -102,6 +106,10 @@ export function findBundledFfmpeg(): string | null {
 }
 
 let cachedFfmpeg: string | null | undefined;
+/** Set when an ffmpeg file exists but will not execute (policy block, bad DLLs). */
+let ffmpegProbeFailure: string | null = null;
+/** When the last failed resolution ran, so an explicit retry can re-probe. */
+let lastFailedProbeAt = 0;
 
 function probeFfmpeg(bin: string): boolean {
   try {
@@ -134,12 +142,41 @@ export function resolveFfmpeg(): string | null {
     if (!isFile(c)) continue;
     if (probeFfmpeg(c)) {
       cachedFfmpeg = c;
+      ffmpegProbeFailure = null;
       return c;
     }
+    // The file is there but cannot run — remember where, so callers can say
+    // "blocked/unusable" instead of the misleading "ffmpeg is required".
+    ffmpegProbeFailure = c;
   }
 
   cachedFfmpeg = null;
+  lastFailedProbeAt = Date.now();
   return null;
+}
+
+/**
+ * Drop a failed ffmpeg resolution so the next attempt probes again — used when
+ * the user explicitly retries after installing/allowing a binary. The previous
+ * result is kept for a minute so a hung probe cannot stall every retry.
+ */
+export function resetFfmpegCache(minIntervalMs = 60_000): void {
+  if (cachedFfmpeg) return;
+  if (Date.now() - lastFailedProbeAt < minIntervalMs) return;
+  cachedFfmpeg = undefined;
+  ffmpegProbeFailure = null;
+}
+
+/**
+ * Why no ffmpeg was resolved, in words a user can act on. Returns null when an
+ * ffmpeg does resolve, and a generic message when nothing was found at all.
+ */
+export function describeFfmpegProblem(): string | null {
+  if (resolveFfmpeg()) return null;
+  if (ffmpegProbeFailure) {
+    return `ffmpeg is present at ${ffmpegProbeFailure} but will not run (blocked by device policy, or missing DLLs). Install a runnable ffmpeg or allow that binary.`;
+  }
+  return 'ffmpeg was not found. Install ffmpeg (or allow the bundled copy) for continuous capture.';
 }
 
 /**

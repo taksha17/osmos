@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { ChatStreamEvent } from '../shared/types';
+import type { UbuntuBridgeMode, UbuntuBridgeState } from '../shared/policy/ubuntuBridge';
 
 /**
  * VAD-endpointed utterance (Architecture v2 §5.2): one complete question /
@@ -54,9 +55,26 @@ const api = {
     ipcRenderer.invoke('stealth:verify') as Promise<{
       ok: boolean;
       supported: boolean;
+      mechanism?: 'capture-exclusion' | 'gnome-bridge';
       detail: string;
       checkedAt: number;
     }>,
+  /** GNOME "stealth bridge" state (Ubuntu/Wayland auto-hide during shares). */
+  getUbuntuBridge: () =>
+    ipcRenderer.invoke('ubuntu:bridge-status') as Promise<UbuntuBridgeState>,
+  installUbuntuBridge: () =>
+    ipcRenderer.invoke('ubuntu:bridge-install') as Promise<{ ok: boolean; output: string }>,
+  uninstallUbuntuBridge: () =>
+    ipcRenderer.invoke('ubuntu:bridge-uninstall') as Promise<{ ok: boolean; output: string }>,
+  setUbuntuBridgeMode: (mode: UbuntuBridgeMode) =>
+    ipcRenderer.invoke('ubuntu:bridge-set-mode', mode) as Promise<{ ok: boolean; error?: string }>,
+  openUbuntuBridgePrefs: () =>
+    ipcRenderer.invoke('ubuntu:bridge-open-prefs') as Promise<{ ok: boolean; error?: string }>,
+  onUbuntuBridge: (listener: (state: UbuntuBridgeState) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, state: UbuntuBridgeState) => listener(state);
+    ipcRenderer.on('ubuntu:bridge', handler);
+    return () => ipcRenderer.removeListener('ubuntu:bridge', handler);
+  },
   ocrExtract: (payload: { base64: string }) => ipcRenderer.invoke('ocr:extract', payload),
   companyIntel: (payload: { companyName: string; jdText?: string; companyUrl?: string }) =>
     ipcRenderer.invoke('company:intel', payload),

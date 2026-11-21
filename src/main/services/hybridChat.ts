@@ -66,8 +66,11 @@ export async function planHybridLanes(
   settings: AppSettings,
   decision: RouteDecision,
   qualityProvider: ProviderConfig,
+  options: { forceQuality?: boolean } = {},
 ): Promise<LanePlan> {
-  const hybridOn = settings.hybridRouting !== false;
+  // Image requests can only travel on the vision-capable quality lane: the
+  // fast model is text-only, and a draft upgrade would send it the image too.
+  const hybridOn = settings.hybridRouting !== false && !options.forceQuality;
   let fast: ProviderConfig | null = null;
 
   if (hybridOn) {

@@ -28,6 +28,8 @@
     "capture:fixtures": "node scripts/capture-fixtures.mjs",
     "bench:web": "node bench/web.mjs",
     "probe:stealth": "node scripts/stealth-probe.mjs",
+    "probe:ubuntu-bridge": "node scripts/ubuntu-bridge-probe.mjs",
+    "test:ubuntu-bridge-live": "bash linux/scripts/test-bridge-live.sh",
     "pack": "npm run build && npm run build:audio-worker && node scripts/pack.mjs",
     "pack:lite": "npm run build && npm run build:audio-worker && node scripts/pack.mjs --lite",
     "pack:linux": "node scripts/ensure-ffmpeg.mjs && node scripts/ensure-bundled-llm.mjs && npm run build && npm run build:audio-worker && electron-builder --linux --publish never",
@@ -43,6 +45,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
+    "dbus-next": "^0.10.2",
     "dompurify": "^3.2.5",
     "electron-store": "^10.0.1",
     "mammoth": "^1.12.1",
@@ -78,6 +81,14 @@
         "to": "audio-worker",
         "filter": [
           "osmos-audio-worker*"
+        ]
+      },
+      {
+        "from": "linux",
+        "to": "linux",
+        "filter": [
+          "gnome-extension/**/*",
+          "scripts/**/*"
         ]
       },
       {
@@ -132,7 +143,10 @@
         "tar.gz"
       ],
       "category": "Utility",
-      "maintainer": "OSMOS contributors <maintainers@osmos.app>"
+      "maintainer": "OSMOS contributors <maintainers@osmos.app>",
+      "desktop": {
+        "StartupWMClass": "osmos"
+      }
     },
     "mac": {
       "target": [

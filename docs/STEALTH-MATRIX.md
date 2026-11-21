@@ -92,8 +92,45 @@ default) and typechecked on macOS in CI, but it has never been run there.
 
 | Concern | Result |
 |---|---|
-| Capture exclusion | **not available** — no OS API; documented in the UI ("share a tab/window") |
+| Per-window capture exclusion | **not available** — GNOME/Mutter has no such flag; documented in the UI |
 | Skip taskbar / always-on-top | **pass** on the Zenbook (v0.6 behaviour, unchanged) |
 | Non-activating show | `showInactive()` + `setFocusable(false)`; per-compositor behaviour on Wayland is **untested** |
 | Click-through | `setIgnoreMouseEvents(true, {forward:true})`; Wayland support is **untested** |
 | Global hotkeys while unfocused | best-effort (Wayland often refuses registration; the app logs it) |
+
+### Linux — GNOME stealth bridge (Ubuntu 24.04 / GNOME Shell 46.0, Wayland)
+
+Implemented and measured 2026-11-21 on this host. The extension is installed in
+`~/.local/share/gnome-shell/extensions/` and enabled for the next login (GNOME 46
+on Wayland cannot hot-load a new extension). `npm run probe:ubuntu-bridge`
+passed against a mock `org.osmos.Bridge`; the installer was exercised in a temp
+`XDG_DATA_HOME`; the canary harness proved it can both catch and clear a
+synthetic leak. `npm run test:ubuntu-bridge-live` then loaded the extension in a
+private-bus headless GNOME Shell, opened a real Mutter ScreenCast and captured
+its PipeWire stream. That proved the hide path without a desktop interaction;
+Chrome/Zoom/OBS, Alt-Tab/Dock and an OCR recording still need §9 on a real
+session.
+
+| Concern | Result | Evidence |
+|---|---|---|
+| Extension syntax | **pass** | `node --check extension.js`, `node --check prefs.js` |
+| GSettings schema | **pass** | `glib-compile-schemas --strict` on the schema |
+| D-Bus contract (app client) | **pass (mock)** | `probe:ubuntu-bridge`: Ping=`1`, `Mode`, `SharingActive`, `SharingChanged(true/false)`, name loss |
+| GJS D-Bus export (extension API) | **pass (mock)** | `gjs -m` mock on a private bus: `wrapJSObject` getters answered, `SharingChanged` and `PropertiesChanged` received by `gdbus monitor` |
+| Installer / uninstaller | **pass** | temp `XDG_DATA_HOME`: extension copied, `gschemas.compiled` produced, uninstall removed the tree |
+| Canary harness | **pass (synthetic)** | `verify-capture.sh --selftest`: canary video flagged in 4/4 frames, clean control passed |
+| Bridge loaded in a real Shell | **pass (headless)** | `test-bridge-live.sh`: headless GNOME Shell 46 loaded the extension; `Ping`=`1`, `Mode` and `SharingActive` answered on D-Bus |
+| Hide on share start | **pass (headless Mutter cast)** | Window with WM_CLASS `osmos` absent from the actual PipeWire capture while sharing (0 magenta samples); `SharingActive` observed 115–276 ms after `Session.Start` across headless runs (20 ms polling; signal timing, not first-frame timing) |
+| Restore on share end | **pass (headless)** | Switching back to `keep` during the share and a fresh cast after it both captured the window again (67,200 magenta samples) |
+| `mode=keep` negative control | **pass (headless)** | Same cast and capture showed the window in `keep` (67,200 samples), so the hiding result is not a broken capture |
+| Built-in GNOME recorder | **partial (headless)** | `org.gnome.Shell.Screencast` emitted `SharingChanged(true/false)`; one headless run polled `SharingActive` as false during the recording, so confirm this row on a desktop (T2.1) |
+| Two overlapping shares | **untested** | T3.3; the code counts handles, but no overlapping-share run yet |
+| Overview / Alt-Tab thumbnail | **best-effort, untested** | While hidden the extension sets `skip_taskbar` (guarded, restored after); real Alt-Tab/Overview behaviour needs a desktop test (T3.5) |
+| Canary absent from a real recording | **window path pass (headless), OCR untested** | The magenta-window equivalent of the canary was 67,200 px in `keep` and 0 while hidden; a real meeting-app recording plus the OCR `mode=keep` control still needs T4/T5 on a desktop |
+| Share already running when enabled | **known limitation** | Handles that existed before `enable()` are not listed (T7.1) |
+| Window vs monitor share | **undistinguished** | The Shell handle carries no source info; both hide |
+| Hidden for the user too | **known limitation** | Full-screen share hides the overlay for everyone |
+| Dock / top-bar leak | **partially mitigated, untested** | `StartupWMClass=osmos` now ships in the Linux desktop entry; hiding the dock during shares is still separate work (T6) |
+
+Honest UI wording lives in `src/shared/policy/ubuntuBridge.ts` (`bridgeSummary`),
+so the app cannot claim a measure this table does not contain.

@@ -68,11 +68,13 @@ Everything below was measured or reproduced on the platform named. Rows that wer
 | Meeting audio (speaker) | Chromium loopback — works out of the box | **Requires BlackHole** + a Multi-Output Device | `ffmpeg -f pulse` on a real `*.monitor` (pw-record fallback) |
 | Microphone | ffmpeg DirectShow / Chromium | AVFoundation via ffmpeg | ffmpeg pulse / pw-record |
 | Screen reading | GDI capture (silent) | `screencapture -x` + Screen Recording grant | Mutter ScreenCast on GNOME (no picker, no flash); CLI tools elsewhere |
-| Capture exclusion | `WDA_EXCLUDEFROMCAPTURE` — verified against the OS flag | `NSWindowSharingNone` — stops legacy `CGWindowList` capture; **ScreenCaptureKit shares can still include it** | No OS equivalent — share a window, not the whole desktop |
+| Capture exclusion | `WDA_EXCLUDEFROMCAPTURE` — verified against the OS flag | `NSWindowSharingNone` — stops legacy `CGWindowList` capture; **ScreenCaptureKit shares can still include it** | No OS flag — optional GNOME bridge auto-hides the overlay during shares; a window/tab share is still safest |
 | Overlay above fullscreen apps | — | yes (`screen-saver` level, `visibleOnFullScreen`) | — |
 | Live screen loop | GDI, silent | `screencapture`, silent | GNOME only; never the portal, never `gnome-screenshot` |
 
 **Linux notes.** GNOME live reading needs `python3-gi`, GStreamer and `gstreamer1.0-pipewire` (default on Ubuntu GNOME). Nothing is bundled — the backend is only offered when its probe passes. Wayland cannot register global shortcuts on many setups; the in-app hotkeys still work.
+
+**Ubuntu screen-share hiding.** GNOME/Wayland has no per-window "exclude from capture" flag. Install the optional GNOME Shell **Stealth Bridge** (`bash linux/scripts/install-bridge.sh`, then log out and back in) and OSMOS hides every OSMOS window while any screen share or recording is active. It is auto-hide during sharing — you will not see the overlay either during a full-screen share — and it cannot tell a window share from a monitor share. Settings → Low-profile shows the live bridge state, installs it, and switches its mode. Verify a recording with `linux/scripts/verify-capture.sh <file>` (and run the `mode=keep` negative control). `--selftest` proves the harness can see a leak and does not invent one; OCR uses the bundled tesseract.js, so system `tesseract` is optional. `npm run test:ubuntu-bridge-live` goes further without touching your desktop: it starts a private-bus headless GNOME Shell, opens a real Mutter ScreenCast, captures the PipeWire stream and checks the window is visible in `mode=keep`, absent while hidden and back afterwards (needs `gst-launch-1.0` with `pipewiresrc`, `pw-dump`, `python3-gi`, `python3-pil`). Chrome/Zoom/OBS and Alt-Tab/Dock still need the manual §9 pass.
 
 **macOS notes.** Meeting audio needs a virtual cable (BlackHole or Loopback) plus a Multi-Output Device; without one the app refuses to record instead of silently transcribing your microphone. `docs/STEALTH-MATRIX.md` lists every capture-app combination as measured, partial or **untested**.
 
@@ -127,7 +129,7 @@ main
   ├─ orchestrator           shared/policy/orchestrator.ts    speculative start → keep | restart | cancel
   ├─ routing + budget       shared/policy/routerV2.ts · contextBudget.ts · answerContext.ts
   ├─ screen classification  shared/policy/screenSnapshot.ts  (code / terminal / slides / chat)
-  ├─ providers              Ollama · OpenAI · Anthropic · Groq · OpenRouter · LiteLLM · vision
+  ├─ providers              Ollama · OpenAI · Anthropic · Groq · OpenRouter · NVIDIA NIM · LiteLLM · vision
   └─ memory                 sql.js SQLite store + shared/policy/memoryRanking.ts
   ▼
 overlay  ← one window per app, presented without stealing focus

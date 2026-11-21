@@ -20,7 +20,7 @@
 | Shell | Electron 34 |
 | UI | React 19 + Vite 6 + TypeScript |
 | Local LLM | Ollama HTTP (`/api/chat` NDJSON stream) |
-| Cloud LLMs | OpenAI / Anthropic / Groq / OpenRouter / LiteLLM via OpenAI-compatible `/chat/completions` |
+| Cloud LLMs | OpenAI / Anthropic / Groq / OpenRouter / NVIDIA NIM / LiteLLM via OpenAI-compatible `/chat/completions` |
 | Web search | DuckDuckGo (default) / Tavily / SearXNG |
 | Offline STT | System Node worker + `@huggingface/transformers` v4 — **Moonshine tiny (default, MIT)** or Whisper base.en |
 | Screen OCR | Main-process `tesseract.js` via `ocr:extract` IPC. Continuous 👁 Live prefers a **silent main backend** on every OS: **Mutter ScreenCast** (GNOME), **GDI/PowerShell** (Windows), **`screencapture -x`** (macOS), CLI (`spectacle`/`grim`/`scrot`) elsewhere. Renderer `getDisplayMedia` is Windows/macOS fallback only — **never** on Linux |
@@ -165,7 +165,7 @@ Capture and STT run in **supervised external processes**, never inline in main.
 - `src/shared/policy/screenSnapshot.ts` is the only screen classifier: `classifySnapshot(ocrText)` → `{ kind, confidence, requiresVision, hint }`. `looksLikeCodeScreen` is derived from it, so do not add a second "is this code" heuristic at a call site. A misclassification changes routing, so a new rule needs a labelled case in `bench/fixtures/screen/labelled.jsonl`.
 - `requiresVision` is true for code and problem statements only (§12). Do not make slides or chats force the vision lane — that would take easy screens off the local lane.
 - `context.snapshot.hint` is the one sentence the screen section carries. Add a kind's instruction to `HINTS` in that module, not inline in `src/main/index.ts`.
-- Vision providers: `src/main/providers/llm/vision.ts` owns capability detection (`providerAcceptsVision`, model-name based — a provider id alone proves nothing) and payload building. Images reach a provider as `LlmImageInput` (a `data:` URL or a path the adapter reads) and are resolved in `config.ts`; an image offered to `capabilities.vision === false` must throw, never be dropped. Without images the OpenAI content stays a plain string, so text-only requests remain byte-identical — keep it that way.
+- Vision providers: `src/main/providers/llm/vision.ts` owns capability detection (`providerAcceptsVision`, model-name based, plus an explicit per-provider `visionModel` override — a provider id alone proves nothing) and payload building. Images reach a provider as `LlmImageInput` (a `data:` URL or a path the adapter reads) and are resolved in `config.ts`; an image offered to `capabilities.vision === false` must throw, never be dropped. Without images the OpenAI content stays a plain string, so text-only requests remain byte-identical — keep it that way.
 - Phase 5 storage: `src/main/providers/memory/store.ts` is the store API (`upsert` idempotent by id, `applyMigration`) and `shared/policy/memoryRanking.ts` is the only ranker (lexical coverage + recency + kind, components reported). Tokenization lives in `shared/policy/textTokens.ts` — do not add a second tokenizer. Electron 34 is Node 20.19 and has **no** `node:sqlite` (verified on the box), so persistence uses `main/providers/memory/sqlJsStore.ts` — SQLite via `sql.js` (WASM). Writes are one transaction exported to `memory.sqlite` through a temp file + rename; `mustExist` must stay (never invent an empty database over a real one), and the WASM binary is located with `require.resolve`, because esbuild test bundles and `app.asar` both break `__dirname`-relative lookups.
 - Phase 5 retrieval is wired: `main/services/memory.ts` opens `memory.sqlite` at startup (`startMemory`), migrates the legacy JSON only when the store is empty, remembers each saved chat, and exposes synchronous `memoryHits` for the chat handler. The packet's `memory` section has its own 500-token budget — never merge it into the transcript or profile budget, and never let retrieval throw into a chat request (it degrades to `[]`).
 - Phase 5 summary: `shared/policy/transcriptSummary.ts` is the only reducer (`extractSessionSignals` + `buildSummaryPrompt`); `BENCH_SUMMARY=1` is the exit-row harness (measured 18.4 s for a 30-minute meeting on the bundled 1.5B). Vectors are deliberately not shipped — do not add `sqlite-vec` without a measured retrieval miss.
@@ -181,6 +181,7 @@ Capture and STT run in **supervised external processes**, never inline in main.
 - `npm run pack` ships the weights; `npm run pack:lite` (or `node scripts/pack.mjs --lite`) ships the `llama-server` runtime only, with `artifactName` marked `-lite`. The lite config is generated at `electron-builder.lite.json` (gitignored) from the `build` block in `package.json`, so packaging options stay in one place — do not hand-edit the generated file.
 - A lite install downloads the GGUF on first run inside `startBundledLlm` → `main/services/modelPackService.ts`: resumable `Range`, `.partial` + rename, SHA-256 verified against `model.json`, which `ensure-bundled-llm.mjs` now writes (`url`, `sha256`, `bytes`). Never accept an unverified download, and never start a download the manifest cannot check.
 - `scripts/pack.mjs` spawns `node_modules/electron-builder/out/cli/cli.js` through the current Node. Do **not** put `spawn('npx', …)` back: `npx` is `npx.cmd` on Windows and a shell-less spawn fails with `ENOENT` (it did, on the box).
+- The Ubuntu bridge ships as real files, not inside `app.asar`: `extraResources` copies `linux/` to `resources/linux`, because the installer must read the extension source and scripts. `dbus-next` is a normal production dependency and is already covered by the `node_modules/**/*` asarUnpack rule.
 - `.github/workflows/release.yml` runs typecheck, tests, the full pack and the lite pack on Ubuntu/macOS/Windows **for `v*` tags only**. Pull-request CI stays typecheck-only on Ubuntu; do not re-add a matrix to `ci.yml`.
 - Signing is not configured: no Apple Developer ID, no Windows OV/EV certificate. Installers are unsigned, `docs/ARCHITECTURE-V2.md` Phase 7 says so, and that row is the one v2 exit criterion this repository cannot satisfy by itself.
 - **macOS ships native helpers it does not build.** Apple Silicon will not exec an unsigned Mach-O, so `scripts/sign-vendored-macos.mjs` ad-hoc signs (`codesign --sign -`, after `xattr -cr`) every Mach-O under `build/bin`, `build/llm` and `binaries/audio-worker`, then `codesign --verify`s each one. `pack.mjs` and `pack:mac` both call it, and it runs even for `--skip-vendor`, because the lite build still ships `llama-server`. Do not remove it: the symptom is `spawn … killed: 9` on a real Mac and never on Linux/Windows.
@@ -356,6 +357,9 @@ Documented so the next agent does not reintroduce these bugs:
     “No DirectShow microphones found” path instead of a late ffmpeg error.
     A box with only inactive endpoints (NVIDIA Broadcast / TV) is an environment gap,
     not a code bug.
+- **Symptom J3 (2026-11-21):** Smart shows “listening” forever on a Windows box with sound cards but **no present audio endpoints**; loopback dies with `NotReadableError: Could not start audio source` and the console logs the same error every few seconds.
+  - **Cause:** `Get-PnpDevice -Class AudioEndpoint -PresentOnly` returns nothing (endpoints missing/disabled), so Chromium has no render endpoint to loop back and dshow has no mic label. Separately, a Device Guard policy can block the vendored `ffmpeg.exe` (`was blocked by your organization's Device Guard policy`) — the file exists but cannot run.
+  - **Fix:** `electronLoopback.ts` maps the DOMException to an actionable message and exports `isFatalLoopbackError`; `useSystemAudioStt` / `useMainMicStt` expose `fatal`, and the Smart watchdog in `ChatPanel` backs off (4s→60s) and stops restarting a fatal ear. `describeFfmpegProblem()` in `resolveBin.ts` distinguishes “not found” from “present but will not run”. A machine with no endpoints stays unusable — that is an environment gap, not a code bug; both ears now say so once instead of retrying forever.
 - **Symptom K:** Screen reader captures once then stops / auto-answers continuously.
   - **Cause:** One-shot path or continuous OCR fired LLM on every frame change.
   - **Fix:** Persistent poll loop + frame hash for context; **answers only on Ctrl/Cmd+Enter / Assist / hotkeys** (overlay never auto-sends).
@@ -413,6 +417,47 @@ Documented so the next agent does not reintroduce these bugs:
   must not claim them.
 - Click-through (`Cmd/Ctrl+Shift+X`) must always be registered: a click-through window
   cannot be clicked to escape.
+
+### Ubuntu GNOME stealth bridge (auto-hide during shares)
+
+- GNOME/Wayland has **no per-window capture-exclusion flag**, so Ubuntu does not use the
+  Windows/macOS mechanism. Instead `linux/gnome-extension/osmos-bridge@osmos.app/` is a
+  GNOME Shell extension that watches the Shell remote-access controller and hides every
+  matching OSMOS window while a share or recording is active (and pins them on top). This
+  is **auto-hide during sharing, for you too** — never document it as "visible to me,
+  invisible to the capture".
+- Contract: `org.osmos.Bridge` on the session bus with `Ping`, read-only
+  `SharingActive`/`Mode` and `SharingChanged`. `src/main/platform/linux/gnomeBridge.ts` is
+  the only client (`dbus-next`, lazy-imported so Windows/macOS never load it), and
+  `src/shared/policy/ubuntuBridge.ts` owns the state shape plus the honest status text.
+  Do not add a second D-Bus path; mode changes go through the extension's GSettings key
+  (`gsettings --schemadir …`), never through a mutating D-Bus method.
+- The overlay must stay identifiable: main appends Chromium `--class=osmos` so XWayland's
+  WM_CLASS is stable in dev and packaged builds. The extension matches `app-ids` (default
+  `osmos` variants) against GTK app id, sandboxed app id, WM_CLASS and its instance. If
+  hiding does nothing, read the real ids in Looking Glass → Windows and fix the extension's
+  prefs.
+- Install/uninstall scripts live in `linux/scripts/`, ship via `extraResources` (`linux/` →
+  `resources/linux`), and are run by the Settings → Low-profile card **without sudo**.
+  Installing cannot take effect until the user logs out and back in on Wayland; the card
+  must say so instead of implying protection already exists.
+- `OSMOS_CANARY=1` renders `OSMOS-CANARY-7F3A` in the overlay;
+  `linux/scripts/verify-capture.sh <recording>` OCRs frames for it. Always run the negative
+  control (`mode=keep`) — if that passes, the test is broken. `verify-capture.sh --selftest`
+  proves the harness itself (synthetic leaking + clean recordings); it falls back to the
+  bundled `tesseract.js` through `scripts/ocr-canary.mjs`, so system tesseract is optional.
+- While a share is running the extension also sets `skip_taskbar` on the windows it hid
+  (guarded, restored after) so they leave Alt-Tab and the Overview grid. Keep the call
+  optional: not every Mutter build exposes the setter, and hiding must still work without it.
+- `npm run probe:ubuntu-bridge` proves the D-Bus contract against a mock service on a
+  private bus. `npm run test:ubuntu-bridge-live` goes further: it starts a private-bus
+  headless GNOME Shell, loads the installed extension, opens a real Mutter ScreenCast and
+  captures its PipeWire stream. It proves the window is present in the capture in
+  `mode=keep`, absent while hidden, and back afterwards (measured 2026-11-21: 67,200
+  magenta samples vs 0), plus the D-Bus contract and `SharingChanged`. Chrome/Zoom/OBS,
+  Alt-Tab/Dock, first-frame timing and a recorded OCR canary still need a real desktop and
+  stay untested in `docs/STEALTH-MATRIX.md`. Known gap: share handles that existed before
+  the extension was enabled are not listed.
 
 ### Smart-listen mic stream — PARKED (2026-08-24, Linux)
 

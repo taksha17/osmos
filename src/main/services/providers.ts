@@ -19,7 +19,7 @@ export type ProviderStreamChunk =
   | { kind: 'content'; text: string };
 
 function isOpenAICompatible(provider: ProviderConfig): boolean {
-  return ['openai', 'groq', 'openrouter', 'litellm'].includes(provider.id);
+  return ['openai', 'groq', 'openrouter', 'nvidia', 'litellm'].includes(provider.id);
 }
 
 async function chatOpenAICompatible(provider: ProviderConfig, system: string, messages: Array<{ role: string; content: string }>, signal?: AbortSignal, images: readonly ResolvedImage[] = []): Promise<{ text: string }> {

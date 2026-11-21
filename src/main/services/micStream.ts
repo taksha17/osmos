@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { listAudioDevices, resolveLinuxMicSource } from './audioDevices.js';
-import { resolveFfmpeg, safeSpawnCwd } from './resolveBin.js';
+import { describeFfmpegProblem, resetFfmpegCache, resolveFfmpeg, safeSpawnCwd } from './resolveBin.js';
 import { listAvAudioInputs, listDshowAudioInputs } from '../platform/index.js';
 
 const LOG_PATH = (() => {
@@ -139,8 +139,16 @@ export class MicStream extends EventEmitter {
     this.chunkMs = Math.max(2000, Math.min(15_000, req.chunkMs || 6000));
     this.bytesWanted = Math.floor((SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE * this.chunkMs) / 1000);
 
+    // A start is an explicit retry: re-probe after a previous failure so an
+    // ffmpeg installed (or unblocked) since app launch is picked up.
+    resetFfmpegCache();
     const ffmpeg = resolveFfmpeg();
-    if (!ffmpeg) return { ok: false, error: 'ffmpeg is required for continuous mic capture.' };
+    if (!ffmpeg) {
+      return {
+        ok: false,
+        error: describeFfmpegProblem() || 'ffmpeg is required for continuous mic capture.',
+      };
+    }
 
     const resolved = await this.resolveBackend(req.device || undefined);
     if (!resolved.ok) return resolved;

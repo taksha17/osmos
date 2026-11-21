@@ -65,6 +65,73 @@ export function fusedAssistPrompt(opts: {
   return parts.join('\n');
 }
 
+/**
+ * Manual overlay actions (Follow-up questions, Recap) need the same live
+ * transcript the Assist path uses. Keep the action wording intact and attach
+ * the recent transcript as data; empty transcripts leave the prompt unchanged.
+ */
+export function transcriptAssistPrompt(opts: {
+  instruction: string;
+  transcript?: string;
+  activeMode: CopilotMode;
+}): string {
+  const instruction = opts.instruction.trim();
+  const transcript = (opts.transcript || '').trim().slice(-4000);
+  if (!transcript) return instruction;
+  const ctx =
+    opts.activeMode === 'interview'
+      ? 'interview'
+      : opts.activeMode === 'meeting'
+        ? 'meeting'
+        : 'session';
+  return [
+    instruction,
+    '',
+    `Recent live ${ctx} transcript (oldest to newest):`,
+    '---',
+    transcript,
+    '---',
+  ].join('\n');
+}
+
+/**
+ * Manual Assist / What-should-I-say prompt.
+ *
+ * The transcript pane can hold several old questions, and handing all of them
+ * to the model makes it re-answer the oldest one forever. The newest utterance
+ * is the one to answer; earlier lines are context only.
+ */
+export function latestUtterancePrompt(opts: {
+  latest: string;
+  earlier?: string;
+  activeMode: CopilotMode;
+}): string {
+  const latest = opts.latest.trim();
+  const earlier = (opts.earlier || '').trim().slice(-3000);
+  if (!latest) return '';
+  const ctx =
+    opts.activeMode === 'interview'
+      ? 'interview'
+      : opts.activeMode === 'meeting'
+        ? 'meeting'
+        : 'session';
+  const parts = [
+    `Live ${ctx} assist. Answer the newest utterance only. Be concise and speakable.`,
+    '',
+    `Newest utterance:\n"${latest}"`,
+  ];
+  if (earlier) {
+    parts.push(
+      '',
+      'Earlier context (do not answer these again unless the newest utterance refers to them):',
+      '---',
+      earlier,
+      '---',
+    );
+  }
+  return parts.join('\n');
+}
+
 /** Simple stable fingerprint so unchanged screen text does not re-trigger assist. */
 export function screenTextFingerprint(text: string): string {
   const normalized = text.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 1200);

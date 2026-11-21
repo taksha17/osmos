@@ -20,8 +20,8 @@ const NAV: Array<{ id: ProfileSection; label: string; icon: string }> = [
   { id: 'identity', label: 'Resume & JD', icon: '◎' },
   { id: 'profile', label: 'Profile', icon: '◉' },
   { id: 'company', label: 'Company Intel', icon: '▣' },
-  { id: 'documents', label: 'Role Insight', icon: '▤' },
-  { id: 'questions', label: 'Cover Letter', icon: '✎' },
+  { id: 'documents', label: 'Documents', icon: '▤' },
+  { id: 'questions', label: 'Questions & STAR', icon: '✎' },
 ];
 
 function readInitialSection(): ProfileSection {
@@ -361,7 +361,8 @@ export function ProfilePanel({ settings, onChange, onSave, status, onClose }: Pr
             </div>
 
             <p className="hub-footnote meta">
-              ℹ Used only in Looking for work and Technical Interview modes. Other modes never receive them.
+              ℹ Sent to your selected model as grounding for answers. Never included in web-search
+              queries or sent anywhere else.
             </p>
           </div>
         ) : null}
@@ -484,7 +485,7 @@ export function ProfilePanel({ settings, onChange, onSave, status, onClose }: Pr
                         updateAgent({ preferredProvider: e.target.value as LlmProvider })
                       }
                     >
-                      {(['ollama', 'openai', 'anthropic', 'groq', 'openrouter', 'litellm'] as LlmProvider[]).map((p) => (
+                      {(['ollama', 'openai', 'anthropic', 'groq', 'openrouter', 'nvidia', 'litellm'] as LlmProvider[]).map((p) => (
                         <option key={p} value={p}>
                           {settings.providers?.[p]?.label || p}
                         </option>
@@ -616,7 +617,7 @@ export function ProfilePanel({ settings, onChange, onSave, status, onClose }: Pr
 
         {section === 'documents' ? (
           <div className="hub-identity">
-            <h2>Role Insight</h2>
+            <h2>Documents</h2>
             <p className="hub-block__desc">Attach reference docs for retrieval during interviews.</p>
             <DocumentsTab settings={settings} onSettingsChange={applySettings} embedded />
           </div>
@@ -624,7 +625,7 @@ export function ProfilePanel({ settings, onChange, onSave, status, onClose }: Pr
 
         {section === 'questions' ? (
           <div className="hub-identity">
-            <h2>Cover Letter / STAR</h2>
+            <h2>Questions & STAR</h2>
             <p className="hub-block__desc">Question bank and STAR stories for speakable answers.</p>
             <QuestionBankTab settings={settings} embedded onSettingsChange={applySettings} />
           </div>

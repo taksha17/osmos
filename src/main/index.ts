@@ -13,6 +13,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createPlatformAdapter, verifyStealth, type StealthStatus } from './platform/index.js';
+import { getGnomeBridge, type GnomeBridge } from './platform/linux/gnomeBridge.js';
+import { isBridgeMode, type UbuntuBridgeState } from '../shared/policy/ubuntuBridge.js';
 import {
   applyNonActivating,
   clickThroughWindowState,
@@ -26,7 +28,8 @@ import { canLoopSafeScreenCapture } from './services/screenCapture.js';
 import { getSettings, updateSettings } from './services/settingsStore.js';
 import { chatOllama, listOllamaModels, streamChatOllama } from './services/ollama.js';
 import { formatHitsForPrompt, searchSearxng } from './services/searxng.js';
-import { searchWeb, testWebSearch, webSearchEnabled } from './services/webSearch.js';
+import { searchWebWithin, testWebSearch, webSearchEnabled } from './services/webSearch.js';
+import { configureWebProviders, probeWebProviders } from './services/webAccess.js';
 import { stopLocalWhisperWorker, transcribeLocalWhisper } from './services/localWhisper.js';
 import { transcribeWithWhisper } from './services/whisper.js';
 import { extractTextFromImage } from './services/ocr.js';
@@ -41,6 +44,7 @@ import {
 import { warmupProvider, getLastWarmup, probeLumenGateway } from './services/providerWarmup.js';
 import { routeTierLabel } from '../shared/lumenRoute.js';
 import { routeDecisionFor } from '../shared/policy/answerContext.js';
+import { decideWebSearch } from '../shared/policy/webNeed.js';
 import { classifySnapshot } from '../shared/policy/screenSnapshot.js';
 import { freshScreenImage } from '../shared/policy/screenImage.js';
 import { providerAcceptsVision } from './providers/llm/vision.js';
@@ -50,7 +54,6 @@ import { memoryHits, rememberSession, startMemory } from './services/memory.js';
 import { answerContextForChat } from './services/answerContext.js';
 import { startBundledLlm, stopBundledLlm } from './services/bundledLlm.js';
 import { loadHistory, saveHistory, upsertSession, deleteSession, clearAllHistory } from './services/history.js';
-import { exportSessionReport } from './services/sessionExport.js';
 import { checkForUpdates } from './services/updates.js';
 import { retrieveChunks } from './services/retrieval.js';
 import { extractTextFromUpload } from './services/documentExtract.js';
@@ -142,6 +145,9 @@ const appIcon = resolveAppIcon();
  // mismatch (`xsettings` / `antialiasing`) — see scripts/start-release.mjs.
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('no-sandbox');
+  // Deterministic X11 WM_CLASS / Wayland app id so the GNOME stealth bridge
+  // can recognise OSMOS windows (docs/UBUNTU-STEALTH-BRIDGE.md §6.1).
+  app.commandLine.appendSwitch('class', 'osmos');
   if (app.isPackaged) {
     app.commandLine.appendSwitch('ozone-platform', 'x11');
   } else {
@@ -167,6 +173,7 @@ async function buildChatContext(
   const { provider: effective, model: effectiveModel } = effectiveProvider(agent, s);
   const provider = s.providers?.[effective] || s.providers?.ollama;
   const providerModel = effectiveModel || provider?.model;
+  const visionModel = String(provider?.visionModel ?? '').trim();
 
   // Profile-harnessed routing: if this question was anticipated in the user's
   // bank, the local lane may answer it from their own material. Matching runs in
@@ -182,6 +189,7 @@ async function buildChatContext(
   const visionAvailable = providerAcceptsVision({
     id: effective,
     model: providerModel || provider?.model,
+    ...(visionModel ? { visionModel } : {}),
   });
   // §12: a code snapshot means the user is mid-problem, so the last few snapshots
   // travel with the request, clipped to a share of the screen budget. `coding` is not
@@ -207,35 +215,54 @@ async function buildChatContext(
   // they came from, so no image ever has to cross the preload boundary.
   const screenImage = context.attachImage ? freshScreenImage(lastScreenGrab(), screen?.at) : null;
   const images = screenImage ? [screenImage] : [];
+  // A configured vision model handles image turns; text turns stay on the main
+  // model. This keeps a fast text model paired with a stronger OCR/VLM lane.
+  const requestModel =
+    images.length > 0 && visionModel ? visionModel : providerModel || provider?.model || '';
 
-  // Interview answers should ground in the saved profile — not random web hits.
-  // Web search still runs for meeting/general, or when the user clearly asks for research.
-  const wantsResearch = /\b(search|news|latest|today|company|salary|stock|who is|what is)\b/i.test(
-    message,
-  );
-  const allowWeb =
-    webSearchEnabled(s) &&
-    (s.activeMode !== 'interview' || wantsResearch);
+  // Web grounding is a policy decision, not a keyword guess: an interview answer
+  // searches only when the question depends on something that changes (versions,
+  // releases, prices, people, news); personal answers stay on the résumé.
+  // Meeting/general keep the always-on behaviour. See `shared/policy/webNeed.ts`.
+  const webDecision = decideWebSearch({
+    question: message,
+    mode: s.activeMode,
+    providerEnabled: webSearchEnabled(s),
+    ...(screen?.text ? { screenText: screen.text } : {}),
+  });
 
   let webBlock = '';
+  let webNote = '';
   let searchHits = 0;
   let usedWebSearch = false;
-  if (allowWeb) {
+  if (webDecision.search) {
     try {
-      const hits = await searchWeb(s, message);
+      // Bounded: a live answer cannot wait on a slow provider. A timeout is an
+      // empty result, so the prompt below still tells the model to flag staleness.
+      const hits = await searchWebWithin(s, webDecision.query, 6_000);
       searchHits = hits.length;
       usedWebSearch = hits.length > 0;
-      const today = new Intl.DateTimeFormat('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        timeZoneName: 'short',
-      }).format(new Date());
-      webBlock = formatHitsForPrompt(hits, today);
+      if (hits.length > 0) {
+        const today = new Intl.DateTimeFormat('en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          timeZoneName: 'short',
+        }).format(new Date());
+        webBlock = formatHitsForPrompt(hits, today);
+      } else {
+        webNote =
+          '# Live web research\nA web lookup was attempted for this question but returned no usable results. Do not present remembered facts as current: if the answer depends on recent information, say your knowledge may be out of date.';
+      }
     } catch (e) {
       console.warn('[chat] web search skipped:', e);
+      webNote =
+        '# Live web research\nA web lookup was attempted but failed. Do not present remembered facts as current: if the answer depends on recent information, say your knowledge may be out of date.';
     }
+  } else if (webDecision.freshness !== 'stable') {
+    webNote =
+      '# Live web research\nThis question asks about something that changes over time, but no live results are available. State that your knowledge may be out of date rather than presenting old facts as current.';
   }
 
   const clip = (text: string, max: number) => {
@@ -380,10 +407,23 @@ async function buildChatContext(
     ].join('\n');
   }
 
+  const now = new Date();
+  const currentTime = new Intl.DateTimeFormat('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  }).format(now);
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const system = [
     `You are ${APP_NAME}, an open-source desktop AI copilot.`,
+    `Current date and time: ${currentTime} (${timeZone}). Use this for questions about today, the date, or the time.`,
     'Be accurate, concise, and honest about uncertainty.',
-    'If live web research is provided, prefer it for current events and public facts.',
+    'Your training data has a cutoff. Live web research, when provided below, is newer than your memory: prefer it for anything that changes (releases, versions, prices, benchmarks, people, companies, policies).',
+    'Do not claim to have searched, browsed, or verified anything that is not in the live research block. If a current fact is needed and none is provided, say your information may be out of date.',
     'Never invent personal résumé facts about the user.',
     'Answer the user question directly. Prefer short, speakable answers.',
     'Use attached reference documents when relevant; cite document names if possible.',
@@ -399,7 +439,7 @@ async function buildChatContext(
     bankBlock,
     docBlock,
     screenBlock,
-    webBlock ? `\n\n# Live web research\n${webBlock}` : '',
+    webBlock ? `\n\n# Live web research\n${webBlock}` : webNote ? `\n\n${webNote}` : '',
   ].join('\n');
 
   return {
@@ -412,10 +452,10 @@ async function buildChatContext(
     images,
     provider: {
       ...provider,
-      model: providerModel || provider?.model || '',
+      model: requestModel,
     } as ProviderConfig,
     agent,
-    model: providerModel || '',
+    model: requestModel,
   };
 }
 
@@ -437,6 +477,9 @@ function createLauncher() {
     title: APP_NAME,
     icon: appIcon,
     backgroundColor: '#050508',
+    // No native File/Edit menu on Windows/Linux — the launcher is its own app
+    // shell and the menu only duplicated Electron defaults. Alt still reveals.
+    autoHideMenuBar: process.platform !== 'darwin',
     webPreferences: {
       preload: preloadPath(),
       contextIsolation: true,
@@ -493,6 +536,15 @@ function createOverlay() {
   // some Windows builds drop WDA_EXCLUDEFROMCAPTURE across hide/show.
   overlay.on('show', () => {
     platform.applyStealth(getSettings().stealthEnabled, [overlay!]);
+    // The renderer fades itself after the idle delay; a hotkey re-show must
+    // clear that fade, otherwise the overlay comes back at 42% opacity until
+    // the pointer happens to move over it.
+    try {
+      overlay?.webContents.send('overlay', { type: 'active' });
+    } catch {
+      /* window closing */
+    }
+    scheduleOverlayHide();
   });
   overlay.on('focus', () => {
     if (getSettings().stealthEnabled) platform.applyStealth(true, [overlay!]);
@@ -561,9 +613,68 @@ function allWindows(): BrowserWindow[] {
   return [launcher, overlay].filter((w): w is BrowserWindow => Boolean(w && !w.isDestroyed()));
 }
 
+let ubuntuBridge: GnomeBridge | null = null;
+
+/**
+ * The packed `linux/` assets (GNOME extension + install scripts). In dev they
+ * sit in the repo; a packaged build copies them to `resources/linux`.
+ */
+function linuxAssetsDir(): string | null {
+  const root = app.isPackaged ? process.resourcesPath : projectRoot();
+  const candidate = path.join(root, 'linux');
+  return fs.existsSync(path.join(candidate, 'scripts', 'install-bridge.sh')) ? candidate : null;
+}
+
+/**
+ * Start the GNOME bridge client (docs/UBUNTU-STEALTH-BRIDGE.md §6).
+ *
+ * Registered on every platform so Settings can report "not available"
+ * honestly; on Linux/GNOME it also runs the installer and reads live state
+ * from `org.osmos.Bridge` on the session bus.
+ */
+function startUbuntuBridge(): void {
+  const bridge = getGnomeBridge(linuxAssetsDir());
+  ubuntuBridge = bridge;
+
+  bridge.on('state', (state: UbuntuBridgeState) => {
+    for (const win of allWindows()) {
+      try {
+        win.webContents.send('ubuntu:bridge', state);
+      } catch {
+        /* window closing */
+      }
+    }
+    // While the extension has the actor hidden the renderer keeps running and
+    // may have faded itself; clear that fade for when the share ends.
+    if (!state.sharing && overlay && !overlay.isDestroyed()) {
+      try {
+        overlay.webContents.send('overlay', { type: 'active' });
+      } catch {
+        /* window closing */
+      }
+    }
+  });
+
+  ipcMain.handle('ubuntu:bridge-status', async () => bridge.refresh());
+  ipcMain.handle('ubuntu:bridge-install', async () => bridge.install());
+  ipcMain.handle('ubuntu:bridge-uninstall', async () => bridge.uninstall());
+  ipcMain.handle('ubuntu:bridge-set-mode', async (_e, mode: unknown) => {
+    if (!isBridgeMode(mode)) return { ok: false, error: 'Unknown bridge mode' };
+    return bridge.setMode(mode);
+  });
+  ipcMain.handle('ubuntu:bridge-open-prefs', async () => bridge.openPrefs());
+
+  bridge.start();
+}
+
 let shortcutsRegistered = false;
 
 function registerIpc() {
+  try {
+    configureWebProviders(getSettings());
+  } catch (e) {
+    console.warn('[webAccess] configure failed:', e);
+  }
   ipcMain.handle('app:log', (_e, level: 'log' | 'info' | 'warn' | 'error', ...args: any[]) => {
     const prefix = `[Renderer:${level.toUpperCase()}]`;
     if (level === 'error') {
@@ -584,11 +695,19 @@ function registerIpc() {
     capabilityNotes: platform.capabilityNotes(),
     features: FEATURES,
     shortcutsRegistered,
+    // Test aid (§6.4): a high-contrast string the capture-verification script
+    // OCRs for. Dev-only; never on in a normal run.
+    canary: process.env.OSMOS_CANARY === '1',
   }));
 
   ipcMain.handle('settings:get', () => getSettings());
   ipcMain.handle('settings:update', (_e, patch: Record<string, unknown>) => {
     const next = updateSettings(patch as Partial<ReturnType<typeof getSettings>>);
+    try {
+      configureWebProviders(next);
+    } catch (e) {
+      console.warn('[webAccess] reconfigure failed:', e);
+    }
     platform.applyStealth(next.stealthEnabled, allWindows());
     if (overlay && !overlay.isDestroyed()) {
       try {
@@ -668,6 +787,41 @@ function registerIpc() {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
   });
+
+  ipcMain.handle(
+    'webaccess:test',
+    async (
+      _e,
+      override?: Partial<{ enabled: boolean; tier: string; baseUrl: string; apiKeyRef: string }>,
+    ) => {
+      try {
+        const base = getSettings();
+        const merged = {
+          ...base,
+          webAccess: { ...(base.webAccess as object | undefined), ...(override as object | undefined) },
+        } as typeof base;
+        configureWebProviders(merged);
+        const entries = await probeWebProviders();
+        const providers = entries.map((en) => ({
+          id: en.provider.id,
+          ok: en.health?.ok ?? false,
+          latencyMs: en.health?.latencyMs ?? 0,
+          detail: en.health?.detail,
+        }));
+        const firing = providers.filter((p) => p.ok);
+        return {
+          ok: firing.length > 0,
+          detail:
+            firing.length > 0
+              ? `${firing.map((p) => `${p.id} ok ${p.latencyMs}ms`).join(' · ')}`
+              : (providers[0]?.detail || 'no web provider answered'),
+          providers,
+        };
+      } catch (e) {
+        return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+      }
+    },
+  );
 
   ipcMain.handle(
     'websearch:test',
@@ -1072,7 +1226,9 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
       });
 
     const decision = routeDecisionFor(context.plan);
-    const plan = await planHybridLanes(s, decision, provider);
+    const plan = await planHybridLanes(s, decision, provider, {
+      forceQuality: images.length > 0,
+    });
     const lane = directProvider(plan);
     const messages = [
       ...(req.history || []).slice(-12),
@@ -1139,7 +1295,9 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
         });
 
       const decision = routeDecisionFor(context.plan);
-      const plan = await planHybridLanes(s, decision, provider);
+      const plan = await planHybridLanes(s, decision, provider, {
+        forceQuality: images.length > 0,
+      });
       // Fire-and-forget quality warmup while we may stream a fast draft.
       void warmupProvider(provider);
 
@@ -1341,17 +1499,6 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
     }
   });
 
-  // Phase 5 exit row: a session report can leave the app as markdown, offline.
-  ipcMain.handle(
-    'history:export-report',
-    async (event, id: string): Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string; summary?: string }> => {
-      const session = loadHistory().find((s) => s.id === id);
-      if (!session) return { ok: false, error: 'session not found' };
-      const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-      return exportSessionReport(session, win);
-    },
-  );
-
   ipcMain.handle('question:list', async (): Promise<QuestionBankResponse> => {
     try {
       const items = loadQuestionBank();
@@ -1530,9 +1677,34 @@ app.whenReady().then(() => {
       }
     });
     if (!ov) return { ok: false, supported: false, detail: 'overlay not ready', checkedAt: Date.now() };
+    if (process.platform === 'linux') {
+      // See docs/UBUNTU-STEALTH-BRIDGE.md: GNOME has no per-window capture
+      // exclusion, so the strongest honest claim is "the compositor hides it".
+      const bridge = ubuntuBridge?.getState();
+      if (bridge?.installed && bridge.mode === 'hide') {
+        return {
+          ok: true,
+          supported: true,
+          mechanism: 'gnome-bridge',
+          detail: bridge.sharing
+            ? 'GNOME bridge: OSMOS windows are hidden for this share'
+            : 'GNOME bridge: OSMOS windows hide while a share or recording is active',
+          checkedAt: Date.now(),
+        };
+      }
+      return {
+        ok: false,
+        supported: false,
+        detail: bridge?.supported
+          ? 'GNOME bridge not installed — the overlay stays visible in a full-screen share. Install it in Settings → Low-profile.'
+          : 'Linux has no per-window capture exclusion; share a tab/window.',
+        checkedAt: Date.now(),
+      };
+    }
     return verifyStealth(ov, enabled);
   });
 
+  startUbuntuBridge();
   registerIpc();
   createLauncher();
   createOverlay();
@@ -1569,6 +1741,7 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  ubuntuBridge?.stop();
   void stopCaptureWorkers().catch(() => undefined);
   void getLinuxLoopbackStream().stop().catch(() => undefined);
   void getMicStream().stop().catch(() => undefined);

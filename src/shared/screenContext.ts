@@ -79,12 +79,16 @@ export function cleanOcrText(raw: string): string {
  * Remove OCR lines that echo text OSMOS is currently displaying (answers,
  * transcript, composer, button labels). Matching is tolerant of OCR errors:
  * a line is treated as echo when it matches exactly after normalisation, is a
- * substring of our own text, or shares ≥80% of its words (≥4 words) with it.
+ * substring of our own text, shares ≥80% of its words (≥4 words) with it, or
+ * contains a long (28-character) compact shingle of our own text. The shingle
+ * check catches lines whose OCR run-together/garbled words defeat token matching.
  */
 export function stripOverlayEcho(ocrText: string, ownTexts: readonly string[]): string {
   const ownLines = new Set<string>();
   const ownTokens = new Set<string>();
   const uiTokens = new Set<string>();
+  const ownShingles = new Set<string>();
+  const SHINGLE = 28;
   const blobParts: string[] = [];
   for (const t of OVERLAY_UI_STRINGS) {
     const n = normalizeLine(t);
@@ -97,6 +101,13 @@ export function stripOverlayEcho(ocrText: string, ownTexts: readonly string[]): 
       ownLines.add(n);
       blobParts.push(n);
       for (const tok of tokens(n)) ownTokens.add(tok);
+      // OCR mangles spacing and a few characters, but a line copied from our
+      // own answer still shares a long contiguous character run. Token overlap
+      // alone misses those lines and feeds the model its previous answer back.
+      const compact = n.replace(/\s+/g, '');
+      for (let i = 0; i + SHINGLE <= compact.length; i += 1) {
+        ownShingles.add(compact.slice(i, i + SHINGLE));
+      }
     }
   }
   if (ownLines.size === 0) return ocrText;
@@ -122,6 +133,17 @@ export function stripOverlayEcho(ocrText: string, ownTexts: readonly string[]): 
       const need = toks.length >= 6 ? 0.7 : 0.8;
       if (hit / toks.length >= need) continue;
     }
+    const compactLine = n.replace(/\s+/g, '');
+    if (compactLine.length >= SHINGLE) {
+      let echoed = false;
+      for (let i = 0; i + SHINGLE <= compactLine.length; i += 1) {
+        if (ownShingles.has(compactLine.slice(i, i + SHINGLE))) {
+          echoed = true;
+          break;
+        }
+      }
+      if (echoed) continue;
+    }
     kept.push(line.trim());
   }
   return kept.join('\n').trim();
@@ -130,6 +152,19 @@ export function stripOverlayEcho(ocrText: string, ownTexts: readonly string[]): 
 /** Clean + de-echo in one call. */
 export function prepareScreenContext(rawOcr: string, ownTexts: readonly string[]): string {
   return stripOverlayEcho(cleanOcrText(rawOcr), ownTexts);
+}
+
+/**
+ * A typed question that explicitly asks about the visible screen. Such a
+ * question should trigger a fresh grab even when the user has not pressed
+ * 📷/👁 yet; otherwise the model can only say it cannot see the screen.
+ */
+export function asksAboutScreen(text: string): boolean {
+  const t = (text || '').trim();
+  if (!t) return false;
+  return /\b(?:on|my|the|this|their|interviewer['’]?s?|current|shared)\s+screen\b|\bscreenshot\b|\bread\s+(?:the|this|my)\s+screen\b/i.test(
+    t,
+  );
 }
 
 /** Cap on screen text sent with a chat request. */

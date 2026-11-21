@@ -338,13 +338,15 @@ CI runs these against a **mock Firecrawl-compatible server** (deterministic); a 
 
 ## 13. Migration plan (extends v2 phases)
 
-> **W0 status:** implemented — `src/shared/contracts/web.ts` (contract),
-> `src/shared/policy/webAccess.ts` (pure capability routing, tested),
-> `src/main/providers/web/builtin.ts` (T0 adapter over the existing
-> DuckDuckGo/SearXNG/Tavily services) and the `WebAccessManager` registry in
-> `src/main/services/webAccess.ts` (health + provenance status). The chat path
-> still calls `searchWeb()`, so behaviour is unchanged; the context-engine
-> wiring, Firecrawl adapter and URL Guard are W1.
+> **W1/W2 status (2026-11-20):** code-complete, mock-verified — `src/main/providers/web/firecrawl.ts`
+> (scrape/map/crawl/extract/health vs mock), `src/main/services/urlGuard.ts` +
+> `src/shared/webGuard.ts` (shape + DNS pinning + redirect re-check), WAM
+> `configureWebProviders()` + `webScrapeVia()`/`webMapVia()` (sanitized + TTL
+> cache) + `webaccess:test` IPC wired to Settings → Web access → Test, and
+> `src/shared/webSanitize.ts` + `pagesToUntrustedBlock()` (W2). The chat path
+> still calls `searchWeb()`, so behaviour is unchanged; the single coordinated
+> WAM swap stays for W3. Real-binary check (Firecrawl Local + Docker stack on
+> the Windows box) is still pending before flipping `features.ts` to live.
 
 | Phase | Work | Exit criteria |
 |---|---|---|

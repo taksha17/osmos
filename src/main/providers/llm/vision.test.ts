@@ -101,3 +101,22 @@ test('vision capability follows the model, not just the provider', () => {
   assert.equal(providerAcceptsVision({ id: 'groq', model: 'llama-3.2-vision' }), true);
   assert.equal(providerAcceptsVision({ id: 'searxng', model: 'gpt-4o' }), false);
 });
+
+test('NVIDIA uses an explicit vision model when configured', () => {
+  assert.equal(
+    providerAcceptsVision({ id: 'nvidia', model: 'nvidia/nemotron-3.5-bolt-e4b' }),
+    false,
+  );
+  assert.equal(
+    providerAcceptsVision({
+      id: 'nvidia',
+      model: 'nvidia/nemotron-3.5-bolt-e4b',
+      visionModel: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
+    }),
+    true,
+  );
+  assert.equal(
+    providerAcceptsVision({ id: 'nvidia', model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning' }),
+    true,
+  );
+});

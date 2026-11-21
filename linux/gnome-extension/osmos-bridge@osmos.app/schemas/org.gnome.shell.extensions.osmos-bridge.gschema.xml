@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.osmos-bridge"
+          path="/org/gnome/shell/extensions/osmos-bridge/">
+    <key name="mode" type="s">
+      <default>'hide'</default>
+      <summary>Behaviour when a share starts</summary>
+      <description>hide = hide the overlay while sharing; keep = never hide (use for the negative-control test); off = do nothing.</description>
+    </key>
+    <key name="app-ids" type="as">
+      <default>['osmos', 'Osmos', 'OSMOS']</default>
+      <summary>Window identifiers to manage</summary>
+      <description>Matched (case-insensitively) against the window's GTK application id, sandboxed app id, WM_CLASS and WM_CLASS instance.</description>
+    </key>
+    <key name="keep-above" type="b">
+      <default>true</default>
+      <summary>Pin the overlay on top and on all workspaces</summary>
+      <description>Wayland clients cannot raise or stick their own windows; the Shell extension does it for them.</description>
+    </key>
+  </schema>
+</schemalist>

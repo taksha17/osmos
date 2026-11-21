@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AppSettings } from '@shared/types';
-import { activeSavedProfile, profileSummary } from '@shared/profiles';
+import { activeSavedProfile } from '@shared/profiles';
 import { resolveAgent } from '@shared/agents';
 import { DEFAULT_SAVED_PROFILE } from '@shared/types';
 import startOsmosIcon from '@resources/Start_Osmos_64.png';
@@ -109,9 +109,8 @@ export function HomeDashboard({
       ? [{ ...DEFAULT_SAVED_PROFILE, ...settings.profile, id: 'default', label: 'Default' }]
       : [];
   const activeProfile = activeSavedProfile(profiles, settings?.activeProfileId);
-  const summary = profileSummary(activeProfile);
   const undetectable = Boolean(settings?.stealthEnabled);
-  const version = info?.version || '0.5.1';
+  const version = info?.version || '';
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -154,7 +153,7 @@ export function HomeDashboard({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search or ask anything..."
+            placeholder="Search sessions…"
             aria-label="Search sessions"
           />
         </label>
@@ -251,7 +250,7 @@ export function HomeDashboard({
               className="home-whatsnew"
               onClick={() => window.osmos.openExternal('https://github.com/taksha17/osmos/releases')}
             >
-              What&apos;s New in {version.split('.').slice(0, 2).join('.')} ↗
+              {version ? `What's new in ${version.split('.').slice(0, 2).join('.')}` : 'What\u2019s new'} ↗
             </button>
           </div>
         </div>
@@ -287,33 +286,24 @@ export function HomeDashboard({
 
         <article className="home-promo home-promo--prep">
           <div className="home-promo__copy">
-            <h2>Link your calendar to see upcoming events</h2>
+            <h2>
+              {activeProfile.companyName?.trim()
+                ? `Prepared for ${activeProfile.companyName.trim()}`
+                : 'Prep with your resume, JD & company intel'}
+            </h2>
+            <p>
+              {activeProfile.label?.trim()
+                ? `${activeProfile.label.trim()} · ${activeProfile.resumeText?.trim() ? 'résumé attached' : 'no résumé yet'}${activeProfile.jdText?.trim() ? ' · JD attached' : ''}`
+                : 'Ground every answer in the role you are interviewing for.'}
+            </p>
           </div>
           <button
             type="button"
             className="home-promo__cta home-promo__cta--ghost"
             onClick={onOpenProfile}
           >
-            <span className="home-promo__g" aria-hidden>
-              G
-            </span>
-            Connect calendar →
+            Open interview prep →
           </button>
-          <div className="home-promo__event" aria-hidden>
-            <div className="home-promo__event-card">
-              <strong>
-                {activeProfile.companyName || summary.hasJd
-                  ? activeProfile.companyName || 'Interview prep'
-                  : 'Q2 Product Roadmap Review'}
-              </strong>
-              <div className="home-promo__event-meta">
-                <span>4:30 PM</span>
-                <span className="home-promo__avatars">
-                  <i /><i />
-                </span>
-              </div>
-            </div>
-          </div>
         </article>
       </div>
 
@@ -333,7 +323,15 @@ export function HomeDashboard({
                     <button
                       type="button"
                       className="home-session-row"
-                      onClick={() => onSwitchTab('history')}
+                      title={sessionTitle(s)}
+                      onClick={() => {
+                        try {
+                          sessionStorage.setItem('osmos-history-focus', s.id);
+                        } catch {
+                          /* ignore */
+                        }
+                        onSwitchTab('history');
+                      }}
                     >
                       <span className="home-session-row__title">{sessionTitle(s)}</span>
                       <span className="home-session-row__meta">

@@ -2,6 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FeatureDef } from '@shared/features';
 import type { AppSettings, AudioDeviceInfo, UpdateStatus, WebSearchProvider } from '@shared/types';
 import { describeAudioCaptureProfile, getAudioCaptureProfile } from '@shared/audioCaptureProfile';
+import {
+  bridgeSummary,
+  type UbuntuBridgeMode,
+  type UbuntuBridgeState,
+} from '@shared/policy/ubuntuBridge';
+import WebAccessSettings from './WebAccessSettings';
 
 type Info = {
   name: string;
@@ -36,8 +42,8 @@ type Section =
 const SECTIONS: Array<{ id: Section; label: string; icon: string }> = [
   { id: 'general', label: 'General', icon: '☰' },
   { id: 'ai', label: 'AI Providers', icon: '✦' },
-  { id: 'web', label: 'Intelligence', icon: '◈' },
-  { id: 'speech', label: 'Audio', icon: '♫' },
+  { id: 'web', label: 'Web Access', icon: '◈' },
+  { id: 'speech', label: 'Audio & Speech', icon: '♫' },
   { id: 'stealth', label: 'Low-profile', icon: '◌' },
   { id: 'keybinds', label: 'Keybinds', icon: '⌨' },
   { id: 'updates', label: 'Setup & Help', icon: '?' },
@@ -199,7 +205,7 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
     }
   };
 
-  const patchProvider = (field: 'apiKey' | 'baseUrl' | 'model', value: string) => {
+  const patchProvider = (field: 'apiKey' | 'baseUrl' | 'model' | 'visionModel', value: string) => {
     const id = settings.activeProvider;
     onChange({
       ...settings,
@@ -432,29 +438,39 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
               <h3>Keybinds</h3>
               <p className="meta">
                 {info?.shortcutsRegistered === false
-                  ? 'Global hotkeys often fail on Wayland — use in-app controls.'
-                  : 'Registered global shortcuts for this session.'}
+                  ? 'Global hotkeys often fail on Wayland — use the in-app controls instead.'
+                  : 'Global shortcuts registered for this session, plus the in-app keys that always work.'}
               </p>
             </header>
             <div className="settings-rows">
-              <div className="settings-row">
-                <div className="settings-row__copy">
-                  <strong>Toggle overlay</strong>
-                  <p>Alt+Shift+Space (Linux) / Cmd+Shift+Space (macOS)</p>
-                </div>
-              </div>
-              <div className="settings-row">
-                <div className="settings-row__copy">
-                  <strong>Assist</strong>
-                  <p>Ctrl/Cmd+Enter in overlay · Alt+Shift+A</p>
-                </div>
-              </div>
-              <div className="settings-row">
-                <div className="settings-row__copy">
-                  <strong>Screen OCR</strong>
-                  <p>Alt+Shift+C</p>
-                </div>
-              </div>
+              {(() => {
+                // Matches `registerShortcuts()` in main: the global modifier is
+                // CommandOrControl on macOS and Alt on Windows/Linux.
+                const isMac = /darwin|mac/i.test(info?.platform || '');
+                const globalMod = isMac ? 'Cmd' : 'Alt';
+                const rows: Array<{ label: string; keys: string; note: string }> = [
+                  {
+                    label: 'Toggle overlay',
+                    keys: `${globalMod}+Shift+Space`,
+                    note: 'Global — show or hide the floating overlay',
+                  },
+                  { label: 'Assist', keys: `${globalMod}+Shift+A`, note: 'Global — ask about what is being said' },
+                  { label: 'Capture screen', keys: `${globalMod}+Shift+C`, note: 'Global — read the screen once (OCR)' },
+                  { label: 'Assist on the composer text', keys: 'Ctrl/Cmd+Enter', note: 'Global and in the composer' },
+                  { label: 'Click-through', keys: `${globalMod}+Shift+X`, note: 'Global — let clicks pass through the overlay' },
+                  { label: 'Stop the answer', keys: 'Ctrl/Cmd+.', note: 'In the overlay and chat composer' },
+                  { label: 'Shortcuts panel', keys: '?', note: 'In the overlay (Esc closes)' },
+                ];
+                return rows.map((r) => (
+                  <div key={r.label} className="settings-row">
+                    <div className="settings-row__copy">
+                      <strong>{r.label}</strong>
+                      <p>{r.note}</p>
+                    </div>
+                    <kbd className="settings-kbd">{r.keys}</kbd>
+                  </div>
+                ));
+              })()}
             </div>
           </div>
         )}
@@ -462,7 +478,7 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
         {section === 'ai' && (
             <div className="settings-section">
               <header className="settings-section__head">
-                <h3>AI provider</h3>
+                <h3>AI providers</h3>
                 <p className="meta">
                   Local Ollama works offline with no API key. Cloud providers need a key but need no extra installs.
                 </p>
@@ -481,6 +497,7 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                   <option value="anthropic">Anthropic</option>
                   <option value="groq">Groq</option>
                   <option value="openrouter">OpenRouter</option>
+                  <option value="nvidia">NVIDIA NIM</option>
                   <option value="litellm">LiteLLM</option>
                 </select>
               </div>
@@ -577,6 +594,18 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                       value={settings.providers?.[settings.activeProvider]?.model || ''}
                       onChange={(e) => patchProvider('model', e.target.value)}
                     />
+                  </div>
+                  <div className="field">
+                    <label>Vision model (optional)</label>
+                    <input
+                      value={settings.providers?.[settings.activeProvider]?.visionModel || ''}
+                      onChange={(e) => patchProvider('visionModel', e.target.value)}
+                      placeholder="e.g. nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
+                    />
+                    <p className="meta">
+                      Used only when a screen image needs vision. Leave blank to use the model
+                      above for everything.
+                    </p>
                   </div>
                   <div className="row" style={{ marginBottom: 14 }}>
                     <button
@@ -760,8 +789,8 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
               <header className="settings-section__head">
                 <h3>Web access</h3>
                 <p className="meta">
-                  Ground answers with live search. DuckDuckGo works with no setup. Tavily is stronger with one API key.
-                  SearXNG is for self-hosters.
+                  Ground answers with live search, plus optional self-hosted page fetching. DuckDuckGo works with no
+                  setup. Tavily is stronger with one API key. SearXNG is for self-hosters.
                 </p>
               </header>
 
@@ -873,14 +902,41 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                   Test web search
                 </button>
               </div>
+
+              <WebAccessSettings
+                value={settings.webAccess}
+                onChange={(patch) =>
+                  set({ webAccess: { ...(settings.webAccess as object), ...patch } as typeof settings.webAccess })
+                }
+                onTest={async () => {
+                  const next = await save({ webAccess: settings.webAccess });
+                  if (!next) return { ok: false, detail: 'save failed' };
+                  const wa = (next.webAccess ?? settings.webAccess ?? {}) as {
+                    enabled?: boolean;
+                    tier?: string;
+                    baseUrl?: string;
+                    apiKeyRef?: string;
+                  };
+                  try {
+                    return await window.osmos.testWebAccess({
+                      enabled: wa.enabled,
+                      tier: wa.tier,
+                      baseUrl: wa.baseUrl,
+                      apiKeyRef: wa.apiKeyRef,
+                    });
+                  } catch (e) {
+                    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+                  }
+                }}
+              />
             </div>
           )}
 
           {section === 'speech' && (
             <div className="settings-section">
               <header className="settings-section__head">
-                <h3>Speech</h3>
-                <p className="meta">Local Whisper is the default — offline and reliable on Linux.</p>
+                <h3>Audio &amp; speech</h3>
+                <p className="meta">Local Whisper is the default — offline and private.</p>
               </header>
 
               <div className="field">
@@ -1179,16 +1235,18 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
           {section === 'stealth' && (
             <div className="settings-section">
               <header className="settings-section__head">
-                <h3>Stealth</h3>
+                <h3>Low-profile</h3>
                 <p className="meta">
                   Screen-share safer overlay: hide from taskbar
                   {info?.platform === 'linux'
-                    ? ', always-on-top. Linux has no OS capture-exclusion API — share a tab/window, not the full desktop.'
+                    ? ', always-on-top. GNOME/Wayland: install the optional Stealth Bridge so the overlay hides itself while a screen share or recording is active. Linux has no per-window capture exclusion — a tab/window share is still safest.'
                     : info?.platform === 'darwin'
                       ? ', and NSWindowSharingNone (setContentProtection). On newer macOS, prefer sharing one app/tab — full-desktop ScreenCaptureKit shares can still include overlays.'
                       : ', and SetWindowDisplayAffinity / WDA_EXCLUDEFROMCAPTURE (setContentProtection) so Zoom, Teams, Meet, Webex, and similar omit Osmos from the shared feed on Windows 10 2004+ / 11.'}
                 </p>
               </header>
+
+              {info?.platform === 'linux' ? <UbuntuBridgeCard /> : null}
 
               {info?.shortcutsRegistered === false ? (
                 <p className="meta" style={{ marginBottom: 14 }}>
@@ -1269,7 +1327,7 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
           {section === 'updates' && (
             <div className="settings-section">
               <header className="settings-section__head">
-                <h3>Updates</h3>
+                <h3>Setup &amp; help</h3>
                 <p className="meta">Check for a newer release from an update feed JSON URL.</p>
               </header>
               <div className="field">
@@ -1306,6 +1364,160 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
             </button>
           </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * GNOME/Wayland auto-hide bridge (docs/UBUNTU-STEALTH-BRIDGE.md §6.3).
+ *
+ * States are read from the session bus via main; installing copies a Shell
+ * extension and cannot take effect until the user logs out and back in, so the
+ * card says that instead of pretending the toggle already protects them.
+ */
+function UbuntuBridgeCard() {
+  const [state, setState] = useState<UbuntuBridgeState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [tail, setTail] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    void window.osmos
+      .getUbuntuBridge()
+      .then((next) => {
+        if (alive) setState(next);
+      })
+      .catch((e) => {
+        if (alive) setError(e instanceof Error ? e.message : String(e));
+      });
+    const off = window.osmos.onUbuntuBridge((next) => setState(next));
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+
+  const summary = state ? bridgeSummary(state) : null;
+  const tone =
+    summary?.tone === 'ok' ? '#39d98a' : summary?.tone === 'warn' ? '#f0b429' : '#8a8f9c';
+
+  const install = async () => {
+    setBusy(true);
+    setError('');
+    setTail('');
+    try {
+      const result = await window.osmos.installUbuntuBridge();
+      setTail(result.output);
+      if (!result.ok) setError('Install failed — see the output below.');
+      setState(await window.osmos.getUbuntuBridge());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const uninstall = async () => {
+    if (!window.confirm('Remove the OSMOS Stealth Bridge from GNOME Shell?')) return;
+    setBusy(true);
+    setError('');
+    try {
+      const result = await window.osmos.uninstallUbuntuBridge();
+      setTail(result.output);
+      if (!result.ok) setError('Uninstall failed — see the output below.');
+      setState(await window.osmos.getUbuntuBridge());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const changeMode = async (mode: UbuntuBridgeMode) => {
+    setError('');
+    const result = await window.osmos.setUbuntuBridgeMode(mode);
+    if (!result.ok) {
+      setError(result.error || 'Could not change the bridge mode');
+      return;
+    }
+    setState(await window.osmos.getUbuntuBridge());
+  };
+
+  return (
+    <div
+      className="field"
+      style={{ borderLeft: `3px solid ${tone}`, paddingLeft: 12, marginBottom: 16 }}
+    >
+      <label>Ubuntu bridge — GNOME Shell</label>
+      <p className="meta" style={{ margin: '4px 0 8px' }}>
+        {summary ? (
+          <>
+            <strong>{summary.label}.</strong> {summary.detail}
+          </>
+        ) : (
+          'Checking the GNOME Shell bridge…'
+        )}
+      </p>
+
+      {state?.supported && !state.installed ? (
+        <button
+          type="button"
+          className="primary"
+          style={{ height: 36 }}
+          disabled={busy || !state.installable}
+          onClick={() => void install()}
+        >
+          {busy ? 'Installing…' : 'Install bridge'}
+        </button>
+      ) : null}
+
+      {state?.installed ? (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select
+            value={state.mode}
+            disabled={busy}
+            onChange={(e) => void changeMode(e.target.value as UbuntuBridgeMode)}
+            style={{ height: 34 }}
+            aria-label="Bridge behaviour when sharing starts"
+          >
+            <option value="hide">Hide overlay while sharing</option>
+            <option value="keep">Keep visible (testing only)</option>
+            <option value="off">Do nothing</option>
+          </select>
+          <button
+            type="button"
+            style={{ height: 34 }}
+            onClick={() => void window.osmos.openUbuntuBridgePrefs()}
+          >
+            Bridge settings
+          </button>
+          <button type="button" style={{ height: 34 }} disabled={busy} onClick={() => void uninstall()}>
+            Uninstall
+          </button>
+        </div>
+      ) : null}
+
+      {state?.supported ? (
+        <p className="meta" style={{ margin: '6px 0 0' }}>
+          Auto-hide only: while a full-screen share is running the overlay is hidden for you too. Window
+          and monitor shares look identical to the Shell.
+        </p>
+      ) : null}
+
+      {tail ? (
+        <pre
+          className="meta"
+          style={{ whiteSpace: 'pre-wrap', margin: '8px 0 0', maxHeight: 160, overflow: 'auto' }}
+        >
+          {tail}
+        </pre>
+      ) : null}
+      {error ? (
+        <p className="meta" style={{ margin: '8px 0 0', color: '#ff6b6b' }}>
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

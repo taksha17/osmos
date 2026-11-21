@@ -53,6 +53,7 @@ Each phase has its exit criteria and its measured result in `docs/ARCHITECTURE-V
 - [ ] **Vision on two cloud providers plus one local model.** Only the wire path is proven — no keys, no local vision model on the test machines.
 - [ ] **macOS clean-machine install + real-device stealth matrix.** Needs a Mac with a screen someone can click on: Screen Recording / Microphone / Accessibility grants, BlackHole, and Zoom/Teams/Meet installed. A VM cannot exercise ScreenCaptureKit.
 - [ ] **Windows capture-exclusion probe in a real session.** An SSH session has no composited desktop, so `SetWindowDisplayAffinity` reports 0 there; run `npm run probe:stealth` from the console.
+- [ ] **Ubuntu bridge hide/leak rows.** The D-Bus contract is covered by `npm run probe:ubuntu-bridge`; hiding during a real Chrome/OBS/Zoom share, the first-frame race and the canary OCR need a desktop session someone can watch. Until then those rows stay **untested** in `docs/STEALTH-MATRIX.md`.
 - [ ] **macOS/Linux rows of `docs/STEALTH-MATRIX.md`** stay labelled *untested* until measured; the UI must not claim them.
 
 ## Design rules

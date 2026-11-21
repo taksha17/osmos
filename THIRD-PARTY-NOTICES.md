@@ -36,3 +36,16 @@ applicable FFmpeg LGPL terms for the bundled binary.
   profile-grounded easy answers without Ollama or API keys. Resident memory stays
   under the 2 GB budget. Weights are not committed to git; they are fetched at
   pack time and shipped inside installers.
+
+## Self-hosted web access — Firecrawl (user-run, never bundled)
+
+- **What:** OSMOS talks plain HTTP to a Firecrawl-compatible service the user
+  runs (Firecrawl Local single binary on `127.0.0.1:3002`, self-hosted Docker
+  stack on `:3002`, or Firecrawl Cloud with the user's key). See
+  `docs/SELF-HOSTING.md` for the Windows-box (`D:\osmos-web\`) setup.
+- **Upstream project:** [Firecrawl](https://github.com/firecrawl/firecrawl)
+- **License:** **AGPL-3.0** (upstream). OSMOS is MIT and does **not** link,
+  vendor, copy, or modify Firecrawl code — the integration is an HTTP client
+  to a separately-distributed service (Architecture v3, §10). Managed mode
+  (if shipped) downloads the unmodified official release with checksum
+  verification only after explicit consent, and shows the licence + source link.

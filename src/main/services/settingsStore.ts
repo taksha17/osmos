@@ -28,6 +28,7 @@ const PROVIDER_IDS: LlmProvider[] = [
   'anthropic',
   'groq',
   'openrouter',
+  'nvidia',
   'litellm',
 ];
 

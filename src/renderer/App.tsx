@@ -11,6 +11,7 @@ import { OnboardingWizard } from './components/OnboardingWizard';
 import { activeSavedProfile } from '@shared/profiles';
 import { resolveAgent } from '@shared/agents';
 import { DEFAULT_SAVED_PROFILE } from '@shared/types';
+import type { UbuntuBridgeMode, UbuntuBridgeState } from '@shared/policy/ubuntuBridge';
 import startOsmosIcon from '@resources/Start_Osmos_64.png';
 
 type Tab = 'home' | 'chat' | 'history';
@@ -24,6 +25,8 @@ type Info = {
   capabilityNotes: string[];
   features: FeatureDef[];
   shortcutsRegistered?: boolean;
+  /** Dev-only capture-verification aid (OSMOS_CANARY=1). */
+  canary?: boolean;
 };
 
 type UtterancePayload = {
@@ -90,6 +93,7 @@ declare global {
       verifyStealth: () => Promise<{
         ok: boolean;
         supported: boolean;
+        mechanism?: 'capture-exclusion' | 'gnome-bridge';
         detail: string;
         checkedAt: number;
       }>;
@@ -222,6 +226,12 @@ declare global {
       getOverlayClickThrough: () => Promise<{ enabled: boolean }>;
       onOverlayClickThrough: (listener: (enabled: boolean) => void) => () => void;
       log?: (level: 'log' | 'info' | 'warn' | 'error', ...args: any[]) => Promise<{ ok: boolean }>;
+      getUbuntuBridge: () => Promise<UbuntuBridgeState>;
+      installUbuntuBridge: () => Promise<{ ok: boolean; output: string }>;
+      uninstallUbuntuBridge: () => Promise<{ ok: boolean; output: string }>;
+      setUbuntuBridgeMode: (mode: UbuntuBridgeMode) => Promise<{ ok: boolean; error?: string }>;
+      openUbuntuBridgePrefs: () => Promise<{ ok: boolean; error?: string }>;
+      onUbuntuBridge: (listener: (state: UbuntuBridgeState) => void) => () => void;
     };
   }
 }
@@ -235,6 +245,7 @@ function OverlayApp() {
   const [idle, setIdle] = useState(false);
   const [paused, setPaused] = useState(false);
   const [clickThrough, setClickThrough] = useState(false);
+  const [canary, setCanary] = useState(false);
   const controlsRef = useRef<{ paused: boolean; togglePause: () => void } | null>(null);
 
   useEffect(() => {
@@ -248,8 +259,15 @@ function OverlayApp() {
     return unsub;
   }, []);
   useEffect(() => {
+    // §6.4: dev-only canary so a recording can be OCR-verified for leaks.
+    void window.osmos.getInfo().then((info) => setCanary(Boolean(info.canary)));
+  }, []);
+  useEffect(() => {
     const unsub = window.osmos.onOverlayEvent((ev) => {
+      // 'active' arrives whenever main (re)shows the overlay, e.g. from the
+      // global hotkey — clear the idle fade so it is fully readable again.
       if (ev.type === 'idle') setIdle(true);
+      else if (ev.type === 'active') setIdle(false);
     });
     return unsub;
   }, []);
@@ -279,6 +297,25 @@ function OverlayApp() {
       onMouseDown={takeFocus}
       onTouchStart={takeFocus}
     >
+      {canary ? (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            padding: '6px 8px',
+            background: '#ffe14d',
+            color: '#111',
+            font: '700 15px/1.2 system-ui, sans-serif',
+            letterSpacing: '0.04em',
+            textAlign: 'center',
+            zIndex: 10,
+          }}
+        >
+          OSMOS-CANARY-7F3A
+        </div>
+      ) : null}
       <div className="overlay-stack">
         <div className="overlay-pill">
           <img

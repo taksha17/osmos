@@ -175,6 +175,33 @@ export function stopElectronLoopbackStream() {
   void window.osmos.disableLoopbackAudio?.().catch(() => undefined);
 }
 
+/**
+ * Turn Chromium's opaque capture errors into something a user can act on.
+ * `NotReadableError` on Windows means the OS had no playback endpoint to loop
+ * back (endpoints missing/disabled) — retrying cannot fix that, so say so.
+ */
+export function describeLoopbackError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  if (/NotReadableError|Could not start audio source/i.test(msg)) {
+    return (
+      'Windows has no active playback device, so system audio cannot be captured. ' +
+      'Enable a speaker or headphones in Settings → System → Sound, then toggle ⚡ Smart off and on.'
+    );
+  }
+  if (/NotAllowedError|Permission|denied/i.test(msg)) {
+    return 'Desktop capture was blocked. Allow screen/audio capture for OSMOS, then toggle ⚡ Smart off and on.';
+  }
+  if (/no audio track/i.test(msg)) {
+    return 'The loopback stream had no audio track. Check the default playback device, then toggle ⚡ Smart off and on.';
+  }
+  return msg || 'Windows loopback capture failed.';
+}
+
+/** True when restarting capture cannot help until the user fixes the device. */
+export function isFatalLoopbackError(message: string): boolean {
+  return /no active playback device|no audio track|Desktop capture was blocked/i.test(message);
+}
+
 /** Capture system/loopback audio for durationMs → 16 kHz mono WAV for Whisper. */
 export async function captureElectronLoopback(
   durationMs = 5_000,
@@ -184,10 +211,7 @@ export async function captureElectronLoopback(
     stream = await ensureElectronLoopbackStream();
   } catch (e) {
     void window.osmos.disableLoopbackAudio?.().catch(() => undefined);
-    return {
-      ok: false,
-      error: e instanceof Error ? e.message : 'Windows loopback capture failed',
-    };
+    return { ok: false, error: describeLoopbackError(e) };
   }
 
   const audioTracks = stream.getAudioTracks();

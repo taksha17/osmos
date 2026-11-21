@@ -52,6 +52,29 @@ export async function searchWeb(settings: AppSettings, query: string): Promise<S
   return searchDuckDuckGo(query);
 }
 
+/**
+ * `searchWeb` with a hard time budget. A live overlay answer cannot wait on a
+ * slow provider, so a timeout resolves as "no hits" and the caller tells the
+ * model to flag staleness instead of blocking.
+ */
+export async function searchWebWithin(
+  settings: AppSettings,
+  query: string,
+  timeoutMs: number,
+): Promise<SearchHit[]> {
+  if (timeoutMs <= 0) return searchWeb(settings, query);
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<SearchHit[]>((resolve) => {
+    timer = setTimeout(() => resolve([]), timeoutMs);
+  });
+  try {
+    return await Promise.race([searchWeb(settings, query), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function testWebSearch(
   settings: AppSettings,
   override?: Partial<Pick<AppSettings, 'webSearchProvider' | 'tavilyApiKey' | 'searxngBaseUrl'>>,

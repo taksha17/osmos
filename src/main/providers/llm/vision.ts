@@ -20,7 +20,7 @@ const SUPPORTED_MIME = /^image\/(png|jpeg|webp|gif)$/i;
 
 const OLLAMA_VISION = /(llava|bakllava|vision|qwen2(\.5)?-vl|gemma3|minicpm-v|moondream)/i;
 const OPENAI_VISION = /(gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|o3|o4-mini|o1)/i;
-const GENERIC_VISION = /(vision|vl\b|multimodal|-v\d)/i;
+const GENERIC_VISION = /(vision|vl\b|multimodal|omni|-v\d)/i;
 
 export type ResolvedImage = {
   mime: string;
@@ -38,7 +38,11 @@ export type ResolvedImage = {
  * multimodal and rejected otherwise — the adapter still refuses to send an image
  * to a capability that is false, and OCR text remains the fallback (§6.4).
  */
-export function providerAcceptsVision(provider: { id?: string; model?: string }): boolean {
+export function providerAcceptsVision(provider: { id?: string; model?: string; visionModel?: string }): boolean {
+  // An explicit vision-model override is authoritative: the user has chosen a
+  // model for image requests even if the text model's name says nothing about
+  // multimodal support.
+  if (String(provider.visionModel ?? '').trim()) return true;
   const id = String(provider.id ?? '');
   const model = String(provider.model ?? '');
   switch (id) {
@@ -51,6 +55,8 @@ export function providerAcceptsVision(provider: { id?: string; model?: string })
     case 'openrouter':
     case 'litellm':
       return OPENAI_VISION.test(model) || GENERIC_VISION.test(model);
+    case 'nvidia':
+      return GENERIC_VISION.test(model);
     default:
       return false;
   }

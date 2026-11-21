@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>OSMOS share test</title>
+<style>
+  body { font: 16px system-ui; margin: 2rem; }
+  video { width: 100%; max-width: 960px; background: #000; }
+  p { margin-top: 1rem; }
+</style>
+<button id="go">Start screen share</button>
+<button id="stop">Stop</button>
+<p id="s">idle</p>
+<video id="v" autoplay muted playsinline></video>
+<script>
+  // The preview shows exactly what a viewer would receive. For a monitor share
+  // open this page on another monitor, or inspect the recording instead.
+  let stream;
+  document.getElementById('go').onclick = async () => {
+    const status = document.getElementById('s');
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const video = document.getElementById('v');
+      video.srcObject = stream;
+      const track = stream.getVideoTracks()[0];
+      status.textContent = 'sharing: ' + track.label;
+      track.onended = () => (status.textContent = 'ended');
+    } catch (e) {
+      status.textContent = 'error: ' + e.message;
+    }
+  };
+  document.getElementById('stop').onclick = () => {
+    stream?.getTracks().forEach((t) => t.stop());
+    document.getElementById('s').textContent = 'stopped';
+  };
+</script>
