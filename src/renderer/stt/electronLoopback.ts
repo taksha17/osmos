@@ -98,7 +98,7 @@ async function openLoopbackStream(): Promise<MediaStream> {
     if (stream.getAudioTracks().length === 0) {
       for (const t of stream.getTracks()) t.stop();
       throw new Error(
-        'No system audio track. Click ⚡ Smart once (user gesture), play sound on speakers, retry.',
+        'No system audio track. Click Listen once (user gesture), play sound on speakers, retry.',
       );
     }
 
@@ -185,21 +185,16 @@ export function describeLoopbackError(err: unknown): string {
   if (/NotReadableError|Could not start audio source/i.test(msg)) {
     return (
       'Windows has no active playback device, so system audio cannot be captured. ' +
-      'Enable a speaker or headphones in Settings → System → Sound, then toggle ⚡ Smart off and on.'
+      'Enable a speaker or headphones in Settings → System → Sound, then toggle Listen off and on.'
     );
   }
   if (/NotAllowedError|Permission|denied/i.test(msg)) {
-    return 'Desktop capture was blocked. Allow screen/audio capture for OSMOS, then toggle ⚡ Smart off and on.';
+    return 'Desktop capture was blocked. Allow screen/audio capture for OSMOS, then toggle Listen off and on.';
   }
   if (/no audio track/i.test(msg)) {
-    return 'The loopback stream had no audio track. Check the default playback device, then toggle ⚡ Smart off and on.';
+    return 'The loopback stream had no audio track. Check the default playback device, then toggle Listen off and on.';
   }
   return msg || 'Windows loopback capture failed.';
-}
-
-/** True when restarting capture cannot help until the user fixes the device. */
-export function isFatalLoopbackError(message: string): boolean {
-  return /no active playback device|no audio track|Desktop capture was blocked/i.test(message);
 }
 
 /** Capture system/loopback audio for durationMs → 16 kHz mono WAV for Whisper. */

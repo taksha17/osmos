@@ -98,7 +98,7 @@ export const FEATURES: FeatureDef[] = [
     id: 'stealth',
     name: 'Low-profile (stealth)',
     description:
-      'Non-activating overlay (focus only on click), Windows tool-window style + WDA_EXCLUDEFROMCAPTURE / macOS NSWindowSharingNone, click-through toggle, skip taskbar. Ubuntu/GNOME: optional Stealth Bridge extension hides every OSMOS window while a share or recording is active (auto-hide, not per-window capture exclusion).',
+      'Non-activating overlay (focus only on click), Windows tool-window style + setContentProtection (DWM affinity; Electron 34 reports WDA_MONITOR) / macOS NSWindowSharingNone, click-through toggle, skip taskbar. Ubuntu/GNOME: optional Stealth Bridge extension hides every OSMOS window while a share or recording is active (auto-hide, not per-window capture exclusion).',
     status: 'live',
     platforms: ['linux', 'darwin', 'win32'],
   },

@@ -12,8 +12,8 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
   <a href="#platform-support"><img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-blue"></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.6.2-orange">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-243%20passing-brightgreen">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.6.3-orange">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-294%20passing-brightgreen">
 </p>
 
 ---

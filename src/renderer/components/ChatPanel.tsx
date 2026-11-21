@@ -373,7 +373,7 @@ export function ChatPanel({
       console.warn('[liveScreen] stream path unavailable:', msg);
       // User dismissed the picker — respect it, do not fall into a flashing loop.
       if (/NotAllowedError|Permission denied|denied|cancel/i.test(msg)) {
-        setError('Screen share was cancelled. Click 👁 again and pick your screen or meeting window.');
+        setError('Screen share was cancelled. Turn background reading on again and pick your screen or meeting window.');
         setLiveScreen(false);
         setLiveScreenStatus('');
         return;

@@ -533,7 +533,7 @@ function createOverlay() {
     }
   });
   // Re-assert OS capture exclusion whenever the overlay becomes visible —
-  // some Windows builds drop WDA_EXCLUDEFROMCAPTURE across hide/show.
+  // some Windows builds drop the DWM affinity across hide/show.
   overlay.on('show', () => {
     platform.applyStealth(getSettings().stealthEnabled, [overlay!]);
     // The renderer fades itself after the idle delay; a hotkey re-show must
@@ -1720,7 +1720,7 @@ app.whenReady().then(() => {
   registerShortcuts();
   platform.applyStealth(getSettings().stealthEnabled, allWindows());
 
-  // Windows can drop WDA_EXCLUDEFROMCAPTURE and macOS spaces can reset
+  // Windows can drop the DWM affinity and macOS spaces can reset
   // sharing flags across display changes — re-assert on every geometry event.
   const reassertStealth = () => {
     if (getSettings().stealthEnabled) {

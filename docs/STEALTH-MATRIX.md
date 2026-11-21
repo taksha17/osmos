@@ -93,11 +93,13 @@ Two measurement notes from this run:
 | Webex | **untested** — not installed | untested — no host | untested |
 | OBS | **untested** — not installed | untested — no host | untested |
 
-The Windows mechanism is a per-window OS flag (`WDA_EXCLUDEFROMCAPTURE`), not a
-per-app integration: any capture path built on the documented DWM/composition
-APIs omits the window, and OBS "Windows 10 (1903+)" capture is the one publicly
-documented to honour it. That is why the honest row above is the affinity value,
-not a list of app names.
+The Windows mechanism is a per-window OS flag, not a per-app integration.
+Electron 34's `setContentProtection` reports `WDA_MONITOR` (affinity 1) rather
+than `WDA_EXCLUDEFROMCAPTURE`; capture paths built on the documented
+DWM/composition APIs withhold the window either way, and OBS "Windows 10
+(1903+)" capture is the one publicly documented to honour it. That is why the
+honest row above is the affinity value and the pixel pair, not a list of app
+names.
 
 ### macOS
 

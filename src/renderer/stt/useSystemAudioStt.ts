@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppSettings } from '../../shared/types';
 import { CONTINUOUS_MAX_IN_FLIGHT } from '@shared/continuousAssist';
-import {
-  captureElectronLoopback,
-  isFatalLoopbackError,
-  isWindowsPlatform,
-} from './electronLoopback';
+import { isFatalSystemAudioError } from '@shared/policy/audioRecovery';
+import { captureElectronLoopback, isWindowsPlatform } from './electronLoopback';
 
 function engineForSettings(settings: AppSettings | null): 'local' | 'openai' {
   if (!settings) return 'local';
@@ -123,7 +120,7 @@ export function useSystemAudioStt(settings: AppSettings | null) {
           } else {
             setError(
               win
-                ? 'Windows loopback is active but still silent. Play audio on speakers, then toggle ⚡ Smart off/on once.'
+                ? 'Windows loopback is active but still silent. Play audio on speakers, then toggle Listen off/on once.'
                 : 'System audio is active but still silent. Play audio on speakers and retry.',
             );
           }
@@ -249,7 +246,7 @@ export function useSystemAudioStt(settings: AppSettings | null) {
             setError(message);
             // A missing playback endpoint never fixes itself — stop instead of
             // retrying every few seconds and leave the UI honest.
-            if (isFatalLoopbackError(message)) {
+            if (isFatalSystemAudioError(message)) {
               setFatal(true);
               activeRef.current = false;
               generationRef.current += 1;

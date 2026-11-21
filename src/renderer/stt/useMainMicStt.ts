@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isFatalMicError } from '@shared/policy/audioRecovery';
 import type { AppSettings } from '../../shared/types';
 
 function engineFor(settings: AppSettings | null): 'local' | 'openai' {
@@ -10,21 +11,6 @@ function engineFor(settings: AppSettings | null): 'local' | 'openai' {
  * (mic:listen-start → mic:audio-chunk). The renderer only transcribes chunks,
  * so React lifecycle changes can never kill the capture itself.
  */
-/**
- * Mic failures the Smart watchdog must not retry: no capture device exists, so
- * every restart fails the same way and keeps the UI claiming to listen.
- */
-function isFatalMicError(message: string): boolean {
-  return /no directshow microphones|no microphone|no default source|no such device|device not found|cannot open audio device|no laptop/i.test(
-    message,
-  )
-    // ffmpeg problems and missing main-process plumbing cannot be fixed by
-    // retrying — restarting only spawns the same broken child again.
-    || /ffmpeg (is|was) (present|not found|required)|will not run|blocked by device policy|needs linux build/i.test(
-      message,
-    );
-}
-
 export function useMainMicStt(settings: AppSettings | null) {
   const [listening, setListening] = useState(false);
   const [partial, setPartial] = useState('');
@@ -49,7 +35,7 @@ export function useMainMicStt(settings: AppSettings | null) {
 
   const start = useCallback(async (): Promise<void> => {
     if (typeof window.osmos.startMicListen !== 'function') {
-      setError('Main-process mic streaming unavailable (needs Linux build).');
+      setError('Main-process mic streaming unavailable.');
       setFatal(true);
       return;
     }

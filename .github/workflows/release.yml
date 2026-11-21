@@ -16,6 +16,9 @@ on:
 env:
   ELECTRON_MIRROR: https://registry.npmmirror.com/-/binary/electron/
 
+permissions:
+  contents: read
+
 jobs:
   pack:
     name: Pack (${{ matrix.os }})
@@ -64,7 +67,37 @@ jobs:
           name: osmos-${{ matrix.os }}
           path: |
             release/*.exe
+            release/*.msi
             release/*.AppImage
             release/*.deb
+            release/*.tar.gz
             release/*.dmg
+            release/*.zip
+            release/*.pkg
           if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: pack
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* \
+              --title "OSMOS $TAG" \
+              --generate-notes
+          fi

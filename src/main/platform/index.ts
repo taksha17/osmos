@@ -16,10 +16,12 @@ export type PlatformId = 'linux' | 'darwin' | 'win32';
 
 /**
  * OS-level capture exclusion for meeting apps (Zoom, Teams, Meet, Webex, etc.).
- * - Windows: SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) via setContentProtection
- * - macOS: NSWindowSharingNone via setContentProtection (legacy APIs; ScreenCaptureKit on
- *   newer macOS may still capture — prefer window/tab share as backup)
- * - Linux: no equivalent OS flag
+ * - Windows: setContentProtection uses DWM display affinity. Electron 34 reports
+ *   WDA_MONITOR rather than WDA_EXCLUDEFROMCAPTURE; capture paths that honour
+ *   affinity withhold the window either way. `npm run probe:stealth` is the check.
+ * - macOS: NSWindowSharingNone via setContentProtection (legacy APIs;
+ *   ScreenCaptureKit on newer macOS may still capture — prefer window/tab share).
+ * - Linux: no per-window OS flag; the optional GNOME bridge auto-hides during shares.
  */
 export function applyOsCaptureExclusion(win: BrowserWindow, enabled: boolean, platformId: PlatformId) {
   if (win.isDestroyed()) return;
@@ -29,7 +31,7 @@ export function applyOsCaptureExclusion(win: BrowserWindow, enabled: boolean, pl
   if (platformId === 'win32' || platformId === 'darwin') {
     try {
       // Windows workaround: force a layered opacity refresh before affinity so
-      // WDA_EXCLUDEFROMCAPTURE sticks across show/hide cycles on some builds.
+      // the DWM affinity sticks across show/hide cycles on some builds.
       if (platformId === 'win32') {
         try {
           const opacity = win.getOpacity();
@@ -103,7 +105,9 @@ export async function verifyStealth(win: BrowserWindow, enabled: boolean): Promi
       ok: enabled,
       supported: true,
       detail: enabled
-        ? `${process.platform === 'win32' ? 'WDA_EXCLUDEFROMCAPTURE' : 'NSWindowSharingNone'} applied`
+        ? process.platform === 'win32'
+          ? 'setContentProtection applied (DWM affinity; Electron 34 reports WDA_MONITOR — see npm run probe:stealth)'
+          : 'NSWindowSharingNone applied'
         : 'Low-profile is off',
       checkedAt: Date.now(),
     };
@@ -606,8 +610,8 @@ export function createPlatformAdapter(): PlatformAdapter {
       id,
       displayName: 'Windows',
       capabilityNotes: () => [
-        'Stealth uses SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) via setContentProtection — hides Osmos from Zoom, Teams, Meet, Webex, OBS, and similar on Windows 10 2004+ / Windows 11.',
-        'System audio: Chromium desktop loopback (ffmpeg has no WASAPI input). Play audio on speakers while Smart is on.',
+        'Stealth uses setContentProtection (DWM display affinity). Electron 34 reports WDA_MONITOR, not WDA_EXCLUDEFROMCAPTURE; run npm run probe:stealth on a real display to verify the pixel pair. Windows 10 2004+ / 11 capture paths that honour affinity omit Osmos.',
+        'System audio: Chromium desktop loopback (ffmpeg has no WASAPI input). Play audio on speakers while Listen is on.',
         'Region capture falls back to full-screen screenshot via PowerShell.',
       ],
       applyStealth(enabled, windows) {
@@ -738,7 +742,7 @@ $bmp.Dispose();
       'System audio: ffmpeg pulse or pw-record on the default sink *.monitor (meeting audio). Not screen-share.',
       canLoopSafeScreenCapture()
         ? 'Continuous screen OCR uses a silent CLI tool (spectacle / grim / scrot). gnome-screenshot is one-shot only (it flashes).'
-        : '👁 Live screen reading uses the screen-share dialog once (ScreenCast portal), then reads silently. 📷 one-shot uses gnome-screenshot (flashes once).',
+        : 'GNOME uses the silent Mutter ScreenCast backend for continuous reading (no dialog, no flash); other desktops fall back to their silent CLI tool.',
     ],
     applyStealth(enabled, windows) {
       for (const win of windows) {

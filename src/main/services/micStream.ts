@@ -203,7 +203,7 @@ export class MicStream extends EventEmitter {
         return {
           ok: false,
           error:
-            'No DirectShow microphones found. Check: ① Windows Settings → Privacy & security → Microphone → allow desktop apps; ② a mic is enabled in Sound settings; then toggle ⚡ Smart again.',
+            'No DirectShow microphones found. Check: ① Windows Settings → Privacy & security → Microphone → allow desktop apps; ② a mic is enabled in Sound settings; then toggle Listen again.',
         };
       }
       const wanted = (device || '').trim().toLowerCase();

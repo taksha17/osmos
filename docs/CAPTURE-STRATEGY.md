@@ -66,8 +66,8 @@ a keybind.
 1. **Chunked STT** — small PCM/WebM windows (≈2–6s), not whole-file uploads.
 2. **Silence / VAD gate** — skip Whisper on near-silent chunks (`silent` / RMS).
 3. **Frame diff** — perceptual / byte hash before OCR+LLM.
-4. **Low-profile overlay** — Win `WDA_EXCLUDEFROMCAPTURE`, macOS `NSWindowSharingNone`,
-   Linux share-tab guidance.
+4. **Low-profile overlay** — Win `setContentProtection` (DWM affinity), macOS
+   `NSWindowSharingNone`, Linux GNOME bridge / share-tab guidance.
 5. Prefer **in-process / Chromium APIs** over fragile CLI PATH tools for audio on Windows.
 
 ---

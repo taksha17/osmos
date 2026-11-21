@@ -10,7 +10,7 @@
 - GitHub: `https://github.com/taksha17/osmos` (public)
 - **Not** a fork or rebrand of Natively. Natively at `/media/taksha/New Volume/natively` is **personal reference only** — study ideas, never copy proprietary/source-available code.
 - License: MIT (`LICENSE`)
-- Current version: **0.6.2** (`package.json`)
+- Current version: **0.6.3** (`package.json`)
 - Reference product: Cluely (real-time interview/meeting copilot). We match core UX: desktop overlay, live transcription, screen context, answer suggestions. We do **not** copy proprietary code or data.
 
 ## Stack
@@ -182,7 +182,7 @@ Capture and STT run in **supervised external processes**, never inline in main.
 - A lite install downloads the GGUF on first run inside `startBundledLlm` → `main/services/modelPackService.ts`: resumable `Range`, `.partial` + rename, SHA-256 verified against `model.json`, which `ensure-bundled-llm.mjs` now writes (`url`, `sha256`, `bytes`). Never accept an unverified download, and never start a download the manifest cannot check.
 - `scripts/pack.mjs` spawns `node_modules/electron-builder/out/cli/cli.js` through the current Node. Do **not** put `spawn('npx', …)` back: `npx` is `npx.cmd` on Windows and a shell-less spawn fails with `ENOENT` (it did, on the box).
 - The Ubuntu bridge ships as real files, not inside `app.asar`: `extraResources` copies `linux/` to `resources/linux`, because the installer must read the extension source and scripts. `dbus-next` is a normal production dependency and is already covered by the `node_modules/**/*` asarUnpack rule.
-- `.github/workflows/release.yml` runs typecheck, tests, the full pack and the lite pack on Ubuntu/macOS/Windows **for `v*` tags only**. Pull-request CI stays typecheck-only on Ubuntu; do not re-add a matrix to `ci.yml`.
+- `.github/workflows/release.yml` runs typecheck, tests, the full pack and the lite pack on Ubuntu/macOS/Windows **for `v*` tags only**, then its final `release` job attaches every artifact (full + lite, all three OSes) to that tag's GitHub Release. Pull-request CI stays typecheck-only on Ubuntu; do not re-add a matrix to `ci.yml`.
 - Signing is not configured: no Apple Developer ID, no Windows OV/EV certificate. Installers are unsigned, `docs/ARCHITECTURE-V2.md` Phase 7 says so, and that row is the one v2 exit criterion this repository cannot satisfy by itself.
 - **macOS ships native helpers it does not build.** Apple Silicon will not exec an unsigned Mach-O, so `scripts/sign-vendored-macos.mjs` ad-hoc signs (`codesign --sign -`, after `xattr -cr`) every Mach-O under `build/bin`, `build/llm` and `binaries/audio-worker`, then `codesign --verify`s each one. `pack.mjs` and `pack:mac` both call it, and it runs even for `--skip-vendor`, because the lite build still ships `llama-server`. Do not remove it: the symptom is `spawn … killed: 9` on a real Mac and never on Linux/Windows.
 - **Screen Recording denial on macOS is silent** (exit 0, black PNG, OCR `''`). Ask TCC via `shared/policy/macPermissions.ts` before reporting "no screen text" — `describeLoopSafeCapture()` and `capturePrimaryScreen()` already do. Do not restore a black-image-only path.
@@ -359,7 +359,7 @@ Documented so the next agent does not reintroduce these bugs:
     not a code bug.
 - **Symptom J3 (2026-11-21):** Smart shows “listening” forever on a Windows box with sound cards but **no present audio endpoints**; loopback dies with `NotReadableError: Could not start audio source` and the console logs the same error every few seconds.
   - **Cause:** `Get-PnpDevice -Class AudioEndpoint -PresentOnly` returns nothing (endpoints missing/disabled), so Chromium has no render endpoint to loop back and dshow has no mic label. Separately, a Device Guard policy can block the vendored `ffmpeg.exe` (`was blocked by your organization's Device Guard policy`) — the file exists but cannot run.
-  - **Fix:** `electronLoopback.ts` maps the DOMException to an actionable message and exports `isFatalLoopbackError`; `useSystemAudioStt` / `useMainMicStt` expose `fatal`, and the Smart watchdog in `ChatPanel` backs off (4s→60s) and stops restarting a fatal ear. `describeFfmpegProblem()` in `resolveBin.ts` distinguishes “not found” from “present but will not run”. A machine with no endpoints stays unusable — that is an environment gap, not a code bug; both ears now say so once instead of retrying forever.
+  - **Fix:** `electronLoopback.ts` maps the DOMException to an actionable message; `src/shared/policy/audioRecovery.ts` owns the cross-platform fatal classifiers (`isFatalSystemAudioError` / `isFatalMicError`) so Windows, macOS and Linux stop retrying a missing device; `useSystemAudioStt` / `useMainMicStt` expose `fatal`, and the Smart watchdog in `ChatPanel` backs off (4s→60s) and stops restarting a fatal ear. `describeFfmpegProblem()` in `resolveBin.ts` distinguishes “not found” from “present but will not run”. A machine with no endpoints stays unusable — that is an environment gap, not a code bug; both ears now say so once instead of retrying forever.
 - **Symptom K:** Screen reader captures once then stops / auto-answers continuously.
   - **Cause:** One-shot path or continuous OCR fired LLM on every frame change.
   - **Fix:** Persistent poll loop + frame hash for context; **answers only on Ctrl/Cmd+Enter / Assist / hotkeys** (overlay never auto-sends).

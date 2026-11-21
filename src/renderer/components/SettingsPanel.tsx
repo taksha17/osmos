@@ -271,7 +271,7 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                   <strong>Low-profile</strong>
                   <p>
                     {info?.platform === 'linux'
-                      ? 'On Linux this only hides Osmos from the taskbar/Alt-Tab. Entire-screen Meet/Zoom shares still include the overlay — share a Chrome tab (or a single window) so others do not see it while you keep using Osmos. Full screen-share hiding will come later on Linux.'
+                      ? 'On Linux this hides Osmos from the taskbar/Alt-Tab. For full-screen shares, install the optional GNOME Stealth Bridge in Settings → Low-profile: it hides every OSMOS window while a share or recording is active. A tab/window share is still the safest option.'
                       : 'Hides the overlay from screen shares where the OS supports capture exclusion (Windows / macOS). Only you can see Osmos during a call.'}
                   </p>
                 </div>
@@ -291,7 +291,7 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                 </div>
                 <div className="settings-row__copy">
                   <strong>Smart assist audio</strong>
-                  <p>Meetings start capturing system / meeting audio when Smart is on</p>
+                  <p>Meetings start capturing system / meeting audio when Listen is on</p>
                 </div>
                 <select
                   value={settings.assistAudioSource || 'system'}
@@ -1242,7 +1242,7 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                     ? ', always-on-top. GNOME/Wayland: install the optional Stealth Bridge so the overlay hides itself while a screen share or recording is active. Linux has no per-window capture exclusion — a tab/window share is still safest.'
                     : info?.platform === 'darwin'
                       ? ', and NSWindowSharingNone (setContentProtection). On newer macOS, prefer sharing one app/tab — full-desktop ScreenCaptureKit shares can still include overlays.'
-                      : ', and SetWindowDisplayAffinity / WDA_EXCLUDEFROMCAPTURE (setContentProtection) so Zoom, Teams, Meet, Webex, and similar omit Osmos from the shared feed on Windows 10 2004+ / 11.'}
+                      : ', and setContentProtection (DWM display affinity) so capture paths that honour affinity omit Osmos on Windows 10 2004+ / 11. Electron 34 reports WDA_MONITOR — run npm run probe:stealth on a real display to verify the pixel pair.'}
                 </p>
               </header>
 
