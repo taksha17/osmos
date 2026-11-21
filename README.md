@@ -68,7 +68,7 @@ Everything below was measured or reproduced on the platform named. Rows that wer
 | Meeting audio (speaker) | Chromium loopback — works out of the box | **Requires BlackHole** + a Multi-Output Device | `ffmpeg -f pulse` on a real `*.monitor` (pw-record fallback) |
 | Microphone | ffmpeg DirectShow / Chromium | AVFoundation via ffmpeg | ffmpeg pulse / pw-record |
 | Screen reading | GDI capture (silent) | `screencapture -x` + Screen Recording grant | Mutter ScreenCast on GNOME (no picker, no flash); CLI tools elsewhere |
-| Capture exclusion | `WDA_EXCLUDEFROMCAPTURE` — verified against the OS flag | `NSWindowSharingNone` — stops legacy `CGWindowList` capture; **ScreenCaptureKit shares can still include it** | No OS equivalent — share a window, not the whole desktop |
+| Capture exclusion | `setContentProtection` (DWM affinity — reads `WDA_MONITOR` on Electron 34; the pixel check needs a real display, see the matrix) | `NSWindowSharingNone` — stops legacy `CGWindowList` capture; **ScreenCaptureKit shares can still include it** | No OS equivalent — share a window, not the whole desktop |
 | Overlay above fullscreen apps | — | yes (`screen-saver` level, `visibleOnFullScreen`) | — |
 | Live screen loop | GDI, silent | `screencapture`, silent | GNOME only; never the portal, never `gnome-screenshot` |
 
