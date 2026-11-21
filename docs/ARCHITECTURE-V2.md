@@ -588,8 +588,7 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > auto-ask path (`ChatPanel.ingestFinal`), so behaviour changed: mic finals are the `me`
 > channel and never answer, meeting cues are dropped as notes, the same question inside
 > 10 s is a duplicate, and a superseding question cancels the stream that is running.
-> The lane plan and the context packet are not wired yet — both live in
-> `src/main/index.ts`, which currently carries another agent's uncommitted web-access work.
+> The lane plan and the context packet are wired too — see **Wired** below.
 > `src/shared/policy/triggerPolicy.ts` now implements the §7.3 table — hotkey, direct
 > question, coding screen (offer, auto-fire only when enabled), meeting cue as a
 > **note**, self-speech never, 10 s dedupe, speculative partials at classifier
@@ -608,7 +607,8 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > |---|---|
 > | Trigger precision / recall, 43 labelled utterances | **1.000 / 1.000** (gate ≥ 0.9 / ≥ 0.85; first run 0.952, both misses fixed by two classifier rules) |
 > | Unit tests | 124/124, 44 of them new for §7.2–§7.4 and the wiring |
-> | Replay set through `npm run bench` | 7 answerable utterances; 2 correctly skipped (one meeting cue, one self-speech) |
+> | Replay set through `npm run bench` | 7 answerable utterances; 2 correctly skipped (one meeting cue, one self-speech); precision/recall still **1.000** on the 43 labels after the wiring |
+> | Live lane check, built app on Windows (driven through `window.osmos.askStream`, cancelled at `meta`) | code snapshot + "fix this bug" → **quality**, reason "short/simple (3 words); vision lane required" (v0.6 alone: fast); same question with no snapshot → **fast**; an 18-word question → **balanced**. Driver: `.qwen/live-probe.ps1` + `.qwen/live-route-probe.mjs` (gitignored harness, like the latency probe) |
 > | **End-of-question → first token, real model** | **p50 49 ms / p95 348 ms** (gate ≤ 1.5 s / ≤ 2.5 s), bundled Qwen2.5-1.5B Q4_K_M through the packaged `llama-server`, 7 samples |
 >
 > **Wired:** `src/shared/policy/answerContext.ts` assembles the `ContextPacket` and the
