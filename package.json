@@ -31,7 +31,7 @@
     "pack": "npm run build && npm run build:audio-worker && node scripts/pack.mjs",
     "pack:lite": "npm run build && npm run build:audio-worker && node scripts/pack.mjs --lite",
     "pack:linux": "node scripts/ensure-ffmpeg.mjs && node scripts/ensure-bundled-llm.mjs && npm run build && npm run build:audio-worker && electron-builder --linux --publish never",
-    "pack:mac": "node scripts/ensure-ffmpeg.mjs && node scripts/ensure-bundled-llm.mjs && npm run build && npm run build:audio-worker && electron-builder --mac --publish never",
+    "pack:mac": "node scripts/ensure-ffmpeg.mjs && node scripts/ensure-bundled-llm.mjs && node scripts/sign-vendored-macos.mjs && npm run build && npm run build:audio-worker && electron-builder --mac --publish never",
     "pack:win": "node scripts/ensure-ffmpeg.mjs && node scripts/ensure-bundled-llm.mjs && npm run build && npm run build:audio-worker && electron-builder --win --publish never",
     "ensure:ffmpeg": "node scripts/ensure-ffmpeg.mjs",
     "ensure:llm": "node scripts/ensure-bundled-llm.mjs",

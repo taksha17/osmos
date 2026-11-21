@@ -183,6 +183,8 @@ Capture and STT run in **supervised external processes**, never inline in main.
 - `scripts/pack.mjs` spawns `node_modules/electron-builder/out/cli/cli.js` through the current Node. Do **not** put `spawn('npx', …)` back: `npx` is `npx.cmd` on Windows and a shell-less spawn fails with `ENOENT` (it did, on the box).
 - `.github/workflows/release.yml` runs typecheck, tests, the full pack and the lite pack on Ubuntu/macOS/Windows **for `v*` tags only**. Pull-request CI stays typecheck-only on Ubuntu; do not re-add a matrix to `ci.yml`.
 - Signing is not configured: no Apple Developer ID, no Windows OV/EV certificate. Installers are unsigned, `docs/ARCHITECTURE-V2.md` Phase 7 says so, and that row is the one v2 exit criterion this repository cannot satisfy by itself.
+- **macOS ships native helpers it does not build.** Apple Silicon will not exec an unsigned Mach-O, so `scripts/sign-vendored-macos.mjs` ad-hoc signs (`codesign --sign -`, after `xattr -cr`) every Mach-O under `build/bin`, `build/llm` and `binaries/audio-worker`, then `codesign --verify`s each one. `pack.mjs` and `pack:mac` both call it, and it runs even for `--skip-vendor`, because the lite build still ships `llama-server`. Do not remove it: the symptom is `spawn … killed: 9` on a real Mac and never on Linux/Windows.
+- **Screen Recording denial on macOS is silent** (exit 0, black PNG, OCR `''`). Ask TCC via `shared/policy/macPermissions.ts` before reporting "no screen text" — `describeLoopSafeCapture()` and `capturePrimaryScreen()` already do. Do not restore a black-image-only path.
 
 ### Web access (v3, `docs/ARCHITECTURE-V3.md`)
 

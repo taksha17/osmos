@@ -566,27 +566,31 @@ export function createPlatformAdapter(): PlatformAdapter {
         const durationSec = Math.max(1, Math.round(durationMs / 1000));
         const devices = await listAvfoundationAudioDevices();
         const picked = resolveMacAudioInput(devices, device);
-        const specs = [picked.spec];
-        if (picked.spec !== ':0') specs.push(':0');
-        for (const spec of specs) {
-          const ffmpegArgs = [
-            '-f',
-            'avfoundation',
-            '-i',
-            spec,
-            '-t',
-            String(durationSec),
-            '-ac',
-            '1',
-            '-ar',
-            '16000',
-            '-y',
-            tmp,
-          ];
-          if (await tryCapture('ffmpeg', ffmpegArgs, tmp)) return readAudioFile(tmp);
-        }
-        const recArgs = ['-d', String(durationSec), tmp];
-        if (await tryCapture('rec', recArgs, tmp)) return readAudioFile(tmp);
+        // No virtual cable and no explicit device → `resolveMacAudioInput`
+        // falls back to AVFoundation index 0, which is the built-in mic. That
+        // "succeeds", the UI says "listening", and every transcript is the
+        // room instead of the meeting (the macOS form of Symptom I). Refuse
+        // with the setup instructions instead of recording the wrong device.
+        if (!picked.usedLoopback) return { ok: false, error: MAC_LOOPBACK_HELP };
+        const ffmpegArgs = [
+          '-f',
+          'avfoundation',
+          '-i',
+          picked.spec,
+          '-t',
+          String(durationSec),
+          '-ac',
+          '1',
+          '-ar',
+          '16000',
+          '-y',
+          tmp,
+        ];
+        if (await tryCapture('ffmpeg', ffmpegArgs, tmp)) return readAudioFile(tmp);
+        // No `:0` retry and no `rec` fallback on purpose: both record the
+        // default *input*, i.e. the microphone, so "system audio" would come
+        // back non-empty and fill the transcript with the room. A failed
+        // loopback has to read as a failed loopback.
         return { ok: false, error: MAC_LOOPBACK_HELP };
       },
     };

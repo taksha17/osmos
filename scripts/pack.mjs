@@ -44,6 +44,13 @@ if (!skipVendor) {
   await runNode('ensure-bundled-llm.mjs');
 }
 
+// Apple Silicon refuses to exec an unsigned Mach-O helper, and ffmpeg /
+// llama-server both arrive unsigned from third parties. Sign the vendor tree
+// before electron-builder copies it into the bundle; no-op off macOS. Runs for
+// the lite build too, even with --skip-vendor, because the runtime is shipped
+// there as well.
+await runNode('sign-vendored-macos.mjs');
+
 /**
  * `--lite` (Architecture v2 §15): ship the llama-server runtime but not the GGUF
  * weights. The app downloads and SHA-256-verifies them on first run, so the

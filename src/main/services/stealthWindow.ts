@@ -120,10 +120,42 @@ export function applyNonActivating(win: BrowserWindow, stealth: boolean): void {
   }
 }
 
+/**
+ * macOS: keep the overlay above a fullscreen meeting app.
+ *
+ * A fullscreen Zoom/Teams/Meet window gets its own Space and a raised window
+ * level, so a normal floating overlay is covered by it — which the user reads
+ * as "the overlay vanished when I went fullscreen". 'screen-saver' is the
+ * highest level Electron exposes and is what other overlays use for this;
+ * `visibleOnAllWorkspaces(..., visibleOnFullScreen)` is what keeps it on the
+ * fullscreen Space. `skipTransformProcessType` matters: without it macOS turns
+ * the app into an accessory (no Dock icon, no menu bar) just for this call.
+ *
+ * The window stays non-activating — this changes its level, not its focus.
+ */
+export function applyOverlayLevel(win: BrowserWindow): void {
+  if (win.isDestroyed()) return;
+  if (process.platform !== 'darwin') return;
+  try {
+    win.setAlwaysOnTop(true, 'screen-saver');
+  } catch {
+    /* older Electron / non-macOS */
+  }
+  try {
+    win.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Show the overlay without activating it (§11 "don't steal focus"). */
 export function presentOverlay(win: BrowserWindow, stealth: boolean): void {
   if (win.isDestroyed()) return;
   applyNonActivating(win, stealth);
+  applyOverlayLevel(win);
   if (stealth) win.showInactive();
   else win.show();
   if (stealth) markToolWindow(win);
@@ -135,6 +167,7 @@ export function presentOverlay(win: BrowserWindow, stealth: boolean): void {
  */
 export function focusOverlay(win: BrowserWindow): void {
   if (win.isDestroyed()) return;
+  applyOverlayLevel(win);
   try {
     win.setFocusable(true);
   } catch {

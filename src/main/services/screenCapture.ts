@@ -10,12 +10,13 @@
  * and never when `loopSafe: true`.
  */
 
-import { desktopCapturer, screen } from 'electron';
+import { desktopCapturer, screen, systemPreferences } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import type { CaptureResult } from '../../shared/types.js';
+import { describeScreenAccess, type AccessVerdict } from '../../shared/policy/macPermissions.js';
 import { findOnPath, safeSpawnCwd } from './resolveBin.js';
 
 export type CaptureScreenOptions = {
@@ -152,6 +153,21 @@ async function captureMacPrimary(tmp: string): Promise<CaptureResult | null> {
   return null;
 }
 
+/**
+ * macOS answers a denied Screen Recording grant with exit 0 and an empty/black
+ * image, so the capture path has to ask TCC itself. `systemPreferences` is not
+ * available before app-ready, hence the permissive fallback: an unknown state
+ * must never block a capture that would have worked.
+ */
+function macScreenAccess(): AccessVerdict {
+  if (process.platform !== 'darwin') return { ok: true, needsPrompt: false };
+  try {
+    return describeScreenAccess(systemPreferences.getMediaAccessStatus('screen'));
+  } catch {
+    return { ok: true, needsPrompt: false };
+  }
+}
+
 async function captureViaDesktopCapturer(): Promise<CaptureResult> {
   try {
     const display = screen.getPrimaryDisplay();
@@ -204,6 +220,10 @@ function isGnomeDesktop(): boolean {
 export function describeLoopSafeCapture(): { ok: boolean; reason?: string; tool?: string } {
   if (process.platform === 'win32') return { ok: true, tool: 'gdi' };
   if (process.platform === 'darwin') {
+    // The loop is silent, so it is exactly the path that fails invisibly when
+    // Screen Recording is off: refuse up front and say which setting to change.
+    const access = macScreenAccess();
+    if (!access.ok) return { ok: false, reason: access.reason };
     return findOnPath('screencapture')
       ? { ok: true, tool: 'screencapture' }
       : { ok: false, reason: 'macOS screencapture not found' };
@@ -246,6 +266,11 @@ export async function hasSilentScreenshotTool(): Promise<boolean> {
  */
 export async function capturePrimaryScreen(opts?: CaptureScreenOptions): Promise<CaptureResult> {
   const loopSafe = Boolean(opts?.loopSafe);
+  const access = macScreenAccess();
+  if (!access.ok) {
+    // Better one actionable error than a black PNG that OCRs to ''.
+    return { dataUrl: '', cancelled: true, error: access.reason };
+  }
   const tmp = path.join(os.tmpdir(), `osmos-screen-${Date.now()}.png`);
 
   const win = await captureWindowsPrimary(tmp);

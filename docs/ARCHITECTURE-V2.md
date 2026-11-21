@@ -880,6 +880,27 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 >   old matrix unaffordable are not spent.
 > - **Manual path unchanged:** `npm run release:upload` still publishes a locally
 >   built release.
+> - **macOS runtime, not just the dmg (2026-11-21).** A dmg only proves
+>   electron-builder could assemble the bundle, so the macOS-only defects that a
+>   real Mac would hit are fixed in code rather than left to the release page:
+>   Apple Silicon refuses to exec an unsigned Mach-O, and `ffmpeg` /
+>   `llama-server` both arrive unsigned from third parties —
+>   `scripts/sign-vendored-macos.mjs` strips quarantine and ad-hoc signs
+>   (`codesign --sign -`) every Mach-O under `build/bin`, `build/llm` and
+>   `binaries/audio-worker`, then verifies each signature; `pack.mjs` runs it for
+>   the full **and** lite build, so `--skip-vendor` cannot skip signing. A denied
+>   Screen Recording grant used to come back as exit 0 plus a black PNG, which
+>   OCR'd to `''` with no error anywhere — `shared/policy/macPermissions.ts` now
+>   turns the TCC status into one actionable message and
+>   `describeLoopSafeCapture()` / `capturePrimaryScreen()` return it. Finally, with
+>   no virtual cable the system-audio path fell back to AVFoundation index 0 (the
+>   built-in microphone) and "recorded the room"; it now refuses with the
+>   BlackHole instructions instead.
+> - **macOS overlay:** `applyOverlayLevel()` in `stealthWindow.ts` raises the
+>   overlay to the `screen-saver` level with
+>   `setVisibleOnAllWorkspaces(visibleOnFullScreen)`, because a fullscreen
+>   Zoom/Teams Space covers a normal floating window. Signing is still the one row
+>   only the owner can close.
 >
 > **Exit row — installers pass Gatekeeper/SmartScreen without override: not met,
 > and not claimed.** This project has no Apple Developer ID and no Windows OV/EV

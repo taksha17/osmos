@@ -40,6 +40,14 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
+      # macOS has no prebuilt LGPL ffmpeg (BtbN dropped its macOS assets), so
+      # ensure-ffmpeg compiles it from source — the slowest step in the matrix.
+      # Both scripts are content-pinned, so their hashes are a valid cache key.
+      - uses: actions/cache@v4
+        with:
+          path: build/bin
+          key: vendor-ffmpeg-${{ runner.os }}-${{ hashFiles('scripts/ensure-ffmpeg.mjs', 'scripts/ensure-bundled-llm.mjs') }}
+
       # Weights are downloaded only where they are needed (macOS images have the
       # least disk headroom); the lite build never downloads them.
       - name: Vendor ffmpeg + bundled LLM (full build)
