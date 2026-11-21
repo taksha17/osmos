@@ -15,6 +15,24 @@
 
 import type { BrowserWindow } from 'electron';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const TOOL_WINDOW_SCRIPT = `param([long]$hwnd)
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class OsmosToolWindow {
+  [DllImport("user32.dll", SetLastError=true)] public static extern int GetWindowLong(IntPtr h, int i);
+  [DllImport("user32.dll", SetLastError=true)] public static extern int SetWindowLong(IntPtr h, int i, int v);
+}
+"@
+$h = [IntPtr]$hwnd
+$ex = [OsmosToolWindow]::GetWindowLong($h, -20)
+$want = ($ex -bor 0x80) -band (-bnot 0x40000)
+if ($want -ne $ex) { [void][OsmosToolWindow]::SetWindowLong($h, -20, $want) }
+`;
 
 /**
  * Windows: give the overlay a tool-window style so it leaves the Alt-Tab list.
@@ -39,29 +57,20 @@ export function markToolWindow(win: BrowserWindow): void {
     return;
   }
 
-  const script = [
-    `$h=[IntPtr]${hwnd}`,
-    'Add-Type @"',
-    'using System;',
-    'using System.Runtime.InteropServices;',
-    'public class OsmosToolWindow {',
-    '  [DllImport("user32.dll", SetLastError=true)] public static extern int GetWindowLong(IntPtr h, int i);',
-    '  [DllImport("user32.dll", SetLastError=true)] public static extern int SetWindowLong(IntPtr h, int i, int v);',
-    '  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);',
-    '}',
-    '"@',
-    'try {',
-    '  $ex=[OsmosToolWindow]::GetWindowLong($h, -20)',
-    '  $want=($ex -bor 0x80) -band (-bnot 0x40000)',
-    '  if ($want -ne $ex) { [void][OsmosToolWindow]::SetWindowLong($h, -20, $want) }',
-    '  [void][OsmosToolWindow]::SetWindowPos($h, [IntPtr]::Zero, 0,0,0,0, 0x27)',
-    '} catch { }',
-  ].join('\n');
+  // The script is written to a file instead of passed with -Command: the here-string
+  // needs literal newlines, and Node's argument escaping mangles them on Windows.
+  let scriptPath: string;
+  try {
+    scriptPath = path.join(os.tmpdir(), 'osmos-toolwindow.ps1');
+    if (!fs.existsSync(scriptPath)) fs.writeFileSync(scriptPath, TOOL_WINDOW_SCRIPT, 'utf8');
+  } catch {
+    return;
+  }
 
   try {
     const child = spawn(
       'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', script],
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', scriptPath, hwnd],
       { windowsHide: true, stdio: 'ignore', detached: true },
     );
     child.unref();

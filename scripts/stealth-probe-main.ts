@@ -144,6 +144,8 @@ async function main() {
     ...overlayWindowType(),
   });
   await overlay.loadURL('data:text/html,<body style="margin:0;background:%23ff00aa"></body>');
+  // Same wiring as src/main/index.ts: blur returns the overlay to passive.
+  overlay.on('blur', () => releaseOverlayFocus(overlay, true));
 
   applyNonActivating(overlay, true);
   presentOverlay(overlay, true);
@@ -178,7 +180,12 @@ async function main() {
     results.exStylesAfterProtection = exStyle;
     results.checks.toolWindowStyle = (exStyle & 0x80) !== 0;
 
-    overlay.setContentProtection(true);
+    try {
+      overlay.setContentProtection(true);
+      results.checks.contentProtectionApiAccepted = true;
+    } catch {
+      results.checks.contentProtectionApiAccepted = false;
+    }
     await sleep(900);
     const native = await affinityOf(tmpDir, overlay);
     results.affinity = native.affinity;
@@ -197,6 +204,9 @@ async function main() {
     // control capture actually shows the overlay.
     const captureUsable = !(control.r < 8 && control.g < 8 && control.b < 8);
     results.checks.screenCaptureUsable = captureUsable;
+    // Without a composited desktop neither DWM affinity nor a pixel capture can
+    // be observed, so the exclusion row is reported as environment-limited.
+    results.exclusionEnvironmentLimited = !captureUsable || native.affinity !== 0x11;
     if (captureUsable) {
       results.checks.captureSeesOverlayWithoutProtection = nearMagenta(control);
       const protectedCapture = await captureMean(tmpDir);
