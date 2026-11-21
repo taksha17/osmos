@@ -25,6 +25,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test": "node scripts/run-shared-tests.mjs",
     "bench": "node bench/run.mjs",
+    "capture:fixtures": "node scripts/capture-fixtures.mjs",
     "bench:web": "node bench/web.mjs",
     "pack": "npm run build && npm run build:audio-worker && node scripts/pack.mjs",
     "pack:linux": "node scripts/ensure-ffmpeg.mjs && node scripts/ensure-bundled-llm.mjs && npm run build && npm run build:audio-worker && electron-builder --linux --publish never",

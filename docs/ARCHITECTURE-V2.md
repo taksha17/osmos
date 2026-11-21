@@ -651,6 +651,7 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > | Check | Result |
 > |---|---|
 > | Screen kind accuracy, `bench/fixtures/screen/labelled.jsonl` | **1.000** on 31 snapshots, **code recall 1.000**, 0 misses (first run 0.839 with 5 misses; see below). Gated: `npm run bench` exits non-zero below accuracy 0.9 or code recall 0.85, and the report is still written |
+> | Holdout plumbing, verified on the box | 2 OCR'd screenshots captured by filename label → bench reports `all` 1.000 **and** holdout 1.000, gate on holdout, exit 0; one mislabelled capture then reads `all` 0.971 (a pass) but holdout 0.667 / code recall 0.5 → **exit 1** with both gate failures, so the all-set number cannot hide a real error |
 > | Unit tests | 134/134, 10 of them new for the classifier and its hint plumbing |
 > | Trigger / latency rows after the change | unchanged (precision 1.000, p50 129 ms on the fake provider) |
 >

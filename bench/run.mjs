@@ -94,16 +94,20 @@ const SCREEN_GATES = { accuracy: 0.9, codeRecall: 0.85 };
 
 function screenGateFailures(screenEval) {
   if (!screenEval) return [];
+  const gate = screenEval.gate;
+  const where =
+    gate.split === 'holdout'
+      ? 'holdout snapshots'
+      : 'tuning snapshots (no holdout captured yet — run scripts/capture-fixtures.mjs) ';
   const failures = [];
-  if (screenEval.accuracy < SCREEN_GATES.accuracy) {
-    failures.push(`screen accuracy ${screenEval.accuracy} < ${SCREEN_GATES.accuracy}`);
+  if (gate.accuracy < SCREEN_GATES.accuracy) {
+    failures.push(`${where}: screen accuracy ${gate.accuracy} < ${SCREEN_GATES.accuracy}`);
   }
-  const codeRecall = screenEval.recall.code;
-  if (codeRecall === undefined) {
-    // A fixture set without code snapshots cannot exercise the §8.2 hard rule.
-    failures.push('no code snapshots in bench/fixtures/screen/labelled.jsonl — code recall gate cannot be evaluated');
-  } else if (codeRecall < SCREEN_GATES.codeRecall) {
-    failures.push(`screen code recall ${codeRecall} < ${SCREEN_GATES.codeRecall}`);
+  if (gate.codeRecall === undefined) {
+    // A set without code snapshots cannot exercise the §8.2 hard rule.
+    failures.push(`${where}: no code snapshots — code recall gate cannot be evaluated`);
+  } else if (gate.codeRecall < SCREEN_GATES.codeRecall) {
+    failures.push(`${where}: screen code recall ${gate.codeRecall} < ${SCREEN_GATES.codeRecall}`);
   }
   return failures;
 }
@@ -124,13 +128,7 @@ function readJsonl(file) {
  * chat path uses and reports accuracy plus per-kind recall. Code recall matters
  * most: it is what forces the vision lane (§8.2 hard rule).
  */
-function evaluateScreen(screen) {
-  const file = path.join(screenFixturesDir, 'labelled.jsonl');
-  if (!fs.existsSync(file)) return null;
-
-  const labelled = readJsonl(file);
-  if (labelled.length === 0) return null;
-
+function screenMetrics(screen, labelled) {
   const perKind = {};
   const misses = [];
   let correct = 0;
@@ -149,11 +147,38 @@ function evaluateScreen(screen) {
     Object.entries(perKind).map(([kind, counts]) => [kind, round(counts.hits / counts.labels)]),
   );
 
+  return { labels: labelled.length, accuracy: round(correct / labelled.length), recall, misses };
+}
+
+/**
+ * Screen snapshot classification — Architecture v2 §12 / Phase 4.
+ *
+ * Fixtures may carry `"split": "holdout"`. The rules were tuned on the hand-written
+ * set, so once a holdout exists the gate is measured on the holdout alone; before
+ * that it falls back to the tuning set and says so, rather than reporting a
+ * number that only means "still consistent with what it was tuned on".
+ */
+function evaluateScreen(screen) {
+  const file = path.join(screenFixturesDir, 'labelled.jsonl');
+  if (!fs.existsSync(file)) return null;
+
+  const labelled = readJsonl(file);
+  if (labelled.length === 0) return null;
+
+  const holdout = labelled.filter((item) => item.split === 'holdout');
+  const all = screenMetrics(screen, labelled);
+  const onHoldout = holdout.length > 0 ? screenMetrics(screen, holdout) : null;
+  const gateMetrics = onHoldout ?? all;
+
   return {
-    labels: labelled.length,
-    accuracy: round(correct / labelled.length),
-    recall,
-    misses,
+    ...all,
+    holdout: onHoldout,
+    gate: {
+      split: onHoldout ? 'holdout' : 'tune',
+      labels: gateMetrics.labels,
+      accuracy: gateMetrics.accuracy,
+      codeRecall: gateMetrics.recall.code,
+    },
   };
 }
 
@@ -388,7 +413,13 @@ async function main() {
         : []),
       ...(screenEval
         ? [
-            `- Screen kinds: accuracy **${screenEval.accuracy}** on ${screenEval.labels} labelled snapshots · code recall **${screenEval.recall.code ?? 'n/a'}** · per kind ${JSON.stringify(screenEval.recall)} · gate **${gateFailures.length === 0 ? 'pass' : 'FAIL'}** (accuracy ≥ ${SCREEN_GATES.accuracy}, code recall ≥ ${SCREEN_GATES.codeRecall})`,
+            `- Screen kinds (all ${screenEval.labels} snapshots): accuracy **${screenEval.accuracy}** · code recall **${screenEval.recall.code ?? 'n/a'}** · per kind ${JSON.stringify(screenEval.recall)}`,
+            ...(screenEval.holdout
+              ? [
+                  `- Screen holdout (${screenEval.holdout.labels} snapshots): accuracy **${screenEval.holdout.accuracy}** · code recall **${screenEval.holdout.recall.code ?? 'n/a'}**`,
+                ]
+              : []),
+            `- Screen gate: **${gateFailures.length === 0 ? 'pass' : 'FAIL'}** on the ${screenEval.gate.split} set (${screenEval.gate.labels} snapshots; accuracy ≥ ${SCREEN_GATES.accuracy}, code recall ≥ ${SCREEN_GATES.codeRecall})`,
             ...gateFailures.map((failure) => `  - GATE FAILED: ${failure}`),
           ]
         : []),
@@ -412,6 +443,11 @@ async function main() {
     console.log(
       `[bench] screen kinds accuracy=${screenEval.accuracy} code recall=${screenEval.recall.code ?? 'n/a'} (${screenEval.labels} snapshots, ${screenEval.misses.length} misses)`,
     );
+    if (screenEval.holdout) {
+      console.log(
+        `[bench] screen holdout accuracy=${screenEval.holdout.accuracy} code recall=${screenEval.holdout.recall.code ?? 'n/a'} (${screenEval.holdout.labels} snapshots, ${screenEval.holdout.misses.length} misses)`,
+      );
+    }
   }
   console.log(`[bench] report → ${path.relative(root, resultPath)}`);
   if (writeDoc) console.log(`[bench] appended → ${path.relative(root, benchDoc)}`);

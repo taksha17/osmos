@@ -165,6 +165,7 @@ Capture and STT run in **supervised external processes**, never inline in main.
 - `requiresVision` is true for code and problem statements only (§12). Do not make slides or chats force the vision lane — that would take easy screens off the local lane.
 - `context.snapshot.hint` is the one sentence the screen section carries. Add a kind's instruction to `HINTS` in that module, not inline in `src/main/index.ts`.
 - Screen kinds are measured by `npm run bench` (accuracy + per-kind recall) and **gated**: the run exits non-zero when accuracy < 0.9, code recall < 0.85, or the fixture set contains no code snapshots. The report and doc section are still written on failure. Trigger and latency rows are deliberately advisory — do not turn them into gates until their corpora are independent.
+- The gate is measured on **holdout** fixtures whenever they exist and only falls back to the tuning set when none have been captured. Any fixture line may carry `"split":"holdout"`; the hand-written lines are the tuning set and must not be relabelled to make the gate pass. Capture real ones with `npm run capture:fixtures -- screen --dir <folder>` (label = filename prefix, e.g. `code-two-sum.png`) or `npm run capture:fixtures -- triggers --file <tsv>`. Add `--out` to write a separate file and `--dry` to preview.
 
 ### Web access (v3, `docs/ARCHITECTURE-V3.md`)
 
