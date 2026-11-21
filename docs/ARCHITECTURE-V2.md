@@ -748,9 +748,21 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > (loads anywhere, persists by rewriting the file). The driver interface exists so
 > that choice can be made and packaged-tested without touching the store API.
 >
-> Still to come in this phase: that driver, `sqlite-vec`-or-equivalent vectors fused
-> with the TF-IDF path in `main/services/retrieval.ts`, and the exit rows — migration
-> against **real** v0.6 data, and a 30-minute transcript summarised in ≤ 60 s locally.
+> **Persistent driver (slice 3):** `main/providers/memory/sqlJsStore.ts` — SQLite via
+> `sql.js` (WASM, MIT) behind the same store API, so no native rebuild and no
+> per-ABI asarUnpack. Writes are batched in a transaction and exported through a
+> temp file plus rename, so a crash cannot leave a half-written `memory.sqlite`;
+> `mustExist` refuses to invent an empty database over a real one, and a corrupt
+> file is reported with its path instead of being read as empty memory. The WASM
+> binary is resolved with `require.resolve`, because both the esbuild test bundle
+> and a packaged `app.asar` break `__dirname`-relative lookup. Measured on the box:
+> migration → close → reopen returns the same records (metadata included) and the
+> same search hits.
+>
+> Still to come in this phase: wiring retrieved memories into the `ContextPacket`,
+> `sqlite-vec`-or-equivalent vectors fused with the TF-IDF path in
+> `main/services/retrieval.ts`, and the exit rows — migration against **real** v0.6
+> data, and a 30-minute transcript summarised in ≤ 60 s locally.
 
 - SQLite + sqlite-vec, hybrid retrieval, data migration from JSON.
 - SessionReport and exports.

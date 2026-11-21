@@ -46,6 +46,7 @@
     "mammoth": "^1.12.1",
     "marked": "^15.0.0",
     "pdf-parse": "^2.4.5",
+    "sql.js": "^1.11.0",
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {

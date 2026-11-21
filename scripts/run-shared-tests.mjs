@@ -60,6 +60,11 @@ const built = (
         platform: 'node',
         format: 'esm',
         target: 'node20',
+        // sql.js is CJS emscripten glue that does `require('fs')` for its WASM.
+        // Bundling it into ESM turns that into a throwing dynamic require, so it
+        // resolves from node_modules at run time instead (the main build already
+        // marks all packages external).
+        external: ['sql.js'],
         logLevel: 'warning',
       });
       return outfile;

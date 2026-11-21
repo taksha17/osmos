@@ -92,6 +92,22 @@ if (plan.records.length === 0) {
   console.log('[dry-run] note: this install has no migratable content yet — a real v0.6 migration check needs a machine that has used the app');
 }
 
+const dbPath = arg('db');
+if (dbPath) {
+  const { openSqlJsStore } = await import('../src/main/providers/memory/sqlJsStore.ts');
+  const store = await openSqlJsStore({ filePath: dbPath });
+  const before = store.count();
+  applyMigration(store, plan);
+  store.close();
+
+  const reopened = await openSqlJsStore({ filePath: dbPath, mustExist: true });
+  const bytes = fs.statSync(dbPath).size;
+  console.log(
+    `[dry-run] persisted: ${dbPath} (${bytes} bytes, ${before} → ${reopened.count()} records, reopened ok)`,
+  );
+  reopened.close();
+}
+
 const query = arg('query');
 if (query) {
   const store = createMemoryStore();
