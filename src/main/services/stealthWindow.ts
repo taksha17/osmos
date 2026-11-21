@@ -14,6 +14,61 @@
  */
 
 import type { BrowserWindow } from 'electron';
+import { spawn } from 'node:child_process';
+
+/**
+ * Windows: give the overlay a tool-window style so it leaves the Alt-Tab list.
+ *
+ * Electron's `skipTaskbar` removes the taskbar button but does not set
+ * WS_EX_TOOLWINDOW, and Windows keeps taskbar-hidden windows in Alt-Tab —
+ * measured with `GetWindowLong(GWL_EXSTYLE)` on the real window. The flag can
+ * only be set with SetWindowLongPtr, which needs the Win32 API; this app already
+ * relies on PowerShell for its Windows screen and audio helpers, so it uses the
+ * same route instead of adding a native module that would need a per-ABI rebuild.
+ *
+ * Fire-and-forget: failure must never block window creation, and the chip in the
+ * UI stays honest because `verifyStealth` reports what the OS says.
+ */
+export function markToolWindow(win: BrowserWindow): void {
+  if (process.platform !== 'win32' || win.isDestroyed()) return;
+  let hwnd: string;
+  try {
+    const handle = win.getNativeWindowHandle();
+    hwnd = (handle.length >= 8 ? handle.readBigUInt64LE(0) : BigInt(handle.readUInt32LE(0))).toString();
+  } catch {
+    return;
+  }
+
+  const script = [
+    `$h=[IntPtr]${hwnd}`,
+    'Add-Type @"',
+    'using System;',
+    'using System.Runtime.InteropServices;',
+    'public class OsmosToolWindow {',
+    '  [DllImport("user32.dll", SetLastError=true)] public static extern int GetWindowLong(IntPtr h, int i);',
+    '  [DllImport("user32.dll", SetLastError=true)] public static extern int SetWindowLong(IntPtr h, int i, int v);',
+    '  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);',
+    '}',
+    '"@',
+    'try {',
+    '  $ex=[OsmosToolWindow]::GetWindowLong($h, -20)',
+    '  $want=($ex -bor 0x80) -band (-bnot 0x40000)',
+    '  if ($want -ne $ex) { [void][OsmosToolWindow]::SetWindowLong($h, -20, $want) }',
+    '  [void][OsmosToolWindow]::SetWindowPos($h, [IntPtr]::Zero, 0,0,0,0, 0x27)',
+    '} catch { }',
+  ].join('\n');
+
+  try {
+    const child = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', script],
+      { windowsHide: true, stdio: 'ignore', detached: true },
+    );
+    child.unref();
+  } catch {
+    /* style is best-effort; skipTaskbar still hides the taskbar button */
+  }
+}
 
 /**
  * Apply the platform's non-activating window style.
@@ -39,6 +94,7 @@ export function presentOverlay(win: BrowserWindow, stealth: boolean): void {
   applyNonActivating(win, stealth);
   if (stealth) win.showInactive();
   else win.show();
+  if (stealth) markToolWindow(win);
 }
 
 /**
@@ -52,7 +108,16 @@ export function focusOverlay(win: BrowserWindow): void {
   } catch {
     /* ignore */
   }
+  // A window shown with showInactive() is not in the activation chain; it has to
+  // be shown (or re-shown) before focus() can take, which is what a user click
+  // on a non-activating overlay does anyway.
+  win.show();
   win.focus();
+  try {
+    win.webContents.focus();
+  } catch {
+    /* ignore */
+  }
 }
 
 /** Focus left the overlay: return to the non-activating state. */

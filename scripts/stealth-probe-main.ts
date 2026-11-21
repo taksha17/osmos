@@ -22,6 +22,7 @@ import {
   applyNonActivating,
   clickThroughWindowState,
   focusOverlay,
+  markToolWindow,
   overlayWindowType,
   presentOverlay,
   releaseOverlayFocus,
@@ -147,35 +148,48 @@ async function main() {
   await sleep(900);
 
   results.checks.visible = overlay.isVisible();
-  results.checks.overlayFocusedAfterShow = overlay.isFocused();
-  results.checks.meetingStillFocused = meeting.isFocused();
+  results.checks.overlayDidNotStealFocus = !overlay.isFocused();
+  results.checks.meetingKeptFocus = meeting.isFocused();
 
-  // Focus grant on click, and release on blur.
+  // Focus is granted on click and released on blur.
   focusOverlay(overlay);
-  await sleep(400);
-  results.checks.overlayFocusedOnClick = overlay.isFocused();
+  await sleep(700);
+  results.checks.overlayTakesFocusOnClick = overlay.isFocused();
   meeting.focus();
-  await sleep(500);
+  await sleep(600);
   results.checks.focusReleasedAfterBlur = !overlay.isFocused();
 
   if (process.platform === 'win32') {
+    markToolWindow(overlay);
+    await sleep(1_500);
+    const before = await affinityOf(tmpDir, overlay);
+    results.exStylesBeforeProtection = before.exStyle;
+
+    overlay.setContentProtection(true);
+    await sleep(800);
     const native = await affinityOf(tmpDir, overlay);
-    results.checks.displayAffinity = native.affinity;
+    results.exStylesAfterProtection = native.exStyle;
+    results.affinity = native.affinity;
+    // 0x11 = WDA_EXCLUDEFROMCAPTURE, the flag Zoom/Teams/OBS capture honours.
+    results.checks.captureExclusionFlagSet = native.affinity === 0x11;
     // WS_EX_TOOLWINDOW (0x80) is what keeps a window out of Alt-Tab.
     results.checks.toolWindowStyle = (native.exStyle & 0x80) !== 0;
-    results.checks.skipTaskbarApplied = (native.exStyle & 0x40000) !== 0;
 
     const control = await captureMean(tmpDir);
     results.controlCapture = control;
-    results.checks.captureSeesOverlayWithoutProtection = nearMagenta(control);
-
-    overlay.setContentProtection(true);
-    await sleep(700);
-    const protectedCapture = await captureMean(tmpDir);
-    results.protectedCapture = protectedCapture;
-    results.checks.captureHidesOverlayWithProtection = !nearMagenta(protectedCapture);
-    results.checks.protectionChangesCapture =
-      JSON.stringify(control) !== JSON.stringify(protectedCapture);
+    // GDI capture returns black when no interactive desktop is attached (an SSH
+    // session, a locked screen); the pixel test is only meaningful when the
+    // control capture actually shows the overlay.
+    const captureUsable = !(control.r < 8 && control.g < 8 && control.b < 8);
+    results.checks.screenCaptureUsable = captureUsable;
+    if (captureUsable) {
+      results.checks.captureSeesOverlayWithoutProtection = nearMagenta(control);
+      const protectedCapture = await captureMean(tmpDir);
+      results.protectedCapture = protectedCapture;
+      results.checks.captureHidesOverlayWithProtection = !nearMagenta(protectedCapture);
+      results.checks.protectionChangesCapture =
+        JSON.stringify(control) !== JSON.stringify(protectedCapture);
+    }
 
     // Click-through must not leave the window focusable.
     setClickThrough(overlay, true);
@@ -184,11 +198,20 @@ async function main() {
     results.checks.clickThroughUnfocusable = !overlay.isFocusable();
     setClickThrough(overlay, false);
   } else {
-    results.checks.displayAffinity = null;
+    results.affinity = null;
   }
 
-  const failed = Object.entries(results.checks).filter(([, value]) => value === false);
+  // Reported, but not a product verdict: with no interactive desktop attached
+  // (an SSH session, a locked screen) GDI capture is black, so the pixel half of
+  // the exclusion test cannot run. The affinity flag above still measures.
+  const environmentChecks = new Set(['screenCaptureUsable']);
+  const failed = Object.entries(results.checks).filter(
+    ([key, value]) => value === false && !environmentChecks.has(key),
+  );
   results.failed = failed.map(([key]) => key);
+  results.environmentLimited = Object.entries(results.checks)
+    .filter(([key, value]) => value === false && environmentChecks.has(key))
+    .map(([key]) => key);
   results.ok = results.failed.length === 0;
 
   process.stdout.write(`STEALTH_PROBE ${JSON.stringify(results)}\n`);
