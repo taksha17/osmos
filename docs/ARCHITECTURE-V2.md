@@ -639,7 +639,10 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 
 ### Phase 4: Vision (2–3 weeks)
 
-> **Phase 4 status (2026-11-21, slice 1):** the screen taxonomy is in.
+> **Phase 4 status (2026-11-21): implemented.** The screen taxonomy, the multimodal
+> provider layer, the image path and coding-mode rolling context are all in and
+> measured; the one exit row that needs a provider key has a harness but no
+> measurement yet (see the end of this block).
 > `src/shared/policy/screenSnapshot.ts` classifies OCR text as code / terminal /
 > error / slide / chat / document / unknown, returns the prompt line that follows
 > from it (`hint`), and owns the §12 hard rule (`requiresVision` is true for code
@@ -653,7 +656,7 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > | Screen kind accuracy, `bench/fixtures/screen/labelled.jsonl` | **1.000** on 31 snapshots, **code recall 1.000**, 0 misses (first run 0.839 with 5 misses; see below). Gated: `npm run bench` exits non-zero below accuracy 0.9 or code recall 0.85, and the report is still written |
 > | Provider wire check (`src/main/providers/llm/config.test.ts`, stubbed `fetch`, no key) | a code-snapshot request leaves with `image_url` content parts (OpenAI-compatible) and the message `images` array (Ollama); a text-only request stays a plain string; a model without vision sends **no** request and rejects. A path reference is read and encoded on the wire |
 > | Holdout plumbing, verified on the box | 2 OCR'd screenshots captured by filename label → bench reports `all` 1.000 **and** holdout 1.000, gate on holdout, exit 0; one mislabelled capture then reads `all` 0.971 (a pass) but holdout 0.667 / code recall 0.5 → **exit 1** with both gate failures, so the all-set number cannot hide a real error |
-> | Unit tests | 134/134, 10 of them new for the classifier and its hint plumbing |
+> | Unit tests | **163/163**, 29 of them new across Phase 4 (classifier and hints, vision payloads, provider wire check, image freshness, rolling window and its budget split) |
 > | Trigger / latency rows after the change | unchanged (precision 1.000, p50 129 ms on the fake provider) |
 >
 > The first run's five misses were real rule bugs, not fixture noise: `\bError:`
@@ -688,10 +691,21 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > needs vision, the lane accepts images, and a paired grab exists, then passes it to
 > `chatWithProvider` / `streamLane` as `LlmImageInput`.
 >
-> Still open: coding mode with a rolling snapshot history; the exit row **screenshot
-> → first token ≤ 3 s with a cloud vision model**, which cannot be measured without a
-> provider key on the test box; and a real-device check that a vision lane returns a
-> correct answer from a code screenshot (unit tests cover the decision, not the answer).
+> **Coding-mode rolling context (slice 4):** `shared/policy/snapshotHistory.ts` keeps
+> the last three snapshots (2 min window, de-duplicated by content, oldest first),
+> `screenLive.ts` records the text of every OCR it emits, and `buildChatContext` sends
+> the two before the current one whenever the snapshot classifies as code — `coding`
+> is not a selectable `CopilotMode`, so the kind is the trigger. The packet splits the
+> screen budget 60/40, so history can never crowd out the snapshot the question is
+> about, and the prompt labels each entry with its kind and age.
+>
+> **Exit row status.** *Screen fixtures meet recall target* — met on the gated set,
+> and the holdout harness exists but the holdout itself is still only synthetic until
+> real screenshots are captured. *Screenshot → first token ≤ 3 s with a cloud vision
+> model* — **not measured**: the harness is ready (`BENCH_VISION_IMAGE=<png>` plus
+> `BENCH_PROVIDER_BASE_URL`/`BENCH_PROVIDER_MODEL`, advisory row, no gate) but there is
+> no key on the test box, and the local 1.5B lane has no vision, so the image correctly
+> falls back to OCR text there.
 
 - Frame grabber with change detection and overlay masking.
 - Multimodal provider support; OCR as async text path.
