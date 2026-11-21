@@ -27,6 +27,7 @@ list short and link the phase that replaces a rule rather than deleting it.
 
 | Guard | Why |
 |---|---|
+| `src/shared/policy/screenSnapshot.ts` | the only screen classifier; `looksLikeCodeScreen` derives from `classifySnapshot`, and the screen-section instruction comes from `HINTS` — two code heuristics drifting apart is how a code screenshot ends up on the fast lane |
 | `src/shared/policy/*` parity tests | `planLanes` still matches the v0.6 `routeDecision` at the default thresholds; `decideTrigger` deliberately deviates (§7.3: notes and self-speech never answer) and `triggerPolicy.test.ts` records the diff, justified by the labelled eval in `bench/fixtures/triggers/` |
 | `bench/` replay harness | routing, prompt and trigger changes need a measured before/after |
 | Contracts import no Electron | each contract must run in a worker and in plain Node |

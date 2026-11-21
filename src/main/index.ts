@@ -308,11 +308,7 @@ async function buildChatContext(
       'This is what is currently visible on the user’s screen (meeting slide, coding problem, question, document).',
       'OCR is imperfect and may include browser/UI noise — ignore anything irrelevant.',
       'If the user’s question refers to “this”, “the screen”, “the question”, or a problem shown, answer using this text.',
-      ...(context.hasCodeScreen
-        ? [
-            'This snapshot is code or a problem statement: explain the bug briefly, then give working code in one block.',
-          ]
-        : []),
+      ...(context.snapshot.hint ? [context.snapshot.hint] : []),
       '---',
       screenText,
       '---',

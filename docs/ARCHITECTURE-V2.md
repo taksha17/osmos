@@ -638,6 +638,38 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 - **Exit:** end-of-question → first token ≤ 1.5 s p50 / ≤ 2.5 s p95 on replay set; trigger precision ≥ 0.9, recall ≥ 0.85 on labelled transcripts.
 
 ### Phase 4: Vision (2–3 weeks)
+
+> **Phase 4 status (2026-11-21, slice 1):** the screen taxonomy is in.
+> `src/shared/policy/screenSnapshot.ts` classifies OCR text as code / terminal /
+> error / slide / chat / document / unknown, returns the prompt line that follows
+> from it (`hint`), and owns the §12 hard rule (`requiresVision` is true for code
+> and problem statements only). `answerContext` carries the classification, and
+> `buildChatContext` now writes `context.snapshot.hint` into the screen section
+> instead of the single hard-coded code sentence, so a terminal or an error dialog
+> gets the instruction that fits it.
+>
+> | Check | Result |
+> |---|---|
+> | Screen kind accuracy, `bench/fixtures/screen/labelled.jsonl` | **1.000** on 31 snapshots, **code recall 1.000**, 0 misses (first run 0.839 with 5 misses; see below) |
+> | Unit tests | 134/134, 10 of them new for the classifier and its hint plumbing |
+> | Trigger / latency rows after the change | unchanged (precision 1.000, p50 129 ms on the fake provider) |
+>
+> The first run's five misses were real rule bugs, not fixture noise: `\bError:`
+> never matched because of a trailing `\b` after a colon, one keyword plus one
+> bullet scored under the threshold, `Input:`/`Output:` counted as speaker lines
+> (problem statements looked like chat), and markdown headings were not
+> recognised as documents. Each is now pinned by a fixture, and the hand-written
+> set still needs an independent corpus before 1.000 is treated as general.
+>
+> Already in place from Phase 1–3, and reused rather than rewritten: frame change
+> detection (`liveScreenStream.ts` pixel diff, `imageHash.ts`), overlay masking
+> (`stripOverlayEcho` in `shared/screenContext.ts`), and the silent grabbers per OS.
+>
+> Still open: multimodal provider support (providers are text-only, so `includeImage`
+> has no consumer yet); coding mode with a rolling snapshot history; and the exit row
+> **screenshot → first token ≤ 3 s with a cloud vision model**, which cannot be
+> measured without a provider key on the test box.
+
 - Frame grabber with change detection and overlay masking.
 - Multimodal provider support; OCR as async text path.
 - Coding mode with rolling snapshot context.

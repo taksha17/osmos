@@ -23,6 +23,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const buildDir = path.join(root, '.bench-build');
 const fixturesDir = path.join(root, 'bench', 'fixtures', 'transcripts');
 const triggerFixturesDir = path.join(root, 'bench', 'fixtures', 'triggers');
+const screenFixturesDir = path.join(root, 'bench', 'fixtures', 'screen');
 const resultsDir = path.join(root, 'bench', 'results');
 const benchDoc = path.join(root, 'docs', 'BENCHMARKS.md');
 
@@ -78,6 +79,57 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const round = (value) => Math.round(value * 1000) / 1000;
+
+function readJsonl(file) {
+  return fs
+    .readFileSync(file, 'utf8')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'))
+    .map((line) => JSON.parse(line));
+}
+
+/**
+ * Screen snapshot classification — Architecture v2 §12 / Phase 4.
+ *
+ * Replays the labelled OCR snapshots through the same `classifySnapshot` the
+ * chat path uses and reports accuracy plus per-kind recall. Code recall matters
+ * most: it is what forces the vision lane (§8.2 hard rule).
+ */
+function evaluateScreen(screen) {
+  const file = path.join(screenFixturesDir, 'labelled.jsonl');
+  if (!fs.existsSync(file)) return null;
+
+  const labelled = readJsonl(file);
+  if (labelled.length === 0) return null;
+
+  const perKind = {};
+  const misses = [];
+  let correct = 0;
+
+  for (const item of labelled) {
+    const got = screen.classifySnapshot(item.text);
+    const ok = got.kind === item.kind;
+    if (ok) correct += 1;
+    else misses.push({ id: item.id, expected: item.kind, got: got.kind, confidence: got.confidence });
+    perKind[item.kind] ??= { labels: 0, hits: 0 };
+    perKind[item.kind].labels += 1;
+    if (ok) perKind[item.kind].hits += 1;
+  }
+
+  const recall = Object.fromEntries(
+    Object.entries(perKind).map(([kind, counts]) => [kind, round(counts.hits / counts.labels)]),
+  );
+
+  return {
+    labels: labelled.length,
+    accuracy: round(correct / labelled.length),
+    recall,
+    misses,
+  };
+}
+
 /**
  * Trigger quality — Architecture v2 §7.3 / §13.2.
  *
@@ -123,7 +175,6 @@ function evaluateTriggers(trigger) {
     }
   }
 
-  const round = (value) => Math.round(value * 1000) / 1000;
   return {
     labels: labelled.length,
     truePositives,
@@ -195,10 +246,12 @@ async function main() {
   const events = await bundle('src/shared/events.ts', 'events.mjs');
   const router = await bundle('src/shared/policy/routerV2.ts', 'router.mjs');
   const trigger = await bundle('src/shared/policy/triggerPolicy.ts', 'trigger.mjs');
+  const screen = await bundle('src/shared/policy/screenSnapshot.ts', 'screen.mjs');
   const llm = await bundle('src/main/providers/llm/config.ts', 'llm.mjs');
 
   const provider = hasRealProvider ? realProvider(llm) : fakeProvider();
   const triggerEval = evaluateTriggers(trigger);
+  const screenEval = evaluateScreen(screen);
   const samples = [];
   const skipped = [];
 
@@ -266,6 +319,7 @@ async function main() {
     provider: provider.id,
     deterministic: !hasRealProvider,
     trigger: triggerEval,
+    screen: screenEval,
     summary,
     samples,
     skipped,
@@ -297,6 +351,11 @@ async function main() {
             `- Trigger quality: precision **${triggerEval.precision}** · recall **${triggerEval.recall}** on ${triggerEval.labels} labelled utterances (tp ${triggerEval.truePositives} / fp ${triggerEval.falsePositives} / fn ${triggerEval.falseNegatives} / tn ${triggerEval.trueNegatives})`,
           ]
         : []),
+      ...(screenEval
+        ? [
+            `- Screen kinds: accuracy **${screenEval.accuracy}** on ${screenEval.labels} labelled snapshots · code recall **${screenEval.recall.code ?? 'n/a'}** · per kind ${JSON.stringify(screenEval.recall)}`,
+          ]
+        : []),
       '',
       table,
       '',
@@ -311,6 +370,11 @@ async function main() {
   if (triggerEval) {
     console.log(
       `[bench] trigger precision=${triggerEval.precision} recall=${triggerEval.recall} (${triggerEval.labels} labels, ${triggerEval.misses.length} misses)`,
+    );
+  }
+  if (screenEval) {
+    console.log(
+      `[bench] screen kinds accuracy=${screenEval.accuracy} code recall=${screenEval.recall.code ?? 'n/a'} (${screenEval.labels} snapshots, ${screenEval.misses.length} misses)`,
     );
   }
   console.log(`[bench] report → ${path.relative(root, resultPath)}`);

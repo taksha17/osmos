@@ -174,6 +174,29 @@ test('without a vision lane the OCR path keeps the v0.6 decision', () => {
   assert.deepEqual(routeDecisionFor(ctx.plan), ctx.plan.decision);
 });
 
+test('the snapshot classification reaches the context and its hint', () => {
+  const code = buildAnswerContext({
+    mode: 'coding',
+    question: 'what is wrong here',
+    screen: { snapshotId: 'snap-1', ocrText: CODE_SCREEN },
+  });
+  assert.equal(code.snapshot.kind, 'code');
+  assert.equal(code.hasCodeScreen, true);
+  assert.match(code.snapshot.hint, /working code/);
+
+  const slide = buildAnswerContext({
+    mode: 'meeting',
+    question: 'what did we decide about the roadmap?',
+    screen: { snapshotId: 'snap-2', ocrText: SLIDE_SCREEN },
+  });
+  assert.equal(slide.snapshot.kind, 'slide');
+  assert.equal(slide.hasCodeScreen, false);
+  assert.equal(slide.plan.requiresVision, false);
+  assert.match(slide.snapshot.hint, /slide/);
+
+  assert.equal(buildAnswerContext({ mode: 'general', question: 'hello there' }).snapshot.hint, '');
+});
+
 test('an empty screen never becomes a screen section', () => {
   const ctx = buildAnswerContext({
     mode: 'general',

@@ -1,0 +1,34 @@
+# Labelled screen snapshots for the §12 classifier (Architecture v2, Phase 4).
+# One JSON object per line: {"id","kind","text"} — `text` is OCR-shaped, newlines
+# escaped. Hand-written from real screen layouts; add a case when a rule changes.
+{"id":"code-ts-class","kind":"code","text":"class Cart {\n  private items: Item[] = [];\n  add(item: Item) {\n    this.items.push(item);\n  }\n}"}
+{"id":"code-python","kind":"code","text":"def two_sum(nums, target):\n    seen = {}\n    for i, n in enumerate(nums):\n        if target - n in seen:\n            return [seen[target - n], i]\n        seen[n] = i"}
+{"id":"code-java","kind":"code","text":"public int[] twoSum(int[] nums, int target) {\n  Map<Integer, Integer> seen = new HashMap<>();\n  for (int i = 0; i < nums.length; i++) {\n    int want = target - nums[i];\n  }\n  return new int[] { 0, 1 };\n}"}
+{"id":"code-jsx","kind":"code","text":"export function Badge({ label }: Props) {\n  const tone = label ? 'info' : 'muted';\n  return <span className={tone}>{label}</span>;\n}"}
+{"id":"code-problem","kind":"code","text":"Given an array of integers nums and an integer target, return indices of the two numbers that add up to target.\n\nExample 1:\nInput: nums = [2,7,11,15], target = 9\nOutput: [0,1]"}
+{"id":"code-go","kind":"code","text":"func (s *Server) handle(w http.ResponseWriter, r *http.Request) {\n\tif r.Method != http.MethodPost {\n\t\thttp.Error(w, \"bad method\", http.StatusMethodNotAllowed)\n\t\treturn\n\t}\n}"}
+{"id":"term-npm","kind":"terminal","text":"PS C:\\Users\\taksh\\osmos-ci> npm run build\n\n> osmos@0.6.0 build\n> vite build\n\nnpm ERR! code ELIFECYCLE\nnpm ERR! errno 1\nnpm error command failed"}
+{"id":"term-git","kind":"terminal","text":"$ git status\nOn branch main\nYour branch is up to date with 'origin/main'.\n\nChanges not staged for commit:\n\tmodified:   src/main/index.ts"}
+{"id":"term-traceback","kind":"terminal","text":"$ python app.py\nTraceback (most recent call last):\n  File \"app.py\", line 12, in <module>\n    main()\nValueError: invalid literal for int() with base 10: 'abc'"}
+{"id":"term-missing","kind":"terminal","text":"$ ffmpeg -f pulse -i default out.wav\nbash: ffmpeg: command not found\nexit code 127"}
+{"id":"term-segfault","kind":"terminal","text":"$ ./osmos --probe\nSegmentation fault (core dumped)"}
+{"id":"error-browser","kind":"error","text":"Uncaught TypeError: Cannot read properties of undefined (reading 'map')\n\nReload   Dismiss"}
+{"id":"error-dialog","kind":"error","text":"Connection failed\nError: connect ETIMEDOUT 10.0.0.4:5432\n\n[ Retry ]   [ Cancel ]"}
+{"id":"error-java","kind":"error","text":"Exception in thread \"main\" java.lang.NullPointerException: Cannot invoke \"String.length()\" because \"name\" is null"}
+{"id":"error-form","kind":"error","text":"We could not save your profile.\nError: 413 Payload Too Large\nRetry    Dismiss"}
+{"id":"slide-roadmap","kind":"slide","text":"Q3 roadmap review\n• Ship the billing migration\n• Cut the onboarding rewrite\n• Hire one platform engineer\nOwner: Priya"}
+{"id":"slide-agenda","kind":"slide","text":"Agenda\n1. Where we are\n2. What changed this quarter\n3. Next steps"}
+{"id":"slide-okr","kind":"slide","text":"OKRs — Platform team\n• p95 answer latency under 1.5 s\n• Zero capture stalls in a 30-minute session\n• Two paying design partners"}
+{"id":"slide-arch","kind":"slide","text":"Architecture review\n• Renderer → IPC → policy\n• Capture worker owns the pipe\n• Quality lane is the fallback\nTakeaways: keep the fast lane boring"}
+{"id":"slide-metrics","kind":"slide","text":"Weekly metrics\n• Activation 41% (+3)\n• D30 retention 18% (-1)\n• p50 first token 49 ms"}
+{"id":"chat-teams","kind":"chat","text":"Priya: can you take the billing migration?\nSam: yes, but I need the retry queue first\nPriya: fine, ship it Thursday"}
+{"id":"chat-slack","kind":"chat","text":"Ana: 09:12 the deploy is green\nBen: 09:13 nice, rolling to eu-west now\nAna: 09:15 watch the error rate"}
+{"id":"chat-transcript","kind":"chat","text":"Interviewer: tell me about a time you led a project\nCandidate: last year I owned the billing migration\nInterviewer: what was the hardest part"}
+{"id":"doc-summary","kind":"document","text":"Executive summary\n\nThe migration moved billing off the legacy cron jobs and onto a single queue. Rollout took three weeks and touched four services. Latency improved by 38% at p95, and the error rate fell to 0.2%. The remaining risk is the retry queue, which still shares a database with the ledger. We recommend splitting it before the next quarter."}
+{"id":"doc-readme","kind":"document","text":"## Installation\n\nRun the installer, then start the app from the launcher. The first launch downloads the local model, which takes a few minutes on a slow connection. If the download fails, the app falls back to your configured cloud provider and shows a warning in Settings."}
+{"id":"doc-spec","kind":"document","text":"Section 4 — Retention\n\nSnapshots are kept per session only. The transcript is stored locally in the profile file. Nothing leaves the machine unless a cloud provider answers a question, in which case the prompt contains the clipped context packet rather than the raw capture."}
+{"id":"doc-abstract","kind":"document","text":"Abstract\n\nWe evaluate endpointing latency across three silence detectors on the same audio set. The state machine dominates the result: switching the per-frame test changes the detected endpoint by less than 40 ms, while the hangover budget moves it by hundreds of milliseconds."}
+{"id":"unknown-loading","kind":"unknown","text":"Loading…"}
+{"id":"unknown-chrome","kind":"unknown","text":"File  Edit  View  Selection  Go  Run  Terminal  Help"}
+{"id":"unknown-icons","kind":"unknown","text":"☰   ✕   ⋮   ⚙   ▾"}
+{"id":"unknown-wallpaper","kind":"unknown","text":"Desktop"}

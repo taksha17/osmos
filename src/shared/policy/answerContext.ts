@@ -1,20 +1,23 @@
 /**
  * Answer context — Architecture v2 §7.2 + §8.2 glue.
  *
- * One call turns a request's inputs into the two objects the chat path needs:
- * the token-budgeted `ContextPacket` (§7.2) and the `LanePlan` (§8.2). Pure, so
- * the main-side adapter (`src/main/services/answerContext.ts`) and the bench can
- * share it, and the unit tests can pin the screen/coding heuristics.
+ * One call turns a request's inputs into the objects the chat path needs: the
+ * token-budgeted `ContextPacket` (§7.2), the `LanePlan` (§8.2) and the §12 screen
+ * snapshot classification. Pure, so the main-side adapter
+ * (`src/main/services/answerContext.ts`) and the bench can share it, and the unit
+ * tests can pin the screen heuristics.
  *
- * The only production step left is the chat handler calling the adapter: prompt
- * assembly lives inline in `src/main/index.ts` (§7 rule 1 keeps it there until the
- * handler is split), so this module is the seam, not the wiring.
+ * Prompt assembly lives inline in `src/main/index.ts` (§7 rule 1), so this module
+ * is the seam: the handler asks it for the decision, the packet and the hint.
  */
 
 import type { RouteDecision } from '../lumenRoute.ts';
 import { buildContextPacket, type ContextBudget, type ContextPacket } from './contextBudget.ts';
 import { planLanes, type LanePlan, type RouterThresholds } from './routerV2.ts';
+import { classifySnapshot, type SnapshotClassification } from './screenSnapshot.ts';
 import type { TriggerMode, TriggerSpeaker } from './triggerPolicy.ts';
+
+export { classifySnapshot, looksLikeCodeScreen } from './screenSnapshot.ts';
 
 export type AnswerContextSources = {
   mode: TriggerMode;
@@ -33,29 +36,12 @@ export type AnswerContextSources = {
 export type AnswerContext = {
   packet: ContextPacket;
   plan: LanePlan;
-  hasScreen: boolean;
+  /** §12: what is on the screen, and the prompt line that follows from it. */
+  snapshot: SnapshotClassification;
+  /** True when the snapshot was classified as code (§12 hard rule). */
   hasCodeScreen: boolean;
+  hasScreen: boolean;
 };
-
-/**
- * Signals that a screen is a code editor or a problem statement rather than a
- * slide or a chat (§12). Two independent hints are required, so prose that
- * happens to contain "return" is not mistaken for code.
- */
-const CODE_HINTS: readonly RegExp[] = [
-  /\b(function|class|interface|struct|enum)\s+\w+/i,
-  /\b(const|let|var)\s+\w+\s*=/,
-  /\b(def|import|from|public|private|protected|static|void)\b/,
-  /=>|===|!==|[{}]\s*$/m,
-  /\b(console\.log|printf|System\.out|print\()/,
-  /\b(leetcode|hackerrank|codility|hackerrank)\b/i,
-];
-
-export function looksLikeCodeScreen(text?: string): boolean {
-  const t = (text ?? '').trim();
-  if (!t) return false;
-  return CODE_HINTS.filter((pattern) => pattern.test(t)).length >= 2;
-}
 
 /**
  * Split a résumé/JD blob into the fact list the packet carries (§7.2's
@@ -75,14 +61,15 @@ export function splitFacts(text: string | undefined, max = 60): string[] {
   return facts;
 }
 
-/** Build the §7.2 packet and the §8.2 lane plan for one request. */
+/** Build the §7.2 packet, the §8.2 lane plan and the §12 snapshot for one request. */
 export function buildAnswerContext(
   sources: AnswerContextSources,
   options: { budget?: ContextBudget; thresholds?: RouterThresholds } = {},
 ): AnswerContext {
   const screenText = (sources.screen?.ocrText ?? '').trim();
   const hasScreen = screenText.length > 0;
-  const hasCodeScreen = looksLikeCodeScreen(screenText);
+  const snapshot = classifySnapshot(screenText);
+  const hasCodeScreen = snapshot.kind === 'code';
 
   const plan = planLanes(
     {
@@ -130,7 +117,7 @@ export function buildAnswerContext(
     options.budget,
   );
 
-  return { packet, plan, hasScreen, hasCodeScreen };
+  return { packet, plan, snapshot, hasScreen, hasCodeScreen };
 }
 
 /**

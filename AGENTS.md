@@ -159,6 +159,13 @@ Capture and STT run in **supervised external processes**, never inline in main.
 - `src/shared/policy/answerContext.ts` returns `{ packet, plan }` for one request (code-screen detection, résumé/JD fact splitting); `src/main/services/answerContext.ts` adapts `AppSettings` to it. `buildChatContext` calls it once, and both chat handlers route on `routeDecisionFor(context.plan)` — do not add a bare `routeDecision(...)` call back into `src/main/index.ts`: a new routing rule belongs in the plan (§8.2 hard rules), not at the call site.
 - Trigger quality is re-measured by `npm run bench` from `bench/fixtures/triggers/labelled.jsonl`. When a trigger rule changes, add a labelled case for it rather than editing an existing label.
 
+### Screen snapshots (Phase 4)
+
+- `src/shared/policy/screenSnapshot.ts` is the only screen classifier: `classifySnapshot(ocrText)` → `{ kind, confidence, requiresVision, hint }`. `looksLikeCodeScreen` is derived from it, so do not add a second "is this code" heuristic at a call site. A misclassification changes routing, so a new rule needs a labelled case in `bench/fixtures/screen/labelled.jsonl`.
+- `requiresVision` is true for code and problem statements only (§12). Do not make slides or chats force the vision lane — that would take easy screens off the local lane.
+- `context.snapshot.hint` is the one sentence the screen section carries. Add a kind's instruction to `HINTS` in that module, not inline in `src/main/index.ts`.
+- Screen kinds are measured by `npm run bench` (accuracy + per-kind recall). Keep the gates at accuracy ≥ 0.9 and code recall ≥ 0.85.
+
 ### Web access (v3, `docs/ARCHITECTURE-V3.md`)
 
 W0 is in: `src/shared/contracts/web.ts`, the pure capability router in `src/shared/policy/webAccess.ts`, the T0 adapter in `src/main/providers/web/builtin.ts`, and the Web Access Manager registry in `src/main/services/webAccess.ts`. Chat still calls `searchWeb()`, so nothing has changed yet.
