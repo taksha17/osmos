@@ -10,7 +10,7 @@
 - GitHub: `https://github.com/taksha17/osmos` (public)
 - **Not** a fork or rebrand of Natively. Natively at `/media/taksha/New Volume/natively` is **personal reference only** — study ideas, never copy proprietary/source-available code.
 - License: MIT (`LICENSE`)
-- Current version: **0.6.1** (`package.json`)
+- Current version: **0.6.2** (`package.json`)
 - Reference product: Cluely (real-time interview/meeting copilot). We match core UX: desktop overlay, live transcription, screen context, answer suggestions. We do **not** copy proprietary code or data.
 
 ## Stack

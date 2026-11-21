@@ -3,7 +3,7 @@
 Where the project actually stands, what is next, and what is blocked on hardware or certificates rather than on code.
 Every claim here is backed by `docs/ARCHITECTURE-V2.md` (specification + phase exit criteria) and `docs/BENCHMARKS.md` (measurements).
 
-**Version:** 0.6.1 · **Tests:** 243 passing on Windows / Linux / macOS CI · **Licence:** MIT
+**Version:** 0.6.2 · **Tests:** 243 passing on Windows / Linux / macOS CI · **Licence:** MIT
 
 ---
 
