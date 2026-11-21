@@ -205,6 +205,18 @@ async function main() {
     results.exStylesAfterProtection = exStyle;
     results.checks.toolWindowStyle = (exStyle & 0x80) !== 0;
 
+    // The control capture must run with protection OFF: it proves the capture
+    // path can see the overlay at all, so a later miss means exclusion rather
+    // than a dead capture path. Capturing it after setContentProtection(true)
+    // made both pixel checks assert the opposite of what their names say.
+    const control = await captureMean(tmpDir);
+    results.controlCapture = control;
+    // GDI capture is uniformly black when no interactive desktop is attached
+    // (an SSH session, a locked screen); the pixel test needs a usable image.
+    const captureUsable = !(control.r < 8 && control.g < 8 && control.b < 8);
+    results.checks.screenCaptureUsable = captureUsable;
+    if (captureUsable) results.checks.captureSeesOverlayWithoutProtection = nearMagenta(control);
+
     try {
       overlay.setContentProtection(true);
       results.checks.contentProtectionApiAccepted = true;
@@ -219,21 +231,13 @@ async function main() {
       .isContentProtected;
     results.checks.contentProtectionReported =
       typeof maybeGet === 'function' ? maybeGet.call(overlay) : null;
-    // 0x11 = WDA_EXCLUDEFROMCAPTURE, readable from any process.
+    // 0x11 = WDA_EXCLUDEFROMCAPTURE, readable from any process. It corroborates
+    // the pixel result but is not a gate: Electron 34 reports WDA_MONITOR (1) on
+    // Windows 11 even though the capture already omits the window, so requiring
+    // 0x11 would fail a working exclusion.
     results.affinityIsExcludeFromCapture = native.affinity === 0x11;
-
-    const control = await captureMean(tmpDir);
-    results.controlCapture = control;
-    // GDI capture returns black when no interactive desktop is attached (an SSH
-    // session, a locked screen); the pixel test is only meaningful when the
-    // control capture actually shows the overlay.
-    const captureUsable = !(control.r < 8 && control.g < 8 && control.b < 8);
-    results.checks.screenCaptureUsable = captureUsable;
-    // Without a composited desktop neither DWM affinity nor a pixel capture can
-    // be observed, so the exclusion row is reported as environment-limited.
-    results.exclusionEnvironmentLimited = !captureUsable || native.affinity !== 0x11;
+    results.exclusionEnvironmentLimited = !captureUsable;
     if (captureUsable) {
-      results.checks.captureSeesOverlayWithoutProtection = nearMagenta(control);
       const protectedCapture = await captureMean(tmpDir);
       results.protectedCapture = protectedCapture;
       results.checks.captureHidesOverlayWithProtection = !nearMagenta(protectedCapture);
