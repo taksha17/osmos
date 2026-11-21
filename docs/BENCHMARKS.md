@@ -73,6 +73,27 @@ measured here: the deterministic provider answers in ~120 ms by construction. It
 real provider run (`BENCH_PROVIDER_BASE_URL` + `BENCH_PROVIDER_MODEL`); the Windows box has
 no local model or provider key.
 
+## Phase 5 — memory and reports (2026-11-21)
+
+Host: Windows test box (Win 11, Node 24.16). Real-provider rows use the bundled
+Qwen2.5-1.5B Q4_K_M served by `llama-server` on `127.0.0.1:8091`
+(`BENCH_PROVIDER_BASE_URL=http://127.0.0.1:8091/v1 BENCH_SUMMARY=1`).
+
+| Check | Result |
+|---|---|
+| Migration → close → reopen (SQLite via `sql.js`) | same record count, same metadata, same search hits after reopen |
+| Migration idempotence | replaying the same plan reports `{added: 0, updated: 3}` and the file still holds 3 rows |
+| Hybrid ranking | lexical IDF coverage + recency half-life + kind prior, components reported per hit; 10 tests |
+| **30-minute summary, local model (§15 exit: ≤ 60 s)** | **18,411 ms** total, first token 12.8 s — 4,509-word / 30-minute deterministic meeting, single pass, `BENCH_SUMMARY=1` |
+| Fast-lane first token, same real-model run | p50 37 ms / p95 48 ms (7 replay samples) |
+| Migration on **real** v0.6 data | **not measured**: this profile has no `chat-history.json` and one empty seeded profile, so the dry run plans 0 records |
+| Unit tests | 219/219 (37 new across the Phase 5 slices: ranking 10, store 8, persistence 8, summary 7, memory budgeting 4) |
+
+Caveats: the meeting is generated (deterministic questions, decisions and action items),
+not a real recording; the model runs CPU-only on this box; the row is one pass with no
+retries and no cloud provider. The summary budget is a target, not a gate — the screen
+kinds remain the only gated row.
+
 ## Run 2026-11-20T19-16-34-035Z
 
 - Platform: `linux-x64` · Node v20.20.2 · provider: `bench-fake` (deterministic fake)

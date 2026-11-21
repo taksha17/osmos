@@ -39,6 +39,15 @@ const VISION_IMAGE = process.env.BENCH_VISION_IMAGE || '';
 const VISION_QUESTION = process.env.BENCH_VISION_QUESTION || 'What is wrong in this code?';
 const VISION_BUDGET_MS = 3_000;
 
+/**
+ * Summary row (Phase 5 exit): BENCH_SUMMARY=1 synthesises a 30-minute meeting,
+ * extracts its signals and asks the provider for a summary. Advisory like the
+ * latency rows; the ≤ 60 s target is the phase's exit criterion.
+ */
+const SUMMARY_ENABLED = process.env.BENCH_SUMMARY === '1';
+const SUMMARY_MINUTES = Number(process.env.BENCH_SUMMARY_MINUTES ?? 30);
+const SUMMARY_BUDGET_MS = 60_000;
+
 const FAKE_FIRST_TOKEN_MS = Number(process.env.BENCH_FAKE_FIRST_TOKEN_MS ?? 120);
 const FAKE_TOKEN_MS = Number(process.env.BENCH_FAKE_TOKEN_MS ?? 6);
 const FAKE_TOKENS = Number(process.env.BENCH_FAKE_TOKENS ?? 24);
@@ -319,6 +328,64 @@ async function measureVision(provider, question, image) {
   };
 }
 
+/** Deterministic ~30-minute meeting: questions, decisions and actions included. */
+function syntheticMeeting(minutes) {
+  const lines = [];
+  const speakers = ['them: Priya', 'them: Sam', 'me'];
+  const topics = ['migration plan', 'release date', 'on-call rotation', 'budget review', 'hiring loop'];
+  let words = 0;
+  let index = 0;
+
+  while (words < minutes * 150) {
+    const topic = topics[index % topics.length];
+    const who = speakers[index % speakers.length];
+    const text =
+      index % 7 === 0
+        ? `Should we move the ${topic} to next week?`
+        : index % 11 === 0
+          ? `We decided to keep the ${topic} as it is for now.`
+          : index % 13 === 0
+            ? `I'll follow up on the ${topic} by Friday.`
+            : `The ${topic} is still the main risk and the team is watching it closely.`;
+    lines.push({ who, text });
+    words += text.split(/\s+/).length;
+    index += 1;
+  }
+
+  return lines;
+}
+
+/** Time a summary request end to end (transcript → prompt → full answer). */
+async function measureSummary(provider, extraction, prompt) {
+  const controller = new AbortController();
+  const startedAt = performance.now();
+  let firstTokenAt = 0;
+  let text = '';
+
+  for await (const chunk of provider.stream({
+    system: prompt.system,
+    messages: [{ role: 'user', content: prompt.user }],
+    signal: controller.signal,
+  })) {
+    if (chunk.kind === 'delta') {
+      if (!firstTokenAt) firstTokenAt = performance.now();
+      text += chunk.text;
+    }
+  }
+
+  const finishedAt = performance.now();
+  return {
+    firstTokenMs: Math.round((firstTokenAt || finishedAt) - startedAt),
+    totalMs: Math.round(finishedAt - startedAt),
+    transcriptChars: extraction.stats.chars,
+    transcriptWords: extraction.stats.words,
+    promptChars: prompt.system.length + prompt.user.length,
+    outputChars: text.length,
+    minutes: SUMMARY_MINUTES,
+    budgetMs: SUMMARY_BUDGET_MS,
+  };
+}
+
 async function main() {
   const hasRealProvider =
     Boolean(process.env.BENCH_PROVIDER_BASE_URL) && Boolean(process.env.BENCH_PROVIDER_MODEL);
@@ -345,6 +412,9 @@ async function main() {
   const trigger = await bundle('src/shared/policy/triggerPolicy.ts', 'trigger.mjs');
   const screen = await bundle('src/shared/policy/screenSnapshot.ts', 'screen.mjs');
   const llm = await bundle('src/main/providers/llm/config.ts', 'llm.mjs');
+  const summaryPolicy = SUMMARY_ENABLED
+    ? await bundle('src/shared/policy/transcriptSummary.ts', 'policy-transcriptSummary.mjs')
+    : null;
 
   const provider = hasRealProvider ? realProvider(llm) : fakeProvider();
   const triggerEval = evaluateTriggers(trigger);
@@ -418,6 +488,20 @@ async function main() {
     vision = await measureVision(provider, VISION_QUESTION, imageRefFromFile(VISION_IMAGE));
   }
 
+  let summaryRow = null;
+  if (summaryPolicy) {
+    // 30 minutes of speech is ~27k chars, so this must not clip: the exit row is
+    // about summarising the whole meeting, not an excerpt of it.
+    const extraction = summaryPolicy.extractSessionSignals(syntheticMeeting(SUMMARY_MINUTES), {
+      maxChars: 60_000,
+    });
+    summaryRow = await measureSummary(
+      provider,
+      extraction,
+      summaryPolicy.buildSummaryPrompt(extraction),
+    );
+  }
+
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const report = {
     runAt: new Date().toISOString(),
@@ -428,6 +512,7 @@ async function main() {
     trigger: triggerEval,
     screen: screenEval,
     vision,
+    summaryRow,
     gates: {
       screen: {
         thresholds: SCREEN_GATES,
@@ -483,6 +568,11 @@ async function main() {
             `- Vision row (screenshot → first token): **${vision.firstTokenMs} ms** (target ≤ ${VISION_BUDGET_MS} ms) · total ${vision.totalMs} ms · image ${vision.imageBytes} B`,
           ]
         : ['- Vision row: skipped (set `BENCH_VISION_IMAGE=<png>` with `BENCH_PROVIDER_BASE_URL`/`MODEL` to measure screenshot → first token)']),
+      ...(summaryRow
+        ? [
+            `- Summary row (${summaryRow.minutes}-minute transcript, ${summaryRow.transcriptWords} words): **${summaryRow.totalMs} ms** total, first token ${summaryRow.firstTokenMs} ms (target ≤ ${SUMMARY_BUDGET_MS} ms) · prompt ${summaryRow.promptChars} chars`,
+          ]
+        : ['- Summary row: skipped (set `BENCH_SUMMARY=1` with a provider to measure the 30-minute summary target)']),
       '',
       table,
       '',
@@ -505,6 +595,13 @@ async function main() {
     );
   } else {
     console.log('[bench] vision row skipped (BENCH_VISION_IMAGE unset)');
+  }
+  if (summaryRow) {
+    console.log(
+      `[bench] summary ${summaryRow.minutes}min/${summaryRow.transcriptWords}w total=${summaryRow.totalMs}ms first=${summaryRow.firstTokenMs}ms (target ≤ ${SUMMARY_BUDGET_MS}ms)`,
+    );
+  } else {
+    console.log('[bench] summary row skipped (BENCH_SUMMARY unset)');
   }
   if (screenEval) {
     console.log(

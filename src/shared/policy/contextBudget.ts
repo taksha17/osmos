@@ -28,6 +28,8 @@ export type ContextBudget = {
   profile: number;
   retrieved: number;
   screen: number;
+  /** Phase 5: earlier sessions and saved material, ranked by `memoryRanking`. */
+  memory: number;
 };
 
 /** §7.2's example budgets: transcript 800, profile 600, retrieved 800, screen 600. */
@@ -37,10 +39,14 @@ export const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
   profile: 600,
   retrieved: 800,
   screen: 600,
+  memory: 500,
 };
 
 /** One earlier screen snapshot, clipped, for coding-mode follow-ups (§12). */
 export type ScreenHistoryEntry = { at: number; kind?: string; ocrText: string };
+
+/** One retrieved memory (Phase 5): an earlier turn, saved answer or document. */
+export type MemoryEntry = { id: string; kind: string; at: number; text: string; score: number };
 
 export type ContextPacket = {
   mode: ContextMode;
@@ -56,6 +62,8 @@ export type ContextPacket = {
   profile?: { resumeFacts: string[]; jdFacts: string[]; companyIntel?: string };
   bankMatch?: { questionId: string; answer: string; score: number };
   retrieved?: Array<{ source: string; text: string; score: number }>;
+  /** Ranked memories, most relevant first. */
+  memory?: MemoryEntry[];
   constraints: {
     maxSpokenSeconds: number;
     language: string;
@@ -68,6 +76,7 @@ export type ContextPacket = {
     profile: number;
     retrieved: number;
     screen: number;
+    memory: number;
     total: number;
   };
 };
@@ -85,6 +94,7 @@ export type ContextPacketInput = {
   profile?: { resumeFacts?: string[]; jdFacts?: string[]; companyIntel?: string };
   bankMatch?: { questionId: string; answer: string; score: number };
   retrieved?: ReadonlyArray<{ source: string; text: string; score: number }>;
+  memory?: ReadonlyArray<MemoryEntry>;
   language?: string;
   format?: 'speakable' | 'bullets' | 'code';
   maxSpokenSeconds?: number;
@@ -272,6 +282,22 @@ export function buildContextPacket(
     if (kept.length) retrieved = kept;
   }
 
+  let memory: ContextPacket['memory'];
+  if (input.memory?.length) {
+    // Ranked already: keep the order (best first) and stop at the budget rather
+    // than shrinking every entry to nothing.
+    const kept: MemoryEntry[] = [];
+    let used = 0;
+    for (const entry of [...input.memory].sort((a, b) => b.score - a.score)) {
+      const text = clipToTokens(entry.text, Math.min(200, budget.memory));
+      const tokens = estimateTokens(text);
+      if (!text || used + tokens > budget.memory) continue;
+      kept.push({ id: entry.id, kind: entry.kind, at: entry.at, text, score: entry.score });
+      used += tokens;
+    }
+    if (kept.length) memory = kept;
+  }
+
   const bankMatch = input.bankMatch
     ? {
         questionId: input.bankMatch.questionId,
@@ -292,13 +318,19 @@ export function buildContextPacket(
     retrieved:
       (retrieved ?? []).reduce((sum, chunk) => sum + estimateTokens(chunk.text), 0) +
       estimateTokens(bankMatch?.answer ?? ''),
+    memory: (memory ?? []).reduce((sum, entry) => sum + estimateTokens(entry.text), 0),
     screen:
       estimateTokens(screen?.ocrText ?? '') +
       (screen?.previous ?? []).reduce((sum, entry) => sum + estimateTokens(entry.ocrText), 0),
     total: 0,
   };
   usage.total =
-    usage.question + usage.transcript + usage.profile + usage.retrieved + usage.screen;
+    usage.question +
+    usage.transcript +
+    usage.profile +
+    usage.retrieved +
+    usage.screen +
+    usage.memory;
 
   return {
     mode: input.mode,
@@ -312,6 +344,7 @@ export function buildContextPacket(
     ...(profile ? { profile } : {}),
     ...(bankMatch ? { bankMatch } : {}),
     ...(retrieved ? { retrieved } : {}),
+    ...(memory ? { memory } : {}),
     constraints: {
       maxSpokenSeconds: input.maxSpokenSeconds ?? (input.mode === 'coding' ? 90 : 45),
       language: input.language ?? 'en',

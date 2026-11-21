@@ -26,6 +26,8 @@ export function answerContextForChat(
     visionAvailable?: boolean;
     /** §12 coding mode: earlier snapshots of the same session, oldest first. */
     previousSnapshots?: ReadonlyArray<{ at: number; kind?: string; ocrText: string }>;
+    /** Phase 5: ranked memories for this question, best first. */
+    memory?: ReadonlyArray<{ id: string; kind: string; at: number; text: string; score: number }>;
   } = {},
 ): AnswerContext {
   const active = activeSavedProfile(settings.profiles, settings.activeProfileId);
@@ -39,6 +41,7 @@ export function answerContextForChat(
     // only needs to know the question was anticipated (§8.2 routing hint).
     ...(hints.bankMatch ? { bankMatch: { questionId: 'active-bank', answer: '', score: 1 } } : {}),
     ...(hints.visionAvailable === undefined ? {} : { visionAvailable: hints.visionAvailable }),
+    ...(hints.memory?.length ? { memory: hints.memory } : {}),
     ...(screenText
       ? {
           screen: {

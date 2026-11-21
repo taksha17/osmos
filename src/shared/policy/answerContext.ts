@@ -35,6 +35,8 @@ export type AnswerContextSources = {
   profile?: { resume?: string; jd?: string; companyIntel?: string };
   bankMatch?: { questionId: string; answer: string; score: number };
   retrieved?: ReadonlyArray<{ source: string; text: string; score: number }>;
+  /** Phase 5: memories already ranked by `memoryRanking`, best first. */
+  memory?: ReadonlyArray<{ id: string; kind: string; at: number; text: string; score: number }>;
   /** False when no configured lane accepts images (§6.4). Defaults to true. */
   visionAvailable?: boolean;
 };
@@ -126,6 +128,7 @@ export function buildAnswerContext(
         : {}),
       ...(sources.bankMatch ? { bankMatch: sources.bankMatch } : {}),
       ...(sources.retrieved ? { retrieved: sources.retrieved } : {}),
+      ...(sources.memory?.length ? { memory: sources.memory } : {}),
     },
     options.budget,
   );

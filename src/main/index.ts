@@ -37,6 +37,7 @@ import { freshScreenImage } from '../shared/policy/screenImage.js';
 import { providerAcceptsVision } from './providers/llm/vision.js';
 import { lastScreenGrab } from './services/screenImageCache.js';
 import { recentScreenSnapshots } from './services/screenSnapshotMemory.js';
+import { memoryHits, rememberSession, startMemory } from './services/memory.js';
 import { answerContextForChat } from './services/answerContext.js';
 import { startBundledLlm, stopBundledLlm } from './services/bundledLlm.js';
 import { loadHistory, saveHistory, upsertSession, deleteSession, clearAllHistory } from './services/history.js';
@@ -183,10 +184,14 @@ async function buildChatContext(
           ocrText: entry.text,
         }))
       : [];
+  // Phase 5: earlier sessions and saved material that match this question travel
+  // in the packet, so the same budgeting that clips the transcript clips them.
+  const memories = memoryHits(message, 3);
   const context = answerContextForChat(s, message, screen, {
     bankMatch: Boolean(bankMatch),
     visionAvailable,
     ...(previousSnapshots.length ? { previousSnapshots } : {}),
+    ...(memories.length ? { memory: memories } : {}),
   });
   // The renderer sends OCR text and its timestamp; main keeps the bytes of the grab
   // they came from, so no image ever has to cross the preload boundary.
@@ -325,6 +330,15 @@ async function buildChatContext(
     }
   }
 
+  const memoryBlock = context.packet.memory?.length
+    ? `\n\n# From the user's memory\nRetrieved from earlier sessions and saved material. Use what is relevant; never invent details these notes do not contain.\n${context.packet.memory
+        .map(
+          (entry) =>
+            `[${entry.kind} · ${Math.max(0, Math.round((Date.now() - entry.at) / 86_400_000))}d ago] ${entry.text}`,
+        )
+        .join('\n\n')}`
+    : '';
+
   const screenText = (screen?.text || '').trim().slice(0, SCREEN_CONTEXT_MAX_CHARS);
   let screenBlock = '';
   if (screenText) {
@@ -371,6 +385,7 @@ async function buildChatContext(
     agentBlock,
     toolBlock,
     prepBlock,
+    memoryBlock,
     bankBlock,
     docBlock,
     screenBlock,
@@ -1242,6 +1257,7 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
   ipcMain.handle('history:save', async (_e, session: ChatSession): Promise<HistoryResponse> => {
     try {
       const sessions = upsertSession(session);
+      rememberSession(session);
       return { ok: true, sessions };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
@@ -1349,6 +1365,8 @@ function registerShortcuts() {
 
 app.whenReady().then(() => {
   migrateLegacyUserData();
+  // Phase 5: open memory (and migrate the legacy JSON once) before the first chat.
+  startMemory(app.getPath('userData'));
   migrateLegacyBanksIntoActiveProfile();
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
     const p = String(permission);

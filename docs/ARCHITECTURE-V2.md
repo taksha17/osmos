@@ -714,8 +714,10 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 
 ### Phase 5: Memory and reports (2 weeks)
 
-> **Phase 5 status (2026-11-21, slice 1 — pure layer):** the half that needs no
-> database is in. `shared/policy/memoryMigration.ts` turns `chat-history.json` and
+> **Phase 5 status (2026-11-21): implemented.** Migration, report, store, ranking,
+> retrieval and the 30-minute summary are in and measured; the one exit row still open
+> is a migration against real v0.6 data, which needs a machine that has used the app.
+> Slice 1 was the half that needs no database: `shared/policy/memoryMigration.ts` turns `chat-history.json` and
 > the profile blobs into typed records with **derived ids** (session, message,
 > question, star, document) so a second run upserts instead of duplicating, sorts
 > them oldest first, and reports every unusable item in `skipped` with a reference
@@ -759,10 +761,30 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > migration → close → reopen returns the same records (metadata included) and the
 > same search hits.
 >
-> Still to come in this phase: wiring retrieved memories into the `ContextPacket`,
-> `sqlite-vec`-or-equivalent vectors fused with the TF-IDF path in
-> `main/services/retrieval.ts`, and the exit rows — migration against **real** v0.6
-> data, and a 30-minute transcript summarised in ≤ 60 s locally.
+> **Retrieval in the request path (slice 4):** `main/services/memory.ts` opens the
+> store at startup, migrates the legacy JSON the first time it is empty, remembers
+> every saved session (`rememberSession`), and answers the chat handler's synchronous
+> `memoryHits(question, 3)`. The three best matches enter the `ContextPacket` as a
+> `memory` section with its own 500-token budget, so they can never crowd out the
+> transcript, and `buildChatContext` renders them under *From the user's memory* with
+> kind and age. Every entry point degrades to "no memories" instead of throwing —
+> retrieval must not be able to break a chat request.
+>
+> **Summary exit row (measured):** `shared/policy/transcriptSummary.ts` reduces a
+> transcript to its questions, decisions and actions, then builds a prompt over the
+> (unclipped for 30 minutes) transcript. On the test box, a real 4,509-word / 30-minute
+> meeting summarises in **18.4 s** total on the bundled Qwen2.5-1.5B (target ≤ 60 s);
+> `BENCH_SUMMARY=1` reproduces the row.
+>
+> **Vectors — deliberately deferred.** `sqlite-vec` is a native/WASM extension, and at
+> personal scale the lexical + recency + kind ranker answers from an in-process scan.
+> Shipping an unused index would add packaging risk (the FIXES.md F/G class) for no
+> measured gain; it comes back when a real corpus shows lexical retrieval missing
+> matches, and that miss should be recorded here rather than assumed.
+>
+> **Exit rows:** fixtures/recall — met on the gated set, holdout still synthetic;
+> 30-minute summary ≤ 60 s — **met at 18.4 s** locally; migration on real v0.6 data —
+> **not met**, the test box has no history to migrate.
 
 - SQLite + sqlite-vec, hybrid retrieval, data migration from JSON.
 - SessionReport and exports.
