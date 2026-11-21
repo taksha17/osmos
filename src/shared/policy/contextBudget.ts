@@ -10,11 +10,14 @@
  * score for retrieved chunks, overlap for profile facts. Text is cut on a
  * sentence or word boundary, never mid-token.
  *
+ * Tokenization lives in `textTokens.ts` so the memory ranking scores text the
+ * same way this budget does.
  * The packet is the input the prompt builder will consume in §7.2's "only place
  * prompts are assembled"; it carries raw context, not prompt text.
  */
 
 import type { CopilotMode } from '../types.ts';
+import { contentTokens } from './textTokens.ts';
 
 /** Copilot modes plus the first-class coding mode from §12. */
 export type ContextMode = CopilotMode | 'coding';
@@ -114,21 +117,6 @@ export function clipToTokens(text: string, maxTokens: number): string {
 
   const space = window.lastIndexOf(' ');
   return (space > 0 ? window.slice(0, space) : window).trim();
-}
-
-const STOPWORDS = new Set([
-  'the', 'a', 'an', 'is', 'are', 'am', 'was', 'were', 'be', 'been', 'do', 'does', 'did',
-  'you', 'your', 'yours', 'i', 'me', 'my', 'we', 'our', 'they', 'them', 'their', 'it',
-  'its', 'to', 'of', 'and', 'or', 'but', 'in', 'on', 'at', 'for', 'with', 'that', 'this',
-  'these', 'those', 'what', 'how', 'why', 'when', 'where', 'who', 'which', 'about', 'so',
-  'if', 'then', 'than', 'there', 'here', 'as', 'by', 'from', 'can', 'could', 'would',
-]);
-
-function contentTokens(text: string): string[] {
-  return String(text ?? '')
-    .toLowerCase()
-    .split(/[^a-z0-9+#.-]+/)
-    .filter((token) => token.length > 1 && !STOPWORDS.has(token));
 }
 
 function overlap(text: string, questionTokens: ReadonlySet<string>): number {

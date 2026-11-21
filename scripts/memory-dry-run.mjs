@@ -4,6 +4,7 @@
  *
  *   node --experimental-strip-types scripts/memory-dry-run.mjs
  *   node --experimental-strip-types scripts/memory-dry-run.mjs --history <chat-history.json> --settings <settings.json>
+ *   node --experimental-strip-types scripts/memory-dry-run.mjs --query "kubernetes migration"
  *
  * Reads only. Prints what would be written (counts, ids by kind, and everything
  * the planner refused with its reason) so the migration can be judged against the
@@ -13,6 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { planMemoryMigration } from '../src/shared/policy/memoryMigration.ts';
+import { applyMigration, createMemoryStore } from '../src/main/providers/memory/store.ts';
 
 function arg(name) {
   const index = process.argv.indexOf(`--${name}`);
@@ -88,4 +90,18 @@ if (plan.skipped.length) {
 
 if (plan.records.length === 0) {
   console.log('[dry-run] note: this install has no migratable content yet — a real v0.6 migration check needs a machine that has used the app');
+}
+
+const query = arg('query');
+if (query) {
+  const store = createMemoryStore();
+  applyMigration(store, plan);
+  const hits = store.search(query, { limit: 5 });
+  console.log(`[dry-run] search for "${query}": ${hits.length} hits`);
+  for (const hit of hits) {
+    const { lexical, recency, kind } = hit.parts;
+    console.log(
+      `[dry-run]   ${hit.score.toFixed(3)} (lex ${lexical.toFixed(2)} · rec ${recency.toFixed(2)} · kind ${kind.toFixed(2)}) ${hit.record.id}: ${hit.record.text.slice(0, 70).replace(/\s+/g, ' ')}`,
+    );
+  }
 }

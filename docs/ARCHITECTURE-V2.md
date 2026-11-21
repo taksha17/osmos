@@ -733,12 +733,24 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > the exit row** — a real §"migration tested on real v0.6 data" check needs a machine
 > that has actually used the app, or an exported data folder from one.
 >
-> Still to come in this phase: the store itself (SQLite + `sqlite-vec`) behind these
-> two pure modules, hybrid retrieval fused with the existing TF-IDF path in
-> `main/services/retrieval.ts`, and the exit rows — migration against **real** v0.6
-> data, and a 30-minute transcript summarised in ≤ 60 s locally. The store is where
-> the packaging risk sits (native module under Electron/asar), so it gets a packaged
-> smoke test before the schema is frozen.
+> **Storage (slice 2):** the store surface is in — `main/providers/memory/store.ts`
+> (`upsert`/`get`/`remove`/`all`/`count`/`search`, idempotent by derived id,
+> `applyMigration`) with an in-memory driver, plus `shared/policy/memoryRanking.ts`,
+> a hybrid ranker that is additive and explainable (`lexical` IDF-weighted coverage,
+> `recency` half-life decay, `kind` prior) and keeps the existing tokenizer in
+> `shared/policy/textTokens.ts` so budget scores and retrieval scores agree.
+>
+> **Why not SQLite yet — measured, not assumed.** Electron 34 bundles Node **20.19**,
+> which has no `node:sqlite` (probe on the test box: `ERR_UNKNOWN_BUILTIN_MODULE`;
+> system Node 24 reports `yes`). So inside the app the built-in module is unavailable,
+> and the remaining options are a native `better-sqlite3` (per-ABI rebuild plus
+> asarUnpack on each OS — the FIXES.md F/G class of bug) or a WASM build like `sql.js`
+> (loads anywhere, persists by rewriting the file). The driver interface exists so
+> that choice can be made and packaged-tested without touching the store API.
+>
+> Still to come in this phase: that driver, `sqlite-vec`-or-equivalent vectors fused
+> with the TF-IDF path in `main/services/retrieval.ts`, and the exit rows — migration
+> against **real** v0.6 data, and a 30-minute transcript summarised in ≤ 60 s locally.
 
 - SQLite + sqlite-vec, hybrid retrieval, data migration from JSON.
 - SessionReport and exports.
