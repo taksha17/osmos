@@ -21,7 +21,12 @@ export function answerContextForChat(
   settings: AppSettings,
   message: string,
   screen?: ChatScreenSource,
-  hints: { bankMatch?: boolean; visionAvailable?: boolean } = {},
+  hints: {
+    bankMatch?: boolean;
+    visionAvailable?: boolean;
+    /** §12 coding mode: earlier snapshots of the same session, oldest first. */
+    previousSnapshots?: ReadonlyArray<{ at: number; kind?: string; ocrText: string }>;
+  } = {},
 ): AnswerContext {
   const active = activeSavedProfile(settings.profiles, settings.activeProfileId);
   const profile = settings.profile;
@@ -35,7 +40,15 @@ export function answerContextForChat(
     ...(hints.bankMatch ? { bankMatch: { questionId: 'active-bank', answer: '', score: 1 } } : {}),
     ...(hints.visionAvailable === undefined ? {} : { visionAvailable: hints.visionAvailable }),
     ...(screenText
-      ? { screen: { snapshotId: `screen-${screen?.at ?? 0}`, ocrText: screenText } }
+      ? {
+          screen: {
+            snapshotId: `screen-${screen?.at ?? 0}`,
+            ocrText: screenText,
+            ...(hints.previousSnapshots?.length
+              ? { previous: hints.previousSnapshots }
+              : {}),
+          },
+        }
       : {}),
     ...(profile
       ? {

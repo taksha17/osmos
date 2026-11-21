@@ -30,6 +30,15 @@ const benchDoc = path.join(root, 'docs', 'BENCHMARKS.md');
 const args = new Set(process.argv.slice(2));
 const writeDoc = !args.has('--no-doc');
 
+/**
+ * Vision row (Phase 4 exit): set BENCH_VISION_IMAGE to a screenshot and, with a
+ * real provider configured, the run measures screenshot → first token against the
+ * ≤ 3 s target. Advisory, like the latency rows — only the screen kinds gate.
+ */
+const VISION_IMAGE = process.env.BENCH_VISION_IMAGE || '';
+const VISION_QUESTION = process.env.BENCH_VISION_QUESTION || 'What is wrong in this code?';
+const VISION_BUDGET_MS = 3_000;
+
 const FAKE_FIRST_TOKEN_MS = Number(process.env.BENCH_FAKE_FIRST_TOKEN_MS ?? 120);
 const FAKE_TOKEN_MS = Number(process.env.BENCH_FAKE_TOKEN_MS ?? 6);
 const FAKE_TOKENS = Number(process.env.BENCH_FAKE_TOKENS ?? 24);
@@ -274,6 +283,42 @@ async function measure(provider, question, mode) {
   };
 }
 
+function imageRefFromFile(file) {
+  const bytes = fs.readFileSync(file);
+  const lower = file.toLowerCase();
+  const mime = lower.endsWith('.jpg') || lower.endsWith('.jpeg') ? 'image/jpeg' : 'image/png';
+  return { mime, dataRef: `data:${mime};base64,${bytes.toString('base64')}` };
+}
+
+/** Time screenshot → first token through the provider's vision path. */
+async function measureVision(provider, question, image) {
+  const controller = new AbortController();
+  const startedAt = performance.now();
+  let firstTokenAt = 0;
+  let chars = 0;
+
+  for await (const chunk of provider.stream({
+    system: 'Benchmark vision replay.',
+    messages: [{ role: 'user', content: question }],
+    images: [image],
+    signal: controller.signal,
+  })) {
+    if (chunk.kind === 'delta') {
+      if (!firstTokenAt) firstTokenAt = performance.now();
+      chars += chunk.text.length;
+    }
+  }
+
+  const finishedAt = performance.now();
+  return {
+    firstTokenMs: Math.round((firstTokenAt || finishedAt) - startedAt),
+    totalMs: Math.round(finishedAt - startedAt),
+    chars,
+    imageBytes: Math.round((image.dataRef.length * 3) / 4),
+    budgetMs: VISION_BUDGET_MS,
+  };
+}
+
 async function main() {
   const hasRealProvider =
     Boolean(process.env.BENCH_PROVIDER_BASE_URL) && Boolean(process.env.BENCH_PROVIDER_MODEL);
@@ -364,6 +409,15 @@ async function main() {
     }, {}),
   };
 
+  let vision = null;
+  if (VISION_IMAGE) {
+    if (!fs.existsSync(VISION_IMAGE)) {
+      console.error(`[bench] BENCH_VISION_IMAGE not found: ${VISION_IMAGE}`);
+      process.exit(1);
+    }
+    vision = await measureVision(provider, VISION_QUESTION, imageRefFromFile(VISION_IMAGE));
+  }
+
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const report = {
     runAt: new Date().toISOString(),
@@ -373,6 +427,7 @@ async function main() {
     deterministic: !hasRealProvider,
     trigger: triggerEval,
     screen: screenEval,
+    vision,
     gates: {
       screen: {
         thresholds: SCREEN_GATES,
@@ -423,6 +478,11 @@ async function main() {
             ...gateFailures.map((failure) => `  - GATE FAILED: ${failure}`),
           ]
         : []),
+      ...(vision
+        ? [
+            `- Vision row (screenshot → first token): **${vision.firstTokenMs} ms** (target ≤ ${VISION_BUDGET_MS} ms) · total ${vision.totalMs} ms · image ${vision.imageBytes} B`,
+          ]
+        : ['- Vision row: skipped (set `BENCH_VISION_IMAGE=<png>` with `BENCH_PROVIDER_BASE_URL`/`MODEL` to measure screenshot → first token)']),
       '',
       table,
       '',
@@ -438,6 +498,13 @@ async function main() {
     console.log(
       `[bench] trigger precision=${triggerEval.precision} recall=${triggerEval.recall} (${triggerEval.labels} labels, ${triggerEval.misses.length} misses)`,
     );
+  }
+  if (vision) {
+    console.log(
+      `[bench] vision first token=${vision.firstTokenMs}ms (target ≤ ${VISION_BUDGET_MS}ms) image=${vision.imageBytes}B`,
+    );
+  } else {
+    console.log('[bench] vision row skipped (BENCH_VISION_IMAGE unset)');
   }
   if (screenEval) {
     console.log(

@@ -25,7 +25,13 @@ export type AnswerContextSources = {
   channel?: TriggerSpeaker;
   isFinal?: boolean;
   transcript?: ReadonlyArray<{ who: string; text: string }>;
-  screen?: { snapshotId: string; ocrText?: string; includeImage?: boolean };
+  screen?: {
+    snapshotId: string;
+    ocrText?: string;
+    includeImage?: boolean;
+    /** Coding mode (§12): earlier snapshots of the same session, oldest first. */
+    previous?: ReadonlyArray<{ at: number; kind?: string; ocrText: string }>;
+  };
   profile?: { resume?: string; jd?: string; companyIntel?: string };
   bankMatch?: { questionId: string; answer: string; score: number };
   retrieved?: ReadonlyArray<{ source: string; text: string; score: number }>;
@@ -105,6 +111,7 @@ export function buildAnswerContext(
               snapshotId: sources.screen.snapshotId,
               includeImage: attachImage,
               ocrText: screenText,
+              ...(sources.screen.previous?.length ? { previous: sources.screen.previous } : {}),
             },
           }
         : {}),

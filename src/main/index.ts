@@ -32,9 +32,11 @@ import {
 import { warmupProvider, getLastWarmup, probeLumenGateway } from './services/providerWarmup.js';
 import { routeTierLabel } from '../shared/lumenRoute.js';
 import { routeDecisionFor } from '../shared/policy/answerContext.js';
+import { classifySnapshot } from '../shared/policy/screenSnapshot.js';
 import { freshScreenImage } from '../shared/policy/screenImage.js';
 import { providerAcceptsVision } from './providers/llm/vision.js';
 import { lastScreenGrab } from './services/screenImageCache.js';
+import { recentScreenSnapshots } from './services/screenSnapshotMemory.js';
 import { answerContextForChat } from './services/answerContext.js';
 import { startBundledLlm, stopBundledLlm } from './services/bundledLlm.js';
 import { loadHistory, saveHistory, upsertSession, deleteSession, clearAllHistory } from './services/history.js';
@@ -170,9 +172,21 @@ async function buildChatContext(
     id: effective,
     model: providerModel || provider?.model,
   });
+  // §12: a code snapshot means the user is mid-problem, so the last few snapshots
+  // travel with the request, clipped to a share of the screen budget. `coding` is not
+  // a selectable mode (CopilotMode has no such member); the kind is the trigger.
+  const previousSnapshots =
+    classifySnapshot(screen?.text).kind === 'code'
+      ? recentScreenSnapshots({ beforeAt: screen?.at, limit: 2 }).map((entry) => ({
+          at: entry.at,
+          kind: entry.kind,
+          ocrText: entry.text,
+        }))
+      : [];
   const context = answerContextForChat(s, message, screen, {
     bankMatch: Boolean(bankMatch),
     visionAvailable,
+    ...(previousSnapshots.length ? { previousSnapshots } : {}),
   });
   // The renderer sends OCR text and its timestamp; main keeps the bytes of the grab
   // they came from, so no image ever has to cross the preload boundary.
@@ -323,6 +337,19 @@ async function buildChatContext(
       'OCR is imperfect and may include browser/UI noise — ignore anything irrelevant.',
       'If the user’s question refers to “this”, “the screen”, “the question”, or a problem shown, answer using this text.',
       ...(context.snapshot.hint ? [context.snapshot.hint] : []),
+      ...(context.packet.screen?.previous?.length
+        ? [
+            '',
+            'Earlier snapshots (oldest first; use only if the question refers back to them):',
+            ...context.packet.screen.previous.map((entry) => {
+              const ageSec = Math.max(
+                0,
+                Math.round(((screen?.at ?? Date.now()) - entry.at) / 1000),
+              );
+              return `[${entry.kind ?? 'unknown'}, ${ageSec}s earlier]\n${entry.ocrText}`;
+            }),
+          ]
+        : []),
       '---',
       screenText,
       '---',

@@ -36,11 +36,20 @@ export const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
   screen: 600,
 };
 
+/** One earlier screen snapshot, clipped, for coding-mode follow-ups (§12). */
+export type ScreenHistoryEntry = { at: number; kind?: string; ocrText: string };
+
 export type ContextPacket = {
   mode: ContextMode;
   question: { text: string; speaker: string; isFinal: boolean };
   recentTranscript: Array<{ who: string; text: string }>;
-  screen?: { snapshotId: string; includeImage: boolean; ocrText?: string };
+  screen?: {
+    snapshotId: string;
+    includeImage: boolean;
+    ocrText?: string;
+    /** Older snapshots, oldest first; never more than 40 % of the screen budget. */
+    previous?: ScreenHistoryEntry[];
+  };
   profile?: { resumeFacts: string[]; jdFacts: string[]; companyIntel?: string };
   bankMatch?: { questionId: string; answer: string; score: number };
   retrieved?: Array<{ source: string; text: string; score: number }>;
@@ -64,7 +73,12 @@ export type ContextPacketInput = {
   mode: ContextMode;
   question: { text: string; speaker?: string; isFinal?: boolean };
   transcript?: ReadonlyArray<{ who: string; text: string }>;
-  screen?: { snapshotId: string; includeImage?: boolean; ocrText?: string };
+  screen?: {
+    snapshotId: string;
+    includeImage?: boolean;
+    ocrText?: string;
+    previous?: ReadonlyArray<ScreenHistoryEntry>;
+  };
   profile?: { resumeFacts?: string[]; jdFacts?: string[]; companyIntel?: string };
   bankMatch?: { questionId: string; answer: string; score: number };
   retrieved?: ReadonlyArray<{ source: string; text: string; score: number }>;
@@ -221,12 +235,37 @@ export function buildContextPacket(
 
   let screen: ContextPacket['screen'];
   if (input.screen) {
+    // §12: history helps in coding mode but must never crowd out the snapshot the
+    // question is about, so it may take at most 40 % of the screen budget.
+    const previousInput = input.screen.previous ?? [];
+    const previousBudget = previousInput.length > 0 ? Math.floor(budget.screen * 0.4) : 0;
+    const currentBudget = Math.max(0, budget.screen - previousBudget);
+
+    const previous: ScreenHistoryEntry[] = [];
+    if (previousBudget > 0) {
+      let used = 0;
+      // Newest first while choosing, then restored to chronological order.
+      for (const item of [...previousInput].sort((a, b) => b.at - a.at)) {
+        const text = clipToTokens(item.ocrText ?? '', Math.min(200, previousBudget));
+        const tokens = estimateTokens(text);
+        if (!text || used + tokens > previousBudget) continue;
+        previous.push({
+          at: item.at,
+          ...(item.kind ? { kind: item.kind } : {}),
+          ocrText: text,
+        });
+        used += tokens;
+      }
+      previous.sort((a, b) => a.at - b.at);
+    }
+
     screen = {
       snapshotId: input.screen.snapshotId,
       includeImage: input.screen.includeImage === true,
       ...(input.screen.ocrText
-        ? { ocrText: clipToTokens(input.screen.ocrText, budget.screen) }
+        ? { ocrText: clipToTokens(input.screen.ocrText, currentBudget) }
         : {}),
+      ...(previous.length > 0 ? { previous } : {}),
     };
   }
 
@@ -265,7 +304,9 @@ export function buildContextPacket(
     retrieved:
       (retrieved ?? []).reduce((sum, chunk) => sum + estimateTokens(chunk.text), 0) +
       estimateTokens(bankMatch?.answer ?? ''),
-    screen: estimateTokens(screen?.ocrText ?? ''),
+    screen:
+      estimateTokens(screen?.ocrText ?? '') +
+      (screen?.previous ?? []).reduce((sum, entry) => sum + estimateTokens(entry.ocrText), 0),
     total: 0,
   };
   usage.total =

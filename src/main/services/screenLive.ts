@@ -24,6 +24,7 @@ import type { BrowserWindow } from 'electron';
 import { capturePrimaryScreen, describeLoopSafeCapture } from './screenCapture.js';
 import { extractTextFromImage } from './ocr.js';
 import { rememberScreenGrab } from './screenImageCache.js';
+import { rememberScreenSnapshot } from './screenSnapshotMemory.js';
 import {
   MutterScreenCastBackend,
   probeMutterScreenCast,
@@ -103,6 +104,7 @@ class ScreenLiveEngine extends EventEmitter {
       const res = await extractTextFromImage({ base64: frame.dataUrl });
       if (!this.running) return;
       if (res.ok && res.text && res.text.trim()) {
+        rememberScreenSnapshot({ text: res.text.trim(), at: frame.at });
         this.emit('text', { text: res.text.trim(), at: frame.at } as LiveTextEvent);
       }
     } catch (e) {
@@ -198,6 +200,7 @@ class ScreenLiveEngine extends EventEmitter {
     try {
       const res = await extractTextFromImage({ base64: frame.dataUrl });
       if (res.ok && res.text?.trim()) {
+        rememberScreenSnapshot({ text: res.text.trim(), at: frame.at });
         return { ok: true, text: res.text.trim(), at: frame.at };
       }
       return { ok: false, error: res.error || 'OCR returned no text' };
@@ -238,7 +241,9 @@ class ScreenLiveEngine extends EventEmitter {
       const res = await extractTextFromImage({ base64: cap.dataUrl });
       if (!this.running) return;
       if (res.ok && res.text && res.text.trim()) {
-        const ev: LiveTextEvent = { text: res.text.trim(), at: Date.now() };
+        const at = Date.now();
+        rememberScreenSnapshot({ text: res.text.trim(), at });
+        const ev: LiveTextEvent = { text: res.text.trim(), at };
         this.emit('text', ev);
       }
     } catch (e) {
