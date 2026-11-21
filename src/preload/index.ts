@@ -25,6 +25,12 @@ const api = {
   openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
   listOllamaModels: (baseUrl?: string) => ipcRenderer.invoke('ollama:list-models', baseUrl),
   testSearxng: (baseUrl?: string) => ipcRenderer.invoke('searxng:test', baseUrl),
+  testWebAccess: (override?: {
+    enabled?: boolean;
+    tier?: string;
+    baseUrl?: string;
+    apiKeyRef?: string;
+  }) => ipcRenderer.invoke('webaccess:test', override),
   testWebSearch: (override?: {
     webSearchProvider?: 'off' | 'duckduckgo' | 'tavily' | 'searxng';
     tavilyApiKey?: string;
@@ -242,6 +248,20 @@ const api = {
     return () => ipcRenderer.removeListener('settings:changed', handler);
   },
   resetOverlayIdle: () => ipcRenderer.invoke('overlay:reset-idle'),
+  /** §11: the overlay only takes keyboard focus when the user clicks it. */
+  focusOverlay: () => ipcRenderer.invoke('overlay:focus'),
+  setOverlayClickThrough: (enabled: boolean) =>
+    ipcRenderer.invoke('overlay:click-through', enabled) as Promise<{
+      ok: boolean;
+      enabled: boolean;
+    }>,
+  getOverlayClickThrough: () =>
+    ipcRenderer.invoke('overlay:get-click-through') as Promise<{ enabled: boolean }>,
+  onOverlayClickThrough: (listener: (enabled: boolean) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, enabled: boolean) => listener(enabled);
+    ipcRenderer.on('overlay:click-through', handler);
+    return () => ipcRenderer.removeListener('overlay:click-through', handler);
+  },
   log: (level: 'log' | 'info' | 'warn' | 'error', ...args: any[]) => ipcRenderer.invoke('app:log', level, ...args),
   clearAllHistory: () => ipcRenderer.invoke('history:clear-all'),
   startScreenLive: (

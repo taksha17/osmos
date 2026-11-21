@@ -49,6 +49,16 @@ declare global {
       listOllamaModels: (baseUrl?: string) =>
         Promise<{ ok: boolean; models: string[]; error?: string; baseUrl?: string }>;
       testSearxng: (baseUrl?: string) => Promise<{ ok: boolean; resultCount?: number; error?: string }>;
+      testWebAccess: (override?: {
+        enabled?: boolean;
+        tier?: string;
+        baseUrl?: string;
+        apiKeyRef?: string;
+      }) => Promise<{
+        ok: boolean;
+        detail: string;
+        providers?: Array<{ id: string; ok: boolean; latencyMs: number; detail?: string }>;
+      }>;
       testWebSearch: (override?: {
         webSearchProvider?: 'off' | 'duckduckgo' | 'tavily' | 'searxng';
         tavilyApiKey?: string;
@@ -206,6 +216,10 @@ declare global {
       onShortcut: (listener: (action: string) => void) => () => void;
       onSettingsChanged: (listener: (settings: AppSettings) => void) => () => void;
       resetOverlayIdle: () => Promise<{ ok: boolean }>;
+      focusOverlay: () => Promise<{ ok: boolean }>;
+      setOverlayClickThrough: (enabled: boolean) => Promise<{ ok: boolean; enabled: boolean }>;
+      getOverlayClickThrough: () => Promise<{ enabled: boolean }>;
+      onOverlayClickThrough: (listener: (enabled: boolean) => void) => () => void;
       log?: (level: 'log' | 'info' | 'warn' | 'error', ...args: any[]) => Promise<{ ok: boolean }>;
     };
   }
@@ -219,6 +233,7 @@ function OverlayApp() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [idle, setIdle] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [clickThrough, setClickThrough] = useState(false);
   const controlsRef = useRef<{ paused: boolean; togglePause: () => void } | null>(null);
 
   useEffect(() => {
@@ -238,17 +253,30 @@ function OverlayApp() {
     return unsub;
   }, []);
 
+  // §11 click-through state lives in main (a click-through window cannot be
+  // clicked), so the pill mirrors it rather than owning it.
+  useEffect(() => {
+    void window.osmos.getOverlayClickThrough?.().then((r) => setClickThrough(Boolean(r?.enabled)));
+    return window.osmos.onOverlayClickThrough?.(setClickThrough);
+  }, []);
+
   const resetIdle = () => {
     if (idle) setIdle(false);
     void window.osmos.resetOverlayIdle();
+  };
+
+  // The overlay is non-activating; a deliberate click is what grants it focus.
+  const takeFocus = () => {
+    resetIdle();
+    void window.osmos.focusOverlay?.();
   };
 
   return (
     <div
       className={`overlay-root${idle ? ' idle' : ''}${paused ? ' overlay-root--paused' : ''}${settings?.stealthEnabled ? ' overlay-root--stealth' : ''}`}
       onMouseMove={resetIdle}
-      onMouseDown={resetIdle}
-      onTouchStart={resetIdle}
+      onMouseDown={takeFocus}
+      onTouchStart={takeFocus}
     >
       <div className="overlay-stack">
         <div className="overlay-pill">
@@ -294,6 +322,24 @@ function OverlayApp() {
             title={paused ? 'Resume listening' : 'Pause listening'}
           >
             <span aria-hidden>{paused ? '▶' : '❚❚'}</span>
+          </button>
+          <button
+            type="button"
+            className={`overlay-pill__pause${clickThrough ? ' overlay-pill__pause--paused' : ''}`}
+            onClick={() => {
+              void window.osmos
+                .setOverlayClickThrough?.(!clickThrough)
+                .then((r) => setClickThrough(Boolean(r?.enabled)));
+            }}
+            aria-pressed={clickThrough}
+            aria-label={clickThrough ? 'Disable click-through' : 'Enable click-through'}
+            title={
+              clickThrough
+                ? 'Click-through on — clicks pass through (Ctrl/Cmd+Shift+X to return)'
+                : 'Click-through off — the overlay takes clicks'
+            }
+          >
+            <span aria-hidden>{clickThrough ? '⤢' : '⤡'}</span>
           </button>
           <button
             type="button"

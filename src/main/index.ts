@@ -13,6 +13,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createPlatformAdapter, verifyStealth, type StealthStatus } from './platform/index.js';
+import {
+  applyNonActivating,
+  clickThroughWindowState,
+  focusOverlay,
+  overlayWindowType,
+  presentOverlay,
+  releaseOverlayFocus,
+  setClickThrough,
+} from './services/stealthWindow.js';
 import { canLoopSafeScreenCapture } from './services/screenCapture.js';
 import { getSettings, updateSettings } from './services/settingsStore.js';
 import { chatOllama, listOllamaModels, streamChatOllama } from './services/ollama.js';
@@ -455,6 +464,8 @@ function createOverlay() {
     show: false,
     icon: appIcon,
     backgroundColor: '#00000000',
+    // §11: a non-activating utility surface, not a window that steals focus.
+    ...overlayWindowType(),
     focusable: true,
     webPreferences: {
       preload: preloadPath(),
@@ -469,6 +480,14 @@ function createOverlay() {
   });
   overlay.setAlwaysOnTop(true, 'screen-saver');
   platform.applyStealth(stealth, [overlay]);
+  applyNonActivating(overlay, stealth);
+  // Focus is granted on click and given back on blur, so the overlay is passive
+  // between deliberate interactions (§11 focus-loss behaviour).
+  overlay.on('blur', () => {
+    if (overlay && !overlay.isDestroyed()) {
+      releaseOverlayFocus(overlay, getSettings().stealthEnabled);
+    }
+  });
   // Re-assert OS capture exclusion whenever the overlay becomes visible —
   // some Windows builds drop WDA_EXCLUDEFROMCAPTURE across hide/show.
   overlay.on('show', () => {
@@ -480,6 +499,22 @@ function createOverlay() {
 }
 
 let overlayHideTimer: ReturnType<typeof setTimeout> | null = null;
+/** Current click-through state, mirrored here because Electron has no getter. */
+let overlayClickThrough = false;
+
+function toggleOverlayClickThrough(): boolean {
+  overlayClickThrough = !overlayClickThrough;
+  if (overlay && !overlay.isDestroyed()) {
+    setClickThrough(overlay, overlayClickThrough);
+    clickThroughWindowState(overlay, overlayClickThrough);
+    try {
+      overlay.webContents.send('overlay:click-through', overlayClickThrough);
+    } catch {
+      /* window closing */
+    }
+  }
+  return overlayClickThrough;
+}
 
 function overlayIdleMs() {
   return getSettings().stealthEnabled ? 2500 : 5000;
@@ -502,6 +537,24 @@ ipcMain.handle('overlay:reset-idle', () => {
   scheduleOverlayHide(overlayIdleMs());
   return { ok: true };
 });
+
+// §11: the user clicked the composer — only then may the overlay take focus.
+ipcMain.handle('overlay:focus', () => {
+  if (!overlay || overlay.isDestroyed()) return { ok: false };
+  focusOverlay(overlay);
+  return { ok: true };
+});
+
+// Click-through is toggled from the overlay controls and from the global
+// shortcut, because a click-through window cannot be clicked to escape.
+ipcMain.handle('overlay:click-through', (_e, enabled: boolean) => {
+  if (!overlay || overlay.isDestroyed()) return { ok: false, enabled: false };
+  const next = setClickThrough(overlay, Boolean(enabled));
+  clickThroughWindowState(overlay, next);
+  return { ok: true, enabled: next };
+});
+
+ipcMain.handle('overlay:get-click-through', () => ({ enabled: overlayClickThrough }));
 
 function allWindows(): BrowserWindow[] {
   return [launcher, overlay].filter((w): w is BrowserWindow => Boolean(w && !w.isDestroyed()));
@@ -562,8 +615,13 @@ function registerIpc() {
     }
     const stealth = getSettings().stealthEnabled;
     platform.applyStealth(stealth, allWindows());
-    if (stealth) overlay.showInactive();
-    else overlay.show();
+    presentOverlay(overlay, stealth);
+    if (overlayClickThrough) {
+      // The mouse-ignore flag survives hide/show; re-assert it so the overlay
+      // cannot come back in a state the user cannot click.
+      setClickThrough(overlay, true);
+      clickThroughWindowState(overlay, true);
+    }
     scheduleOverlayHide(overlayIdleMs());
     // Wake quality (+ optional fast) provider so Assist isn't cold.
     const s = getSettings();
@@ -1330,25 +1388,34 @@ function registerShortcuts() {
       if (!overlay || overlay.isDestroyed()) createOverlay();
       if (!overlay) return;
       if (overlay.isVisible()) overlay.hide();
-      else overlay.showInactive();
+      else presentOverlay(overlay, getSettings().stealthEnabled);
     });
     const b = globalShortcut.register(`${mod}+Shift+A`, () => {
       if (!overlay || overlay.isDestroyed()) createOverlay();
-      overlay?.showInactive();
+      if (overlay) presentOverlay(overlay, getSettings().stealthEnabled);
       overlay?.webContents.send('shortcut', 'ask');
     });
     const c = globalShortcut.register(`${mod}+Shift+C`, () => {
       if (!overlay || overlay.isDestroyed()) createOverlay();
-      overlay?.showInactive();
+      if (overlay) presentOverlay(overlay, getSettings().stealthEnabled);
       overlay?.webContents.send('shortcut', 'capture');
     });
     // Ctrl/Cmd+Enter → Assist (same as overlay composer)
     const d = globalShortcut.register('CommandOrControl+Enter', () => {
       if (!overlay || overlay.isDestroyed()) createOverlay();
-      overlay?.showInactive();
+      if (overlay) presentOverlay(overlay, getSettings().stealthEnabled);
       overlay?.webContents.send('shortcut', 'ask');
     });
+    // §11 click-through: the only way out of a click-through overlay is a
+    // shortcut, so it must be registered even when the overlay is unfocused.
+    const e = globalShortcut.register(`${mod}+Shift+X`, () => {
+      if (!overlay || overlay.isDestroyed()) createOverlay();
+      toggleOverlayClickThrough();
+    });
     shortcutsRegistered = Boolean(a && b && c);
+    if (!e) {
+      console.warn('[shortcuts] click-through shortcut unavailable (common on Wayland)');
+    }
     if (!d) {
       console.warn('[shortcuts] CommandOrControl+Enter unavailable (common on Wayland)');
     }
