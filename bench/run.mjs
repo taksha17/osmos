@@ -81,6 +81,33 @@ function sleep(ms) {
 
 const round = (value) => Math.round(value * 1000) / 1000;
 
+/**
+ * Screen kind gates (Architecture v2, Phase 4).
+ *
+ * Only the screen taxonomy is gated: the trigger set is measured against a
+ * hand-written corpus and the latency rows depend on the provider, so both stay
+ * advisory until they have an independent set to hold them. A failed gate still
+ * writes its report and doc section, then exits non-zero, so the numbers survive
+ * the failure.
+ */
+const SCREEN_GATES = { accuracy: 0.9, codeRecall: 0.85 };
+
+function screenGateFailures(screenEval) {
+  if (!screenEval) return [];
+  const failures = [];
+  if (screenEval.accuracy < SCREEN_GATES.accuracy) {
+    failures.push(`screen accuracy ${screenEval.accuracy} < ${SCREEN_GATES.accuracy}`);
+  }
+  const codeRecall = screenEval.recall.code;
+  if (codeRecall === undefined) {
+    // A fixture set without code snapshots cannot exercise the §8.2 hard rule.
+    failures.push('no code snapshots in bench/fixtures/screen/labelled.jsonl — code recall gate cannot be evaluated');
+  } else if (codeRecall < SCREEN_GATES.codeRecall) {
+    failures.push(`screen code recall ${codeRecall} < ${SCREEN_GATES.codeRecall}`);
+  }
+  return failures;
+}
+
 function readJsonl(file) {
   return fs
     .readFileSync(file, 'utf8')
@@ -252,6 +279,7 @@ async function main() {
   const provider = hasRealProvider ? realProvider(llm) : fakeProvider();
   const triggerEval = evaluateTriggers(trigger);
   const screenEval = evaluateScreen(screen);
+  const gateFailures = screenGateFailures(screenEval);
   const samples = [];
   const skipped = [];
 
@@ -320,6 +348,13 @@ async function main() {
     deterministic: !hasRealProvider,
     trigger: triggerEval,
     screen: screenEval,
+    gates: {
+      screen: {
+        thresholds: SCREEN_GATES,
+        passed: gateFailures.length === 0,
+        failures: gateFailures,
+      },
+    },
     summary,
     samples,
     skipped,
@@ -353,7 +388,8 @@ async function main() {
         : []),
       ...(screenEval
         ? [
-            `- Screen kinds: accuracy **${screenEval.accuracy}** on ${screenEval.labels} labelled snapshots · code recall **${screenEval.recall.code ?? 'n/a'}** · per kind ${JSON.stringify(screenEval.recall)}`,
+            `- Screen kinds: accuracy **${screenEval.accuracy}** on ${screenEval.labels} labelled snapshots · code recall **${screenEval.recall.code ?? 'n/a'}** · per kind ${JSON.stringify(screenEval.recall)} · gate **${gateFailures.length === 0 ? 'pass' : 'FAIL'}** (accuracy ≥ ${SCREEN_GATES.accuracy}, code recall ≥ ${SCREEN_GATES.codeRecall})`,
+            ...gateFailures.map((failure) => `  - GATE FAILED: ${failure}`),
           ]
         : []),
       '',
@@ -379,6 +415,12 @@ async function main() {
   }
   console.log(`[bench] report → ${path.relative(root, resultPath)}`);
   if (writeDoc) console.log(`[bench] appended → ${path.relative(root, benchDoc)}`);
+
+  if (gateFailures.length > 0) {
+    for (const failure of gateFailures) console.error(`[bench] GATE FAILED: ${failure}`);
+    // Reported after the evidence is on disk, so a failing run still leaves numbers.
+    process.exitCode = 1;
+  }
 }
 
 main().catch((error) => {

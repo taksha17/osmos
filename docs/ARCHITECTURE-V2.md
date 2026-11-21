@@ -650,7 +650,7 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 >
 > | Check | Result |
 > |---|---|
-> | Screen kind accuracy, `bench/fixtures/screen/labelled.jsonl` | **1.000** on 31 snapshots, **code recall 1.000**, 0 misses (first run 0.839 with 5 misses; see below) |
+> | Screen kind accuracy, `bench/fixtures/screen/labelled.jsonl` | **1.000** on 31 snapshots, **code recall 1.000**, 0 misses (first run 0.839 with 5 misses; see below). Gated: `npm run bench` exits non-zero below accuracy 0.9 or code recall 0.85, and the report is still written |
 > | Unit tests | 134/134, 10 of them new for the classifier and its hint plumbing |
 > | Trigger / latency rows after the change | unchanged (precision 1.000, p50 129 ms on the fake provider) |
 >

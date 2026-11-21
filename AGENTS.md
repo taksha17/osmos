@@ -164,7 +164,7 @@ Capture and STT run in **supervised external processes**, never inline in main.
 - `src/shared/policy/screenSnapshot.ts` is the only screen classifier: `classifySnapshot(ocrText)` → `{ kind, confidence, requiresVision, hint }`. `looksLikeCodeScreen` is derived from it, so do not add a second "is this code" heuristic at a call site. A misclassification changes routing, so a new rule needs a labelled case in `bench/fixtures/screen/labelled.jsonl`.
 - `requiresVision` is true for code and problem statements only (§12). Do not make slides or chats force the vision lane — that would take easy screens off the local lane.
 - `context.snapshot.hint` is the one sentence the screen section carries. Add a kind's instruction to `HINTS` in that module, not inline in `src/main/index.ts`.
-- Screen kinds are measured by `npm run bench` (accuracy + per-kind recall). Keep the gates at accuracy ≥ 0.9 and code recall ≥ 0.85.
+- Screen kinds are measured by `npm run bench` (accuracy + per-kind recall) and **gated**: the run exits non-zero when accuracy < 0.9, code recall < 0.85, or the fixture set contains no code snapshots. The report and doc section are still written on failure. Trigger and latency rows are deliberately advisory — do not turn them into gates until their corpora are independent.
 
 ### Web access (v3, `docs/ARCHITECTURE-V3.md`)
 
