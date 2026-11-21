@@ -5,171 +5,198 @@
 <h1 align="center">OSMOS</h1>
 
 <p align="center">
-  <strong>A local-first, open-source AI copilot for interviews, meetings, and calls.</strong><br/>
-  Listens to the room, reads your screen, and drafts answers — while everything stays on your machine.
+  <strong>A local-first desktop copilot for interviews, meetings and calls.</strong><br/>
+  It hears the room, reads the screen when you ask it to, and drafts an answer in an overlay — without sending your audio anywhere.
 </p>
 
 <p align="center">
-  <a href="#license"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
-  <a href="#install--run"><img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue"></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.6.0-orange">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
+  <a href="#platform-support"><img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-blue"></a>
+  <img alt="Version" src="https://img.shields.io/badge/version-0.6.1-orange">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-243%20passing-brightgreen">
 </p>
 
 ---
 
-## What is OSMOS?
+## What it is
 
-OSMOS is a desktop overlay copilot that:
+OSMOS is an MIT-licensed Electron app that sits in a floating overlay next to your meeting. It captures microphone and speaker audio, transcribes it locally, decides whether a question was actually directed at you, and streams an answer from a model that runs **on your machine** (a bundled Qwen2.5-1.5B) or from a provider you configure with your own key.
 
-- **Listens** — live microphone + speaker-loopback capture, transcribed locally with Whisper (or your cloud provider of choice)
-- **Reads** — background screen OCR keeps a fresh snapshot of what's on your display, so every answer already knows your context
-- **Answers** — streaming LLM responses rendered as clean markdown inside an always-on-top overlay
-- **Stays invisible** — OS-level capture exclusion keeps the overlay out of Zoom / Teams / Meet / OBS screen shares
+There is no account, no telemetry and no subscription. Audio, transcripts, résumés and API keys stay in `~/.config/OSMOS` unless you deliberately point a request at a cloud provider.
 
-Everything runs **on your machine**: audio never leaves it unless *you* pick a cloud STT/LLM provider. No account. No telemetry. No subscription.
+| | |
+|---|---|
+| **Listening** | Mic + speaker loopback → endpointing → local STT (Moonshine tiny by default, Whisper base.en optional) |
+| **Reading** | On-demand screen OCR (Tesseract in the main process) through a silent per-OS backend |
+| **Answering** | Bundled 1.5B fast lane for immediate drafts, your quality provider for the real answer |
+| **Hiding** | OS-level capture exclusion on Windows; `setContentProtection` on macOS; documented limits on Linux |
+| **Remembering** | SQLite session memory, hybrid retrieval, offline session reports you can export |
 
 ---
 
-## Features
+## Install
 
-### 🎧 Smart Listen (dual-ear audio)
-| Ear | Source | Notes |
+Download from [Releases](https://github.com/taksha17/osmos/releases).
+
+| Build | Size | What it contains |
 |---|---|---|
-| **mic** | Your microphone | Continuous main-process capture — survives UI churn; self-heals with respawn + stall watchdog |
-| **spk** | Speaker loopback | Transcribes call/meeting audio playing through the machine |
+| **Full** | ~1.2 GB | App + `llama-server` runtime + the 940 MB Qwen2.5-1.5B weights |
+| **Lite** (`-lite`) | ~284 MB | App + runtime only; the weights are downloaded and SHA-256-verified on first run |
 
-- Finalized speech lands in a **live transcript panel** beside chat — verify accuracy in real time
-- One-click **Copy** exports the full timestamped transcript for session notes
-- Silence is skipped intelligently (no wasted transcription), and non-speech markers like `[Music]` are filtered out of notes
+Both are self-contained: no Python, no ffmpeg, no Ollama install required for the local path.
 
-### 👁 Live Screen Reading
-Silent background OCR on every OS — Mutter ScreenCast on GNOME (no picker, no flash), GDI on Windows, `screencapture` on macOS. Overlay self-echo is stripped in software. Fresh on-screen text is attached to the next question automatically.
+> **The installers are unsigned.** There is no Apple Developer ID and no Windows OV/EV certificate, so:
+> - **macOS:** clear quarantine once — `xattr -dr com.apple.quarantine /Applications/OSMOS.app` — then grant Screen Recording, Microphone and Accessibility in System Settings → Privacy & Security.
+> - **Windows:** SmartScreen shows "More info → Run anyway".
+>
+> This is tracked as an open exit criterion in [`docs/ARCHITECTURE-V2.md`](docs/ARCHITECTURE-V2.md) §20, not silently ignored.
 
-### ⚡ Smart Mode
-One toggle orchestrates both ears + live screen. A visible `● REC` chip stays on while capture is active — honest by default.
+### First run
 
-### 🛡 Low-profile (stealth)
-- **Windows**: `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` — excluded from all DWM-based captures (Zoom, Teams, Meet, Webex, OBS)
-- **macOS**: `NSWindowSharingNone` via `setContentProtection` — outside ScreenCaptureKit streams
-- Exclusion re-asserted on show/focus/display changes; skip-taskbar + always-on-top included
-- Honest limits: hardware HDMI dongles and phone cameras see everything — physics, not software
-
-### 🧠 Profiles & Interview Intelligence
-Named multi-profiles, each carrying: résumé + job description, company intel (auto-researched), role documents (TF-IDF retrieval), question bank with STAR stories, mode prompts (interview / meeting / general), and per-agent provider overrides.
-
-### 💬 Chat that respects your stack
-Ollama (local) first-class; OpenAI / Anthropic / Groq / OpenRouter / LiteLLM via one OpenAI-compatible surface. Streaming, cancel, markdown rendering sanitized with DOMPurify.
-
-### 🔇 Zero-dependency installs
-Runtime pieces vendored into every installer (downloaded at **local pack** time — not committed to git):
-
-- **Whisper audio worker** — frozen standalone binary (PyInstaller bundles Python + NumPy)
-- **ffmpeg** — official **LGPL** builds (BtbN), staged per-platform
-- **Onboard fast LLM** — Qwen2.5-1.5B Instruct (Q4 GGUF) + `llama-server` for instant Assist drafts and profile-grounded easy answers
-
-Users install nothing manually: no Python, no pip, no PortAudio, no ffmpeg, no Ollama required for the fast lane.
+1. The onboarding wizard asks for a profile (optional) and a provider.
+2. **Local-only:** leave the provider on the bundled model. **Cloud:** add a key in Settings → Models.
+3. Turn on **Smart** to hear the meeting, press <kbd>Ctrl/Cmd</kbd>+<kbd>Enter</kbd> for an answer, <kbd>Alt/Option</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> to read the screen.
 
 ---
 
-## How it works
+## Platform support
 
-```mermaid
-flowchart LR
-    subgraph Main process
-        MIC[Mic stream\nffmpeg pulse/dshow/avfoundation] --> WAV[6s WAV chunks]
-        SPK[Speaker loopback\nmonitor capture] --> WAV
-        LIVE[Live screen engine\nsilent snap → OCR] --> CTX[Fused context]
-        WAV --> WHISPER[Whisper worker\nstandalone binary]
-    end
-    WHISPER -->|finals| PANEL[Transcript panel]
-    PANEL --> ASK{shouldAutoAssist}
-    CTX --> PROMPT[fusedAssistPrompt]
-    PROMPT --> LLM[[Ollama or cloud LLM]]
-    ASK --> LLM
-    LLM --> OVERLAY[Markdown answer card]
-```
+Everything below was measured or reproduced on the platform named. Rows that were never verified are labelled **untested** — the UI does not claim them either.
 
-Key design rule: **all capture lives in the main process** (`src/main/services/micStream.ts`, `linuxLoopbackStream.ts`, `screenLive.ts`). The renderer only transcribes chunks and renders UI, so React lifecycle can never kill a recording.
+| | Windows | macOS | Linux |
+|---|---|---|---|
+| Meeting audio (speaker) | Chromium loopback — works out of the box | **Requires BlackHole** + a Multi-Output Device | `ffmpeg -f pulse` on a real `*.monitor` (pw-record fallback) |
+| Microphone | ffmpeg DirectShow / Chromium | AVFoundation via ffmpeg | ffmpeg pulse / pw-record |
+| Screen reading | GDI capture (silent) | `screencapture -x` + Screen Recording grant | Mutter ScreenCast on GNOME (no picker, no flash); CLI tools elsewhere |
+| Capture exclusion | `WDA_EXCLUDEFROMCAPTURE` — verified against the OS flag | `NSWindowSharingNone` — stops legacy `CGWindowList` capture; **ScreenCaptureKit shares can still include it** | No OS equivalent — share a window, not the whole desktop |
+| Overlay above fullscreen apps | — | yes (`screen-saver` level, `visibleOnFullScreen`) | — |
+| Live screen loop | GDI, silent | `screencapture`, silent | GNOME only; never the portal, never `gnome-screenshot` |
+
+**Linux notes.** GNOME live reading needs `python3-gi`, GStreamer and `gstreamer1.0-pipewire` (default on Ubuntu GNOME). Nothing is bundled — the backend is only offered when its probe passes. Wayland cannot register global shortcuts on many setups; the in-app hotkeys still work.
+
+**macOS notes.** Meeting audio needs a virtual cable (BlackHole or Loopback) plus a Multi-Output Device; without one the app refuses to record instead of silently transcribing your microphone. `docs/STEALTH-MATRIX.md` lists every capture-app combination as measured, partial or **untested**.
 
 ---
 
-## Install & Run
-
-### End users
-Grab an installer from [Releases](https://github.com/taksha17/osmos/releases) (built offline on each OS and uploaded with `npm run release:upload`).
-
-Every installer is **fully self-contained** — no manual installs on any OS:
-
-- **Windows**: NSIS installer with LGPL ffmpeg + frozen audio worker + onboard LLM
-- **macOS**: `.dmg` (unsigned for now — right-click → Open pastes Gatekeeper) with bundled ffmpeg + LLM
-- **Linux**: `.deb` / AppImage with bundled ffmpeg + LLM; uses your existing PipeWire/Pulse
-
-GNOME Live screen reading uses Mutter ScreenCast (`python3-gi` + GStreamer/PipeWire, default on Ubuntu). macOS needs Screen Recording once in System Settings.
-
-### Developers
+## Build from source
 
 ```bash
 git clone https://github.com/taksha17/osmos.git
 cd osmos
 npm install
-npm run ensure:llm   # once per OS host: ~400MB GGUF + matching llama-server
-npm run dev
-npm run typecheck
-npm run build
-# Package on the matching host — each installer embeds the onboard LLM:
-npm run pack:linux      # Linux x64/arm64
-npm run pack:mac        # must run on macOS
-npm run pack:win        # must run on Windows
-npm run release:upload  # upload release/* via gh (no Actions minutes)
+
+npm run dev          # Vite on :5179 + Electron, OSMOS_DEV=1
+npm run typecheck    # tsc for app + node configs
+npm test             # 243 unit tests (src/shared + src/main)
+npm run build        # renderer + main + workers
 ```
 
-CI is **typecheck-only** on Ubuntu. Do not push `v*` tags expecting CI to pack — that matrix was removed to save GitHub Actions minutes.
+Package on the matching host — each OS embeds its own `llama-server` runtime and its own ffmpeg:
 
-The onboard LLM (Qwen2.5-1.5B) is the **same GGUF on every OS**; only the `llama-server` binary differs (Linux / macOS / Windows, x64 or arm64). `ensure-bundled-llm.mjs` picks the correct runtime for the host automatically.
+```bash
+npm run pack:linux    # AppImage + deb
+npm run pack:mac      # dmg (must run on macOS)
+npm run pack:win      # NSIS installer
+node scripts/pack.mjs --lite            # runtime only, weights downloaded on first run
+```
 
-<details>
-<summary>Configuration highlights (Settings → …)</summary>
+`ensure-ffmpeg` and `ensure-bundled-llm` stage the vendored runtimes (gitignored, ~1 GB). On macOS ffmpeg is compiled from pinned LGPL source, and `scripts/sign-vendored-macos.mjs` ad-hoc signs every vendored Mach-O — **without that signature Apple Silicon kills the helper on spawn**.
 
-- **Speech**: STT engine (local-whisper / openai-whisper / webspeech), mic picker, language, **🎙 Test mic** with live volume meter + peak hold
-- **Smart assist audio**: mic / system / both
-- **Models**: Ollama host probe, provider API keys (encrypted at rest via OS keychain)
-- **Web search**: DuckDuckGo / SearXNG / Tavily grounding
-- **Low-profile**: capture exclusion toggle
-- **Local data**: delete-all sessions & transcripts
+Do not run `pack:all`: electron-builder cannot cross-build a working mac/win package from Linux. Pull-request CI runs typecheck and tests on Ubuntu, macOS and Windows; the pack matrix in `.github/workflows/release.yml` runs only for `v*` tags.
 
-</details>
+### Useful checks
 
----
-
-## Why OSMOS over Cluely / Natively?
-
-| | **OSMOS** | Cluely | Natively |
-|---|---|---|---|
-| **Price** | Free, MIT | $20–100/mo | Paid tiers |
-| **Where your data goes** | Stays on disk; cloud only if you opt in | Cloud pipeline by design | Cloud |
-| **Open source** | ✅ MIT — audit every line | ❌ Closed | ❌ Source-available (restricted) |
-| **Telemetry** | None | Analytics on by default | Yes |
-| **Local LLM support** | ✅ First-class (Ollama) | ❌ | Limited |
-| **Local STT** | ✅ Whisper worker, zero-dep binary | Cloud | Cloud/hybrid |
-| **Cross-platform** | Win + macOS + Linux | Win + mac | mac-centric |
-| **Recording transparency** | Visible ● REC chip + one-click purge | Covert by positioning | N/A |
-| **Lock-in** | Your models, your keys, your files | Their stack | Their stack |
-
-**The short version:** OSMOS gives you the same real-time copilot capability without shipping your interview audio, screen contents, résumé, and API keys through someone else's server — and without a subscription metering your career.
+```bash
+npm run bench                    # replay harness: triggers, latency, screen kinds (gated ≥ 0.9 accuracy)
+npm run capture:fixtures -- screen --dir ./screens   # label real screenshots into a fixture set
+npm run probe:stealth            # Windows: does the overlay actually leave Alt-Tab and exclude capture?
+```
 
 ---
 
-## Privacy, consent & legal notes
+## How it works
 
-- **Consent laws vary.** Many jurisdictions require all-party consent to record conversations. OSMOS shows a persistent `● REC` indicator whenever capture is active — use it responsibly and follow your local law.
-- **Other people's words are their data.** Transcripts stored locally include other participants; Settings → Stealth → *Delete all sessions & transcripts* purges them instantly.
-- **Cloud providers have usage policies.** If interview-assist use conflicts with a provider's terms, use the local path (Ollama + local Whisper) — fully supported.
-- **No analytics.** No crash reporting, no telemetry, no phone-home. The update check hits a static feed you configure.
+```
+renderer (React)
+  │  ChatRequest { message, history, screenText?, screenAt? }   ← raw context, never prompt text
+  ▼
+main
+  ├─ capture workers (supervised, external)      mic + speaker → utterance events
+  ├─ endpointing            shared/policy/vadEndpoint.ts
+  ├─ trigger policy         shared/policy/triggerPolicy.ts   "was this a question for me?"
+  ├─ orchestrator           shared/policy/orchestrator.ts    speculative start → keep | restart | cancel
+  ├─ routing + budget       shared/policy/routerV2.ts · contextBudget.ts · answerContext.ts
+  ├─ screen classification  shared/policy/screenSnapshot.ts  (code / terminal / slides / chat)
+  ├─ providers              Ollama · OpenAI · Anthropic · Groq · OpenRouter · LiteLLM · vision
+  └─ memory                 sql.js SQLite store + shared/policy/memoryRanking.ts
+  ▼
+overlay  ← one window per app, presented without stealing focus
+```
 
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) for status and [`AGENTS.md`](AGENTS.md) for contributor/architecture conventions.
+Three rules shape the codebase:
+
+1. **Capture never runs inline in `main/index.ts`.** Workers are separate processes behind a supervisor with a stall watchdog and restart backoff, so a wedged `ffmpeg` cannot freeze the UI.
+2. **Policy is pure and unit-tested.** Trigger decisions, routing, budgeting and ranking live in `src/shared/policy/*` and are driven by the `bench/` replay harness from plain Node — no Electron needed.
+3. **Screen data stays in main.** The renderer sends OCR text plus a timestamp; the grabbed image never crosses the preload boundary.
+
+`docs/ARCHITECTURE-V2.md` is the full specification (seven phases, each with its exit criteria and what was measured). `AGENTS.md` is the contributor contract.
 
 ---
+
+## Measured, not claimed
+
+Numbers from `docs/BENCHMARKS.md`, produced on a Windows 11 test box and a Linux Zenbook. Re-run with `npm run bench`.
+
+| Metric | Result |
+|---|---|
+| Endpointing, end-of-speech p50 | **460 ms** |
+| End-of-speech → final transcript p50 | **510 ms** (WER 6.5 %) |
+| End-of-question → first token, bundled 1.5B | **p50 49 ms / p95 348 ms** |
+| Trigger precision / recall | **1.000 / 1.000** on 43 labelled utterances |
+| Screen-kind accuracy / code recall | **1.0 / 1.0** on the fixture set (gate: ≥ 0.9 / ≥ 0.85) |
+| Idle cost while listening | ≈ 3 % CPU, ≈ 93 MB RSS |
+| 30-minute meeting summary | 18.4 s on the bundled 1.5B |
+| Unit tests | **243** passing |
+
+Cloud-lane latency and vision recall are **not** measured — they need provider keys this repository does not ship. The harness prints `row skipped` rather than inventing a number.
+
+---
+
+## Privacy
+
+- **Nothing leaves the machine** unless you configure a cloud provider or cloud STT. The bundled model, local STT and OCR run offline.
+- **API keys** live in the local settings store, never in the repo or in logs.
+- **Recording indicator.** A visible `● REC` chip is shown whenever capture is active; Settings → *Delete all sessions & transcripts* purges stored sessions.
+- **Consent is your responsibility.** Many jurisdictions require all-party consent to record a conversation. Hardware HDMI capture and a phone camera will always see an overlay — capture exclusion is software, not a guarantee.
+
+---
+
+## Documentation
+
+| Doc | What it answers |
+|---|---|
+| [`docs/ARCHITECTURE-V2.md`](docs/ARCHITECTURE-V2.md) | The v2 specification, phase by phase, with exit criteria and measurements |
+| [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | Every measured number and how it was produced |
+| [`docs/STEALTH-MATRIX.md`](docs/STEALTH-MATRIX.md) | Capture exclusion per OS and per meeting app, including what is untested |
+| [`docs/CAPTURE-STRATEGY.md`](docs/CAPTURE-STRATEGY.md) | Why screen capture differs per desktop, and the silent path chosen |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | What is done, what is next, what is blocked on hardware |
+| [`docs/REGRESSIONS.md`](docs/REGRESSIONS.md) | Bugs that were fixed and must not come back |
+| [`docs/SELF-HOSTING.md`](docs/SELF-HOSTING.md) | Running optional web-access backends yourself |
+| [`docs/ARCHITECTURE-V3.md`](docs/ARCHITECTURE-V3.md) | The in-progress web-access layer (scaffold) |
+| [`AGENTS.md`](AGENTS.md) | Conventions, invariants and the validation checklist for contributors |
+
+---
+
+## Status
+
+- **v2 is implemented end to end:** phases 0–7 are in `main`, with the numbers above.
+- **v3 (self-hosted web access)** is a scaffold — the capability router and Web Access Manager exist; chat still calls the v0.6 search path.
+- **Open, and honest about it:** signed/notarized installers (no certificates), vision accuracy on real providers (no keys), and the macOS/Linux halves of the stealth matrix that need a real meeting app on a real desktop.
+
+## Contributing
+
+Read [`AGENTS.md`](AGENTS.md) first — it holds the invariants (policy in `shared/policy`, capture in workers, nothing new in `main/index.ts`, platform behaviour behind `src/main/platform/`). Before declaring a change done: `npm run typecheck`, `npm test`, `npm run build`, and `npm run bench` for anything that touches routing, prompts or triggers.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Bundled runtimes keep their own licenses: ffmpeg is an unmodified **LGPL** build ([source](https://github.com/BtbN/FFmpeg-Builds)); the frozen audio worker bundles Python+NumPy under their respective licenses.
+MIT — see [LICENSE](LICENSE). Bundled third-party runtimes keep their own licences: ffmpeg is an unmodified **LGPL** build ([source](https://github.com/BtbN/FFmpeg-Builds)); `llama.cpp` is MIT and the Qwen2.5-1.5B weights are Apache-2.0; Tesseract.js is Apache-2.0 and Moonshine is MIT. Full list: [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
