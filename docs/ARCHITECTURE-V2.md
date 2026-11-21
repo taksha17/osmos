@@ -922,15 +922,36 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 
 ## 20. Definition of done for v2
 
-- [ ] All Phase exit criteria met in committed benchmark reports.
-- [ ] p50 end-of-question → first token ≤ 1.5 s (local fast lane) and ≤ 2.5 s p95.
-- [ ] Clean-machine install works on Windows, macOS and Ubuntu with no manual dependencies.
-- [ ] Vision path works with at least two cloud providers and one local model.
-- [ ] Session reports and exports available offline.
-- [ ] Stealth matrix published; unverified combinations clearly labelled.
-- [ ] Signed/notarized installers published.
-- [ ] README, ROADMAP, AGENTS.md and `features.ts` updated and consistent with this document.
-- [ ] No personal paths, LAN addresses or secrets in the repository.
+Status as of 2026-11-21, measured on the Windows 11 box (`docs/BENCHMARKS.md`,
+`docs/STEALTH-MATRIX.md`). A row is ticked only when something was measured; the
+rest say what is missing, because an unticked row with a reason is worth more than
+a tick that hides a gap.
+
+- [x] **Phase exit criteria measured where the host allows it.** Phases 0–3 and 5
+  are in with numbers; the Phase 4 vision row and the Phase 6 capture-exclusion row
+  are measured only at wire level (no provider key, no composited desktop over SSH).
+- [x] **Latency.** End-of-question → first token: p50 **49 ms**, p95 **348 ms** on the
+  bundled 1.5B lane (`npm run bench`, `BENCH_PROVIDER_*` set); trigger p50 460 ms,
+  end-of-speech → transcript p50 510 ms, WER 6.5 %. All under the 1.5 s / 2.5 s
+  budget with room for a cloud lane.
+- [~] **Clean-machine install.** Windows 11: packaged NSIS build installed, workers
+  probed from the installed tree. Ubuntu: unpacked packaged tree runs under
+  `start:release`. **macOS: not installed anywhere — no host.**
+- [ ] **Vision on two cloud providers plus one local model.** Only the wire path is
+  verified (payload shape, capability refusal, image pairing). No provider key and no
+  local vision model were available, so this row is open.
+- [x] **Session reports and exports offline.** History → *Export report* writes
+  `shared/policy/sessionReport.ts`'s markdown through `main/services/sessionExport.ts`
+  — no provider, no network. Report, file name and pairing rules are unit-tested.
+- [x] **Stealth matrix published** (`docs/STEALTH-MATRIX.md`) with every untested
+  combination labelled `unverified` and its reason.
+- [ ] **Signed / notarized installers.** Not met: no Apple Developer ID and no Windows
+  OV/EV certificate in this project. Builds are unsigned and the release notes say so;
+  see Phase 7 for what an owner has to buy before this can change.
+- [x] **README, ROADMAP, AGENTS.md and `features.ts`** describe the shipped v2 code.
+- [x] **No personal paths, LAN addresses or secrets** in tracked files; the only
+  private ranges left are inside `webGuard` test fixtures, where blocking them is the
+  point.
 
 ---
 

@@ -155,6 +155,7 @@ Capture and STT run in **supervised external processes**, never inline in main.
 - `src/shared/policy/triggerPolicy.ts` is the only place that decides *whether* to answer (§7.3). Only a direct question or a hotkey fires; meeting cues return `notes: true` and must never produce a model request; a repeat inside the 10 s window is `duplicate`; the user's own channel never fires. Do **not** reintroduce "answer anything long" — that v0.6 heuristic is what Phase 3 replaced. Agreement/tag questions (`Wasn't that demo great?`, short, no wh-word) are deliberately not asks, and imperative stems (`name`, `list`, `show me`, …) count as asks even without a `?`.
 - `src/shared/policy/orchestrator.ts` owns the request lifecycle (§7.4) as a pure state machine: speculative start on a partial with confidence ≥ 0.8, `keep` when the final is within 20 % edit distance, `restart` when it is not, cancel when a newer question arrives, cancel at the 15 s deadline. It **returns actions** and never spawns or cancels a request itself — keep the provider calls in the caller.
 - Lane choice is `src/shared/policy/routerV2.ts`: hard rules (code snapshot → vision lane; no vision model → OCR text), a `easyMaxWords` threshold input (default `EASY_MAX_WORDS`), and a fallback chain ending at the quality lane after the 2.5 s first-token budget. `decision` stays the v0.6 result so status lines and parity tests keep working.
+- Phase 5's report is reachable: History → *Export report* → `history:export-report` → `main/services/sessionExport.ts` writes `shared/policy/sessionReport.ts`'s markdown with a save dialog. Keep it offline — the report must never need a provider.
 - `src/shared/policy/contextBudget.ts` builds the §7.2 `ContextPacket` and is the only place section budgets are applied; trimming is by relevance (recency + question overlap, retrieval score), never arbitrary slicing.
 - `src/shared/policy/answerContext.ts` returns `{ packet, plan }` for one request (code-screen detection, résumé/JD fact splitting); `src/main/services/answerContext.ts` adapts `AppSettings` to it. `buildChatContext` calls it once, and both chat handlers route on `routeDecisionFor(context.plan)` — do not add a bare `routeDecision(...)` call back into `src/main/index.ts`: a new routing rule belongs in the plan (§8.2 hard rules), not at the call site.
 - Trigger quality is re-measured by `npm run bench` from `bench/fixtures/triggers/labelled.jsonl`. When a trigger rule changes, add a labelled case for it rather than editing an existing label.
@@ -174,6 +175,14 @@ Capture and STT run in **supervised external processes**, never inline in main.
 - Screen images never cross the preload boundary: `ChatRequest` carries OCR text plus `screenAt`, and main keeps the grabbed bytes (`services/screenImageCache.ts`, memory only). `shared/policy/screenImage.ts` decides freshness and pairing (≤ 45 s old, ≤ 5 s from the OCR timestamp) — do not attach an image without a paired timestamp, and do not persist grabs to disk.
 - Screen kinds are measured by `npm run bench` (accuracy + per-kind recall) and **gated**: the run exits non-zero when accuracy < 0.9, code recall < 0.85, or the fixture set contains no code snapshots. The report and doc section are still written on failure. Trigger and latency rows are deliberately advisory — do not turn them into gates until their corpora are independent.
 - The gate is measured on **holdout** fixtures whenever they exist and only falls back to the tuning set when none have been captured. Any fixture line may carry `"split":"holdout"`; the hand-written lines are the tuning set and must not be relabelled to make the gate pass. Capture real ones with `npm run capture:fixtures -- screen --dir <folder>` (label = filename prefix, e.g. `code-two-sum.png`) or `npm run capture:fixtures -- triggers --file <tsv>`. Add `--out` to write a separate file and `--dry` to preview.
+
+### Distribution (Phase 7)
+
+- `npm run pack` ships the weights; `npm run pack:lite` (or `node scripts/pack.mjs --lite`) ships the `llama-server` runtime only, with `artifactName` marked `-lite`. The lite config is generated at `electron-builder.lite.json` (gitignored) from the `build` block in `package.json`, so packaging options stay in one place — do not hand-edit the generated file.
+- A lite install downloads the GGUF on first run inside `startBundledLlm` → `main/services/modelPackService.ts`: resumable `Range`, `.partial` + rename, SHA-256 verified against `model.json`, which `ensure-bundled-llm.mjs` now writes (`url`, `sha256`, `bytes`). Never accept an unverified download, and never start a download the manifest cannot check.
+- `scripts/pack.mjs` spawns `node_modules/electron-builder/out/cli/cli.js` through the current Node. Do **not** put `spawn('npx', …)` back: `npx` is `npx.cmd` on Windows and a shell-less spawn fails with `ENOENT` (it did, on the box).
+- `.github/workflows/release.yml` runs typecheck, tests, the full pack and the lite pack on Ubuntu/macOS/Windows **for `v*` tags only**. Pull-request CI stays typecheck-only on Ubuntu; do not re-add a matrix to `ci.yml`.
+- Signing is not configured: no Apple Developer ID, no Windows OV/EV certificate. Installers are unsigned, `docs/ARCHITECTURE-V2.md` Phase 7 says so, and that row is the one v2 exit criterion this repository cannot satisfy by itself.
 
 ### Web access (v3, `docs/ARCHITECTURE-V3.md`)
 
@@ -342,7 +351,7 @@ Documented so the next agent does not reintroduce these bugs:
 - Stream parser yields `{ kind: 'thinking' | 'content' }`; UI “Model thinking…”.
 - Interview mode skips web search unless the query looks like research.
 - Profile/JD clipped in `buildChatContext`; empty final → explicit `error` event.
-- Probe Ollama saves form URL first, then probes that host (LAN often `http://192.168.4.31:11434`).
+- Probe Ollama saves form URL first, then probes that host.
 
 ### Local STT (moonshine / whisper worker)
 
@@ -411,7 +420,7 @@ Remaining symptom: pipe still starves after ~1st chunk on this Zenbook/PipeWire 
 
 ### Ollama
 
-- Default may be `http://127.0.0.1:11434`. Dev LAN often `http://192.168.4.31:11434` (`gemma4:e4b`, `qwen2.5:1.5b`).
+- Default is `http://127.0.0.1:11434`; a dev box may use its own LAN/host URL (`qwen2.5:1.5b` for speed).
 - Prefer `qwen2.5:1.5b` when speed matters; `gemma4:e4b` is slower (thinking).
 
 ### STT / Whisper / audio
@@ -520,8 +529,8 @@ See `docs/ROADMAP.md` and `src/shared/features.ts`.
 
 ## Session notes (human machine)
 
-- Dev machine: Linux Zenbook (PipeWire / GNOME Wayland); Ollama often on LAN `192.168.4.31:11434`
-- **Windows test box:** `192.168.1.4`, user `Taksh` (`TAKSHA-DESKTOP`, Win 11 Home, Node 24, git 2.54). OpenSSH is up but password auth is required — `Taksh` is an administrator, so keys must go in `C:\ProgramData\ssh\administrators_authorized_keys`, not the user's home. Run PowerShell over SSH with `-EncodedCommand` (base64 UTF-16LE) to avoid quoting issues; use bare `git`, not `git.cmd`. Keep one clone at `C:\Users\taksh\osmos-ci` for PR checks.
+- Dev machine: Linux Zenbook (PipeWire / GNOME Wayland); Ollama may be a LAN host
+- **Windows test box:** a LAN host (`TAKSHA-DESKTOP`, Win 11 Home, Node 24, git 2.54) reached over SSH as user `Taksh`; ask the owner for the address. OpenSSH is up but password auth is required — `Taksh` is an administrator, so keys must go in `C:\ProgramData\ssh\administrators_authorized_keys`, not the user's home. Run PowerShell over SSH with `-EncodedCommand` (base64 UTF-16LE) to avoid quoting issues; use bare `git`, not `git.cmd`. Keep one clone at `C:\Users\taksh\osmos-ci` for PR checks.
 - Default sink monitor: `alsa_output.pci-…HiFi__hw_sofhdadsp__sink.monitor`; mic often `…_6__source` (laptop digital)
 - **Bundled-runtime spike (reproducible):**
   `env -i HOME=$HOME PATH=/tmp/osmos-empty-bin:/usr/bin:/bin XDG_RUNTIME_DIR=/run/user/$(id -u) ELECTRON_RUN_AS_NODE=1 SPIKE_MONITOR="$(pactl get-default-sink).monitor" ./node_modules/electron/dist/electron .qwen/spike-nopath.mjs`

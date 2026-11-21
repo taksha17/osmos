@@ -33,7 +33,7 @@ Checks:
 
 ### Windows 11 Home — 2026-11-21
 
-`Electron 34.5.8` · `Node 20.19.1` · test box `TAKSHA-DESKTOP` (192.168.1.4),
+`Electron 34.5.8` · `Node 20.19.1` · test box (`TAKSHA-DESKTOP`),
 driven over SSH.
 
 | Concern | Result | Evidence |
