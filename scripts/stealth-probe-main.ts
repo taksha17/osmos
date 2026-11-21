@@ -159,9 +159,10 @@ async function main() {
   focusOverlay(overlay);
   await sleep(700);
   results.checks.overlayTakesFocusOnClick = overlay.isFocused();
-  meeting.focus();
+  // Drive the real blur event: the app's handler then returns the overlay to a
+  // non-focusable state, which is the policy under test.
+  overlay.blur();
   await sleep(600);
-  // The policy is that a blurred overlay stops accepting keyboard focus.
   results.checks.focusReleasedAfterBlur = !overlay.isFocusable();
 
   if (process.platform === 'win32') {

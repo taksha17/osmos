@@ -32,6 +32,7 @@ $h = [IntPtr]$hwnd
 $ex = [OsmosToolWindow]::GetWindowLong($h, -20)
 $want = ($ex -bor 0x80) -band (-bnot 0x40000)
 if ($want -ne $ex) { [void][OsmosToolWindow]::SetWindowLong($h, -20, $want) }
+Write-Output ("ex={0} want={1} now={2}" -f $ex, $want, [OsmosToolWindow]::GetWindowLong($h, -20))
 `;
 
 /**
@@ -59,10 +60,12 @@ export function markToolWindow(win: BrowserWindow): void {
 
   // The script is written to a file instead of passed with -Command: the here-string
   // needs literal newlines, and Node's argument escaping mangles them on Windows.
+  // Rewritten on every call: caching by "file exists" once ran a stale script
+  // from an earlier version, which silently did nothing.
   let scriptPath: string;
   try {
-    scriptPath = path.join(os.tmpdir(), 'osmos-toolwindow.ps1');
-    if (!fs.existsSync(scriptPath)) fs.writeFileSync(scriptPath, TOOL_WINDOW_SCRIPT, 'utf8');
+    scriptPath = path.join(os.tmpdir(), 'osmos-toolwindow-v1.ps1');
+    fs.writeFileSync(scriptPath, TOOL_WINDOW_SCRIPT, 'utf8');
   } catch {
     return;
   }
@@ -71,8 +74,26 @@ export function markToolWindow(win: BrowserWindow): void {
     const child = spawn(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', scriptPath, hwnd],
-      { windowsHide: true, stdio: 'ignore', detached: true },
+      { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], detached: true },
     );
+    let diagnostics = '';
+    child.stdout?.on('data', (buf: Buffer) => {
+      diagnostics += buf.toString('utf8');
+    });
+    child.stderr?.on('data', (buf: Buffer) => {
+      diagnostics += buf.toString('utf8');
+    });
+    child.on('exit', (code) => {
+      try {
+        fs.writeFileSync(
+          path.join(os.tmpdir(), 'osmos-toolwindow.log'),
+          `hwnd=${hwnd} code=${code}\n${diagnostics}`,
+          'utf8',
+        );
+      } catch {
+        /* diagnostics only */
+      }
+    });
     child.unref();
   } catch {
     /* style is best-effort; skipTaskbar still hides the taskbar button */
