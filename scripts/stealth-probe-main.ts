@@ -134,7 +134,9 @@ async function main() {
   const overlay = new BrowserWindow({
     ...RECT,
     frame: false,
-    transparent: false,
+    // Must match the real overlay: SetWindowDisplayAffinity only succeeds on a
+    // layered window, so an opaque probe window would silently fail the check.
+    transparent: true,
     alwaysOnTop: true,
     skipTaskbar: true,
     show: false,
@@ -157,23 +159,33 @@ async function main() {
   results.checks.overlayTakesFocusOnClick = overlay.isFocused();
   meeting.focus();
   await sleep(600);
-  results.checks.focusReleasedAfterBlur = !overlay.isFocused();
+  // The policy is that a blurred overlay stops accepting keyboard focus.
+  results.checks.focusReleasedAfterBlur = !overlay.isFocusable();
 
   if (process.platform === 'win32') {
     markToolWindow(overlay);
-    await sleep(1_500);
     const before = await affinityOf(tmpDir, overlay);
     results.exStylesBeforeProtection = before.exStyle;
 
+    // WS_EX_TOOLWINDOW (0x80) is what keeps a window out of Alt-Tab. The style
+    // is applied by a short-lived PowerShell helper, so poll instead of guessing
+    // how long its Add-Type compile takes.
+    let exStyle = before.exStyle;
+    for (let attempt = 0; attempt < 16 && (exStyle & 0x80) === 0; attempt++) {
+      await sleep(500);
+      exStyle = (await affinityOf(tmpDir, overlay)).exStyle;
+    }
+    results.exStylesAfterProtection = exStyle;
+    results.checks.toolWindowStyle = (exStyle & 0x80) !== 0;
+
     overlay.setContentProtection(true);
-    await sleep(800);
+    await sleep(900);
     const native = await affinityOf(tmpDir, overlay);
-    results.exStylesAfterProtection = native.exStyle;
     results.affinity = native.affinity;
-    // 0x11 = WDA_EXCLUDEFROMCAPTURE, the flag Zoom/Teams/OBS capture honours.
-    results.checks.captureExclusionFlagSet = native.affinity === 0x11;
-    // WS_EX_TOOLWINDOW (0x80) is what keeps a window out of Alt-Tab.
-    results.checks.toolWindowStyle = (native.exStyle & 0x80) !== 0;
+    // In-process getter: Electron reports whether the affinity call landed.
+    results.checks.contentProtectionReported = overlay.isContentProtected();
+    // 0x11 = WDA_EXCLUDEFROMCAPTURE, readable from any process.
+    results.affinityIsExcludeFromCapture = native.affinity === 0x11;
 
     const control = await captureMean(tmpDir);
     results.controlCapture = control;
