@@ -21,12 +21,12 @@
  *   npm run pack:linux | pack:mac | pack:win
  */
 
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import https from 'node:https';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { extractArchive } from './lib/extract-archive.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outRoot = path.join(root, 'build', 'llm');
@@ -124,26 +124,6 @@ function download(url, dest) {
   });
 }
 
-function extract(archive, dir) {
-  fs.mkdirSync(dir, { recursive: true });
-  if (/\.zip$/i.test(archive)) {
-    if (process.platform === 'win32') {
-      execFileSync(
-        'powershell.exe',
-        [
-          '-NoProfile',
-          '-Command',
-          `Expand-Archive -Path '${archive.replace(/'/g, "''")}' -DestinationPath '${dir.replace(/'/g, "''")}' -Force`,
-        ],
-        { stdio: 'inherit' },
-      );
-    } else {
-      execFileSync('unzip', ['-o', archive, '-d', dir], { stdio: 'inherit' });
-    }
-  } else {
-    execFileSync('tar', ['-xzf', archive, '-C', dir], { stdio: 'inherit' });
-  }
-}
 
 function findServerBinary(dir, platform) {
   const want = serverNameFor(platform);
@@ -246,7 +226,7 @@ async function ensureRuntime(platform, arch) {
   if (!fs.existsSync(archive) || fs.statSync(archive).size < 1_000_000) {
     await download(asset.url, archive);
   }
-  extract(archive, extractDir);
+  extractArchive(archive, extractDir);
   const found = findServerBinary(extractDir, platform);
   if (!found) {
     throw new Error(`llama-server not found in ${platform}/${arch} archive`);

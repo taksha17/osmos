@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import https from 'node:https';
 import { fileURLToPath } from 'node:url';
+import { extractArchive } from './lib/extract-archive.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = path.join(root, 'build', 'bin', process.platform === 'win32' ? 'win32' : process.platform);
@@ -67,27 +68,6 @@ function download(url, dest) {
   });
 }
 
-function extract(archive, dir) {
-  fs.mkdirSync(dir, { recursive: true });
-  if (/\.zip$/.test(archive)) {
-    if (process.platform === 'win32') {
-      execFileSync(
-        'powershell.exe',
-        [
-          '-NoProfile',
-          '-Command',
-          `Expand-Archive -Path '${archive.replace(/'/g, "''")}' -DestinationPath '${dir.replace(/'/g, "''")}' -Force`,
-        ],
-        { stdio: 'inherit' },
-      );
-    } else {
-      execFileSync('unzip', ['-o', archive, '-d', dir], { stdio: 'inherit' });
-    }
-  } else {
-    // .tar.xz — macOS/Linux CI hosts ship bsdtar/gnu tar with xz
-    execFileSync('tar', ['-xJf', archive, '-C', dir], { stdio: 'inherit' });
-  }
-}
 
 function findFfmpegBinary(dir) {
   const stack = [dir];
@@ -133,7 +113,7 @@ async function main() {
   const extractDir = path.join(outDir, '_extract');
   fs.rmSync(extractDir, { recursive: true, force: true });
   try {
-    extract(archive, extractDir);
+    extractArchive(archive, extractDir);
     let found;
     if (process.platform === 'darwin') {
       // Compile minimal LGPL ffmpeg from pinned source (BtbN ships no macOS
