@@ -85,8 +85,30 @@ export function utteranceHash(text: string): string {
 const HIGH_STAKES_QUESTION =
   /(tell me about yourself|tell me about a time|walk me through|why do you want|why should we hire|greatest strength|greatest weakness|where do you see yourself|salary|compensation|tell us about)/i;
 
+/**
+ * Agreement/tag questions ("Wasn't that demo great?") seek confirmation, not an
+ * answer. Answering them in a meeting is noise, so they are not classified as
+ * questions even though they carry a question mark.
+ */
+const AGREEMENT_QUESTION =
+  /^(wasn'?t|weren'?t|isn'?t|aren'?t|doesn'?t|don'?t|didn'?t|won'?t|wouldn'?t|couldn'?t|shouldn'?t)\b/i;
+
+/** A wh-word anywhere means the utterance asks for information, not agreement. */
+const WH_WORD = /\b(what|how|why|when|where|who|which|whose)\b/i;
+
+function isAgreementQuestion(text: string): boolean {
+  if (!AGREEMENT_QUESTION.test(text)) return false;
+  if (WH_WORD.test(text)) return false;
+  return text.split(/\s+/).length <= 8;
+}
+
+/**
+ * Interrogatives plus the imperative phrasings that are really asks: "Name three
+ * ways…", "List the trade-offs…", "Walk me through…". Without these, an ask with
+ * neither a `?` nor an interrogative word never reached the model.
+ */
 const QUESTION_STEM =
-  /^(what|what's|how|how's|why|why's|when|where|who|whose|which|can you|could you|would you|will you|do you|did you|have you|are you|is there|are there|tell me|describe|explain|walk me through|summarize|outline|compare)\b/i;
+  /^(what|what's|how|how's|why|why's|when|where|who|whose|which|can you|could you|would you|will you|do you|did you|have you|are you|is there|are there|tell me|tell us|describe|explain|walk me through|summarize|outline|compare|name|list|define|show me|write|implement|solve|calculate|compute|draft)\b/i;
 
 /**
  * Rules-based question classifier (§7.3). Confidence is calibrated so that the
@@ -98,6 +120,7 @@ export function classifyQuestion(text: string): QuestionSignal {
   if (!t) return { isQuestion: false, confidence: 0 };
 
   if (HIGH_STAKES_QUESTION.test(t)) return { isQuestion: true, confidence: 0.95 };
+  if (isAgreementQuestion(t)) return { isQuestion: false, confidence: 0.2 };
   if (t.endsWith('?')) return { isQuestion: true, confidence: 0.9 };
   if (QUESTION_STEM.test(t)) return { isQuestion: true, confidence: 0.8 };
   if (/\?/.test(t)) return { isQuestion: true, confidence: 0.75 };

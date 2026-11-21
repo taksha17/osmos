@@ -602,17 +602,18 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 >
 > | Check | Result |
 > |---|---|
-> | Trigger precision / recall, 40 labelled utterances | **0.952 / 0.952** (gate ≥ 0.9 / ≥ 0.85; 1 false positive, 1 false negative) |
-> | Unit tests | 108/108, 28 of them new for §7.2–§7.4 |
+> | Trigger precision / recall, 43 labelled utterances | **1.000 / 1.000** (gate ≥ 0.9 / ≥ 0.85; first run 0.952, both misses fixed by two classifier rules) |
+> | Unit tests | 110/110, 30 of them new for §7.2–§7.4 |
 > | Replay set through `npm run bench` | 7 answerable utterances; 2 correctly skipped (one meeting cue, one self-speech) |
 >
 > Still open: wiring the orchestrator and context packet into main (§7.1's event bus
 > is still unused there); the **end-of-question → first-token** gate, which needs a real
 > provider run (`BENCH_PROVIDER_BASE_URL` + `BENCH_PROVIDER_MODEL`) — the deterministic
 > provider answers in ~120 ms by construction; and an accuracy set for
-> `pickEasyMaxWords`, so the boundary stays at the v0.6 default of 18 words. The two
-> trigger misses are recorded in `docs/BENCHMARKS.md`: a rhetorical question fires, and
-> an imperative phrasing with no stem ("Name three ways…") is missed.
+> `pickEasyMaxWords`, so the boundary stays at the v0.6 default of 18 words. Trigger
+> quality is measured on a hand-written 43-utterance set, and the first run's two misses
+> were fixed by the rules derived from them — an independent corpus is needed before
+> 1.000 is treated as a general result (`docs/BENCHMARKS.md`).
 
 - Implement Orchestrator, Context Engine, Trigger Policy, request cancellation/deadlines.
 - Router v2 with eval-driven thresholds and fallback chain.

@@ -14,7 +14,7 @@ only runs from the same machine.
 | Utterances correctly skipped (self-speech / filler) | measured (`src/shared/policy/triggerPolicy.ts`) |
 | End-of-speech → utterance handed to STT (p50 ≤ 600 ms) | measured 431 ms (Phase 2 slice 1); transcript timing needs `bench/fixtures/audio` |
 | STT word error rate (≤ 12 %) | Phase 2 |
-| Trigger precision ≥ 0.9 / recall ≥ 0.85 | measured 0.952 / 0.952 on 40 labelled utterances (Phase 3) |
+| Trigger precision ≥ 0.9 / recall ≥ 0.85 | measured 1.000 / 1.000 on 43 labelled utterances (Phase 3) |
 | End-of-question → first token (≤ 1.5 s p50 / 2.5 s p95) | plumbing measured through the fake provider; real-provider run still open (Phase 3) |
 | Vision key-fact recall | Phase 4 — needs `bench/fixtures/screens` |
 | Idle CPU / RAM while listening | measured (Phase 1) |
@@ -49,12 +49,17 @@ provider (`BENCH_FAKE_FIRST_TOKEN_MS=120`).
 
 | Check | Result |
 |---|---|
-| Trigger precision / recall (§13.2 gate: ≥ 0.9 / ≥ 0.85) | **0.952 / 0.952** on 40 labelled utterances (tp 20, fp 1, fn 1, tn 18) |
-| False positive | "Wasn't that demo great?" — rhetorical, but the rules treat any `?` as a question |
-| False negative | "Name three ways to avoid a deadlock" — imperative with no interrogative stem and no `?` |
+| Trigger precision / recall (§13.2 gate: ≥ 0.9 / ≥ 0.85) | **1.000 / 1.000** on 43 labelled utterances (tp 22, fp 0, fn 0, tn 21) |
+| Agreement/tag questions | `Wasn't that demo great?` (≤ 8 words, no wh-word) is no longer treated as an ask |
+| Imperative asks | stems such as `name`, `list`, `show me` now fire without a `?` or interrogative word |
 | Answerable utterances in the replay set | 7 (2 skipped: one meeting cue, one self-speech) |
-| First token through the deterministic provider | p50 127 ms / p95 133 ms — harness plumbing only, not model latency |
-| Unit tests | 108/108 on Windows (28 new for §7.2–§7.4) |
+| First token through the deterministic provider | p50 127 ms / p95 130 ms — harness plumbing only, not model latency |
+| Unit tests | 110/110 on Windows (30 new for §7.2–§7.4) |
+
+The first run of this set scored 0.952 (1 false positive, 1 false negative: the two rows
+above). Both were fixed by the classifier rules listed, so 1.000 on this hand-written set
+is expected rather than independent evidence — the eval set still needs utterances written
+without reading the rules before the number can be trusted.
 
 The §17 gate is **end-of-question → first token p50 ≤ 1.5 s / p95 ≤ 2.5 s**. That is not
 measured here: the deterministic provider answers in ~120 ms by construction. It needs a

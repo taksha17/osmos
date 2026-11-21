@@ -95,6 +95,32 @@ test('looksLikeMeetingCue ignores small talk', () => {
   assert.equal(looksLikeMeetingCue('We decided to delay the launch'), true);
 });
 
+test('agreement and tag questions are not treated as asks', () => {
+  assert.equal(classifyQuestion("Wasn't that demo great?").isQuestion, false);
+  assert.equal(classifyQuestion("Wasn't that demo great?").confidence, 0.2);
+  assert.equal(decideTrigger({ text: "Wasn't that demo great?" }).fire, false);
+  // A negated auxiliary with real information content still reaches the cue path.
+  const deadline = decideTrigger({ text: "Isn't the deadline Friday?" });
+  assert.equal(deadline.fire, false);
+  assert.equal(deadline.reason, 'meeting-cue');
+  // A negated question with an interrogative stem is still a question.
+  assert.equal(classifyQuestion("Don't you think we should ask why it failed?").isQuestion, true);
+});
+
+test('imperative asks fire even without a question mark', () => {
+  for (const text of [
+    'Name three ways to avoid a deadlock',
+    'List the tradeoffs between the two stores',
+    'Show me how the retry loop behaves',
+  ]) {
+    const d = decideTrigger({ text });
+    assert.equal(d.fire, true, text);
+    assert.equal(d.reason, 'direct-question', text);
+  }
+  // A plain instruction to a colleague is not an ask for the copilot.
+  assert.equal(decideTrigger({ text: 'Give the customer a call after lunch' }).fire, false);
+});
+
 test('classifyQuestion separates stems, explicit questions and statements', () => {
   assert.equal(classifyQuestion('What is a mutex?').confidence, 0.9);
   assert.equal(classifyQuestion('Tell me about a time you led a project.').confidence, 0.95);

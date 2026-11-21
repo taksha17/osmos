@@ -24,11 +24,13 @@
 {"channel":"them","text":"How would you design a rate limiter at this scale","expect":"answer"}
 {"channel":"them","text":"What would you do if the queue backed up during a deploy","expect":"answer"}
 {"channel":"them","text":"Name three ways to avoid a deadlock","expect":"answer"}
+{"channel":"them","text":"List the tradeoffs between the two stores","expect":"answer"}
 {"channel":"them","text":"We should probably revisit the pricing page copy","expect":"note"}
 {"channel":"them","text":"Let us schedule the retro for Monday","expect":"note"}
 {"channel":"them","text":"We decided to delay the launch by two weeks","expect":"note"}
 {"channel":"them","text":"I will send the notes after the call","expect":"note"}
 {"channel":"them","text":"That is the action item for Priya","expect":"note"}
+{"channel":"them","text":"Isn't the deadline Friday?","expect":"note"}
 {"channel":"them","text":"Absolutely, we can take that offline and follow up later","expect":"note"}
 {"channel":"them","text":"Good morning everyone, thanks for joining the call","expect":"none"}
 {"channel":"them","text":"Okay so the plan is to ship on Thursday afternoon","expect":"none"}
@@ -36,6 +38,7 @@
 {"channel":"them","text":"Right, that covers the status update for this week","expect":"none"}
 {"channel":"them","text":"The meeting starts in about ten minutes","expect":"none"}
 {"channel":"them","text":"Wasn't that demo great?","expect":"none"}
+{"channel":"them","text":"Give the customer a call after lunch","expect":"none"}
 {"channel":"them","text":"hi","expect":"none"}
 {"channel":"them","text":"thanks","expect":"none"}
 {"channel":"them","text":"No worries at all","expect":"none"}
