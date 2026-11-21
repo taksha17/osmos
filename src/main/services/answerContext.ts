@@ -5,11 +5,9 @@
  * onto it. The chat handler in `src/main/index.ts` calls `answerContextForChat`
  * and uses `plan.primary` for routing and `packet` for the prompt sections.
  *
- * It is deliberately not called yet: prompt assembly is still inline in that file,
- * which currently carries unrelated uncommitted work. Wiring is two lines:
- *
- *   const ctx = answerContextForChat(s, message, screen);
- *   // then route on ctx.plan.primary and read ctx.packet instead of re-clipping.
+ * Called from `buildChatContext` (which already resolves the question bank and the
+ * screen), so both chat handlers route on `routeDecisionFor(context.plan)` and the
+ * packet's code-screen flag reaches the prompt.
  */
 
 import type { AppSettings } from '../../shared/types.js';
@@ -23,6 +21,7 @@ export function answerContextForChat(
   settings: AppSettings,
   message: string,
   screen?: ChatScreenSource,
+  hints: { bankMatch?: boolean } = {},
 ): AnswerContext {
   const active = activeSavedProfile(settings.profiles, settings.activeProfileId);
   const profile = settings.profile;
@@ -31,6 +30,9 @@ export function answerContextForChat(
   return buildAnswerContext({
     mode: settings.activeMode || 'general',
     question: message,
+    // The bank entry itself reaches the prompt from `buildChatContext`; the packet
+    // only needs to know the question was anticipated (§8.2 routing hint).
+    ...(hints.bankMatch ? { bankMatch: { questionId: 'active-bank', answer: '', score: 1 } } : {}),
     ...(screenText
       ? { screen: { snapshotId: `screen-${screen?.at ?? 0}`, ocrText: screenText } }
       : {}),

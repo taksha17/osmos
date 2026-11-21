@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import {
   buildAnswerContext,
   looksLikeCodeScreen,
+  routeDecisionFor,
   splitFacts,
 } from './answerContext.ts';
+import { routeDecision } from '../lumenRoute.ts';
 
 const CODE_SCREEN = [
   'Given an array of integers nums and an integer target, return indices of the two numbers that add up to target.',
@@ -140,6 +142,36 @@ test('benchmarked thresholds reach the lane plan', () => {
   );
   assert.equal(wide.plan.primary, 'fast');
   assert.deepEqual(wide.plan.tiers, ['fast', 'quality']);
+});
+
+test('a code snapshot overrides the v0.6 lane decision', () => {
+  // Short question that v0.6 would send straight to the fast lane.
+  const ctx = buildAnswerContext({
+    mode: 'coding',
+    question: 'What does twoSum return?',
+    screen: { snapshotId: 'snap-1', ocrText: CODE_SCREEN },
+  });
+  assert.equal(ctx.plan.decision.tier, 'fast');
+  const decision = routeDecisionFor(ctx.plan);
+  assert.equal(decision.tier, 'quality');
+  assert.equal(decision.preferUpgrade, false);
+  assert.match(decision.reason, /vision/i);
+});
+
+test('routeDecisionFor keeps the v0.6 decision when no hard rule fires', () => {
+  const question = 'What is a mutex?';
+  const ctx = buildAnswerContext({ mode: 'general', question });
+  assert.deepEqual(routeDecisionFor(ctx.plan), routeDecision(question, { mode: 'general' }));
+});
+
+test('without a vision lane the OCR path keeps the v0.6 decision', () => {
+  const ctx = buildAnswerContext({
+    mode: 'coding',
+    question: 'Why does this fail?',
+    screen: { snapshotId: 'snap-1', ocrText: CODE_SCREEN },
+    visionAvailable: false,
+  });
+  assert.deepEqual(routeDecisionFor(ctx.plan), ctx.plan.decision);
 });
 
 test('an empty screen never becomes a screen section', () => {

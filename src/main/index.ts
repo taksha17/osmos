@@ -30,7 +30,9 @@ import {
   streamLane,
 } from './services/hybridChat.js';
 import { warmupProvider, getLastWarmup, probeLumenGateway } from './services/providerWarmup.js';
-import { routeDecision, routeTierLabel } from '../shared/lumenRoute.js';
+import { routeTierLabel } from '../shared/lumenRoute.js';
+import { routeDecisionFor } from '../shared/policy/answerContext.js';
+import { answerContextForChat } from './services/answerContext.js';
 import { startBundledLlm, stopBundledLlm } from './services/bundledLlm.js';
 import { loadHistory, saveHistory, upsertSession, deleteSession, clearAllHistory } from './services/history.js';
 import { checkForUpdates } from './services/updates.js';
@@ -155,6 +157,13 @@ async function buildChatContext(
   // every mode, before routing, so both handlers can pass the hint.
   const bank = active.questions?.length ? active.questions : loadQuestionBank();
   const bankMatch = matchQuestionBank(message, bank);
+
+  // Phase 3 seam (§7.2 packet + §8.2 lanes): one call decides the lane plan and
+  // the token-budgeted context for this request. `routeDecisionFor` applies the
+  // code-snapshot hard rule on top of the v0.6 decision.
+  const context = answerContextForChat(s, message, screen, {
+    bankMatch: Boolean(bankMatch),
+  });
 
   // Interview answers should ground in the saved profile — not random web hits.
   // Web search still runs for meeting/general, or when the user clearly asks for research.
@@ -299,6 +308,11 @@ async function buildChatContext(
       'This is what is currently visible on the user’s screen (meeting slide, coding problem, question, document).',
       'OCR is imperfect and may include browser/UI noise — ignore anything irrelevant.',
       'If the user’s question refers to “this”, “the screen”, “the question”, or a problem shown, answer using this text.',
+      ...(context.hasCodeScreen
+        ? [
+            'This snapshot is code or a problem statement: explain the bug briefly, then give working code in one block.',
+          ]
+        : []),
       '---',
       screenText,
       '---',
@@ -332,6 +346,7 @@ async function buildChatContext(
     usedWebSearch,
     searchHits,
     bankMatch,
+    context,
     provider: {
       ...provider,
       model: providerModel || provider?.model || '',
@@ -938,17 +953,13 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
     const message = (req?.message || '').trim();
     if (!message) return { ok: false, error: 'Empty message' };
 
-    const { s, system, usedWebSearch, searchHits, provider, bankMatch } =
+    const { s, system, usedWebSearch, searchHits, provider, context } =
       await buildChatContext(message, {
         text: req?.screenText,
         at: req?.screenAt,
       });
 
-    const decision = routeDecision(message, {
-      mode: s.activeMode || 'general',
-      hasScreen: Boolean((req?.screenText || '').trim()),
-      bankMatch: Boolean(bankMatch),
-    });
+    const decision = routeDecisionFor(context.plan);
     const plan = await planHybridLanes(s, decision, provider);
     const lane = directProvider(plan);
     const messages = [
@@ -1009,17 +1020,13 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
       const ac = new AbortController();
       streamAbortControllers.set(requestId, ac);
 
-      const { s, system, usedWebSearch, searchHits, provider, bankMatch } =
+      const { s, system, usedWebSearch, searchHits, provider, context } =
         await buildChatContext(message, {
           text: req?.screenText,
           at: req?.screenAt,
         });
 
-      const decision = routeDecision(message, {
-        mode: s.activeMode || 'general',
-        hasScreen: Boolean((req?.screenText || '').trim()),
-        bankMatch: Boolean(bankMatch),
-      });
+      const decision = routeDecisionFor(context.plan);
       const plan = await planHybridLanes(s, decision, provider);
       // Fire-and-forget quality warmup while we may stream a fast draft.
       void warmupProvider(provider);

@@ -11,6 +11,7 @@
  * handler is split), so this module is the seam, not the wiring.
  */
 
+import type { RouteDecision } from '../lumenRoute.ts';
 import { buildContextPacket, type ContextBudget, type ContextPacket } from './contextBudget.ts';
 import { planLanes, type LanePlan, type RouterThresholds } from './routerV2.ts';
 import type { TriggerMode, TriggerSpeaker } from './triggerPolicy.ts';
@@ -130,4 +131,21 @@ export function buildAnswerContext(
   );
 
   return { packet, plan, hasScreen, hasCodeScreen };
+}
+
+/**
+ * The decision the provider planner consumes (`planHybridLanes`), with §8.2's hard
+ * rule applied: a code or problem snapshot is never answered by the fast lane, so
+ * the lane that starts the request is the vision-capable quality one.
+ *
+ * Only vision overrides the v0.6 decision. Everything else is returned untouched,
+ * so draft-then-upgrade keeps behaving exactly as it does today; the plan's own
+ * `primary` describes the lane that streams, which is not always the decision's
+ * tier (a draft starts on fast and is replaced).
+ */
+export function routeDecisionFor(plan: LanePlan): RouteDecision {
+  if (plan.requiresVision && !plan.visionFallback && plan.decision.tier !== 'quality') {
+    return { tier: 'quality', reason: plan.reason, preferUpgrade: false };
+  }
+  return plan.decision;
 }

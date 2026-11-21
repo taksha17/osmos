@@ -607,21 +607,26 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > | Check | Result |
 > |---|---|
 > | Trigger precision / recall, 43 labelled utterances | **1.000 / 1.000** (gate ≥ 0.9 / ≥ 0.85; first run 0.952, both misses fixed by two classifier rules) |
-> | Unit tests | 121/121, 41 of them new for §7.2–§7.4 and the wiring seam |
+> | Unit tests | 124/124, 44 of them new for §7.2–§7.4 and the wiring |
 > | Replay set through `npm run bench` | 7 answerable utterances; 2 correctly skipped (one meeting cue, one self-speech) |
 > | **End-of-question → first token, real model** | **p50 49 ms / p95 348 ms** (gate ≤ 1.5 s / ≤ 2.5 s), bundled Qwen2.5-1.5B Q4_K_M through the packaged `llama-server`, 7 samples |
 >
-> **Ready to flip:** `src/shared/policy/answerContext.ts` assembles the `ContextPacket`
-> and the `LanePlan` in one call (code-screen detection for the §12 hard rule, résumé/JD
-> fact splitting, screen presence) and `src/main/services/answerContext.ts` maps
-> `AppSettings` onto it. The chat handler needs two lines —
-> `const ctx = answerContextForChat(settings, message, screen)`, then route on
-> `ctx.plan.primary` and read prompt sections from `ctx.packet` — but it is not called
-> yet: prompt assembly is inline in `src/main/index.ts`, which currently carries another
-> agent's uncommitted work, and editing it there would be reverted by their next commit.
+> **Wired:** `src/shared/policy/answerContext.ts` assembles the `ContextPacket` and the
+> `LanePlan` in one call (code-screen detection for the §12 hard rule, résumé/JD fact
+> splitting, screen presence); `src/main/services/answerContext.ts` maps `AppSettings`
+> onto it. `buildChatContext` calls it once and returns it as `context`, and both chat
+> handlers route on `routeDecisionFor(context.plan)`, so the hard rule now reaches
+> `planHybridLanes`: a code/problem snapshot never starts on the fast lane, and without a
+> vision lane the OCR text is used instead. `context.hasCodeScreen` also adds a short
+> "answer with code" line to the screen section.
 >
-> Still open: that call site; speculative start, which needs the partial utterances
-> Phase 2 is adding; the cloud/quality lane of the latency gate (measured on the local
+> The wiring commit touches only the regions of `src/main/index.ts` outside the
+> uncommitted web-access work there, so that patch stays unstaged and keeps applying.
+>
+> Still open: the prompt sections still use their v0.6 builders — moving them onto
+> `packet` section budgets is the remaining §7.2 follow-up, and it should be measured
+> against the current prompt before landing; speculative start, which needs the partial
+> utterances Phase 2 is adding; the cloud/quality lane of the latency gate (measured on the local
 > 1.5B fast lane only — no provider key on the test box); and an accuracy set for
 > `pickEasyMaxWords`, so the boundary stays at the v0.6 default of 18 words. Trigger
 > quality is measured on a hand-written 43-utterance set, and the first run's two misses
