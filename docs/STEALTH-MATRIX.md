@@ -33,16 +33,18 @@ Checks:
 
 ### Windows 11 Home — 2026-11-21
 
-`Electron 34.5.8` · `Node 20.19.1` · test box (`TAKSHA-DESKTOP`),
-driven over SSH.
+`Electron 34.5.8` · `Node 20.19.1` · test box (`TAKSHA-DESKTOP`, build 26300).
+The probe ran in the **logged-on console session** (`schtasks /ru taksh /it`),
+not in the SSH session: an SSH-attached shell cannot capture at all
+(`Graphics.CopyFromScreen` → "The handle is invalid").
 
 | Concern | Result | Evidence |
 |---|---|---|
-| Excluded from capture | **mechanism wired, unverified here** | `setContentProtection(true)` accepted; `WDA_EXCLUDEFROMCAPTURE` could not be confirmed because the SSH-attached desktop is not composited (`GetWindowDisplayAffinity` = 0, GDI capture black, GPU process exiting) |
+| Excluded from capture | **unverified — this host cannot show it** | `setContentProtection(true)` accepted, `GetWindowDisplayAffinity` = **1** (`WDA_MONITOR`), not `0x11`; the control grab taken with protection **off** returned the meeting window's own `#202020` and never contained the magenta overlay, so there is no pair of frames to compare |
 | Don't steal focus | **pass** | `overlayDidNotStealFocus=true`, `meetingKeptFocus=true` |
 | Focus on click | **pass** | `overlayTakesFocusOnClick=true` |
-| Return to passive on blur | **pass** | `passiveAfterFocusRelease=true` (an SSH session cannot move foreground focus, so the blur *event* never fires; the probe runs the handler body) |
-| Hide from task switchers | **pass** | `WS_EX_TOOLWINDOW` present in the overlay's ex-style (`0x8080008` = layered + topmost + noactivate + toolwindow) |
+| Return to passive on blur | **pass** | `passiveAfterFocusRelease=true` (a remote session cannot move foreground focus, so the blur *event* never fires; the probe runs the handler body) |
+| Hide from task switchers | **pass** | `WS_EX_TOOLWINDOW` present in the overlay's ex-style (`134217864` = `0x8000088`: noactivate + toolwindow + topmost) |
 | Click-through | **pass** | `setIgnoreMouseEvents(true, {forward:true})` applied, `clickThroughUnfocusable=true`; Electron has no read-back API for the mouse flag |
 | Global hotkeys while unfocused | **pass** | `Ctrl/Cmd+Shift+Space / A / C / X` registered at startup (`shortcutsRegistered`) |
 
@@ -51,20 +53,35 @@ Measured line:
 ```
 STEALTH_PROBE {"platform":"win32","checks":{"visible":true,"overlayDidNotStealFocus":true,
 "meetingKeptFocus":true,"overlayTakesFocusOnClick":true,"passiveAfterFocusRelease":true,
-"toolWindowStyle":true,"contentProtectionApiAccepted":true,"contentProtectionReported":null,
-"screenCaptureUsable":false,"clickThroughUnfocusable":true},"ok":true,"blurEvents":0,
-"exStylesBeforeProtection":134742152,"exStylesAfterProtection":134742152,"affinity":0,
-"affinityIsExcludeFromCapture":false,"controlCapture":{"r":0,"g":0,"b":0},
-"exclusionEnvironmentLimited":true,"failed":[],"environmentLimited":["screenCaptureUsable"]}
+"toolWindowStyle":true,"screenCaptureUsable":true,
+"captureSeesOverlayWithoutProtection":false,"contentProtectionApiAccepted":true,
+"contentProtectionReported":null,"captureHidesOverlayWithProtection":true,
+"protectionChangesCapture":false,"clickThroughUnfocusable":true},"ok":false,
+"failed":["captureSeesOverlayWithoutProtection","protectionChangesCapture"],
+"environmentLimited":[],"blurEvents":0,"exStylesBeforeProtection":134217864,
+"exStylesAfterProtection":134217864,"controlCapture":{"r":32,"g":32,"b":32},"affinity":1,
+"affinityIsExcludeFromCapture":false,"exclusionEnvironmentLimited":false,
+"protectedCapture":{"r":32,"g":32,"b":32}}
 ```
 
-**What is still open on Windows.** Capture exclusion is the one row this host
-cannot answer: the desktop attached to an SSH session is not composited, so both
-`SetWindowDisplayAffinity` and a GDI screen grab are inert. Run
-`npm run probe:stealth` from the console session (logged in at the machine, not
-over SSH) and expect `screenCaptureUsable=true`, `affinity=17` and
-`captureSeesOverlayWithoutProtection=true` /
-`captureHidesOverlayWithProtection=true`; those three then become the row.
+**What is still open on Windows.** Only the capture-exclusion pixels. This box has
+no real display output: `Screen.PrimaryScreen` reports a 1024×768 fallback and
+session-0 grabs fail with "The handle is invalid", so the overlay is never
+composited into a GDI grab even with protection disabled. On a machine with a
+monitor attached, run `npm run probe:stealth` from a console window and expect
+`captureSeesOverlayWithoutProtection=true` followed by
+`captureHidesOverlayWithProtection=true`; that pair is the row.
+
+Two measurement notes from this run:
+
+- `affinity=1` means Electron 34 sets `WDA_MONITOR`, not `WDA_EXCLUDEFROMCAPTURE`.
+  It is recorded as measured and no longer gates the verdict
+  (`affinityIsExcludeFromCapture` is informational): capture paths that honour
+  affinity withhold the window either way, and the pixel pair is the behavioural
+  test.
+- The probe used to take its control frame **after** enabling protection, which
+  made `captureSeesOverlayWithoutProtection` assert the opposite of its name. It
+  now captures the control first, so a run on an ordinary desktop is meaningful.
 
 ### Meeting apps (Zoom / Teams / Meet / Webex / OBS)
 

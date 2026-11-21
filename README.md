@@ -12,7 +12,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
   <a href="#platform-support"><img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-blue"></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.6.1-orange">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.6.2-orange">
   <img alt="Tests" src="https://img.shields.io/badge/tests-243%20passing-brightgreen">
 </p>
 
@@ -68,7 +68,7 @@ Everything below was measured or reproduced on the platform named. Rows that wer
 | Meeting audio (speaker) | Chromium loopback — works out of the box | **Requires BlackHole** + a Multi-Output Device | `ffmpeg -f pulse` on a real `*.monitor` (pw-record fallback) |
 | Microphone | ffmpeg DirectShow / Chromium | AVFoundation via ffmpeg | ffmpeg pulse / pw-record |
 | Screen reading | GDI capture (silent) | `screencapture -x` + Screen Recording grant | Mutter ScreenCast on GNOME (no picker, no flash); CLI tools elsewhere |
-| Capture exclusion | `WDA_EXCLUDEFROMCAPTURE` — verified against the OS flag | `NSWindowSharingNone` — stops legacy `CGWindowList` capture; **ScreenCaptureKit shares can still include it** | No OS flag — optional GNOME bridge auto-hides the overlay during shares; a window/tab share is still safest |
+| Capture exclusion | `setContentProtection` (DWM affinity — reads `WDA_MONITOR` on Electron 34; the pixel check needs a real display, see the matrix) | `NSWindowSharingNone` — stops legacy `CGWindowList` capture; **ScreenCaptureKit shares can still include it** | No OS flag — optional GNOME bridge auto-hides the overlay during shares; a window/tab share is still safest |
 | Overlay above fullscreen apps | — | yes (`screen-saver` level, `visibleOnFullScreen`) | — |
 | Live screen loop | GDI, silent | `screencapture`, silent | GNOME only; never the portal, never `gnome-screenshot` |
 
