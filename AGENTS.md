@@ -281,7 +281,19 @@ Documented so the next agent does not reintroduce these bugs:
 - Packaged `files` / `asarUnpack` must include `tesseract.js` (and existing Whisper/ORT deps).
 - Linux main process always appends `no-sandbox` + ozone auto (packaged and unpackaged).
 - **Verify a build from the artefact, not the config.** Build, install it, then run the installed binary with `ELECTRON_RUN_AS_NODE=1` against a probe that resolves the worker, captures audio and transcribes with `node`/`python`/`ffmpeg` removed from `PATH`. On Windows start the packaged exe with `Start-Process -Wait`: it is a GUI-subsystem binary, so `&` returns immediately and `$LASTEXITCODE` stays stale (a passing-looking check that never ran).
-- **CI packaging:** disabled — pack locally and `npm run release:upload`. CI is typecheck-only.
+- **Symptom A2 (`windows-latest` vendor step):** the release run dies with
+  `Cannot find an overload for "ExtractToDirectory" and the argument count: "3"`
+  followed by `[ensure-ffmpeg] ffmpeg.exe not produced`.
+  - **Cause:** the download succeeds and extraction fails. A child `powershell.exe`
+    inherits the step shell's (pwsh 7) `PSModulePath`, so `Expand-Archive -Force`
+    loads the PS7 `Microsoft.PowerShell.Archive` module, whose three-argument
+    `ExtractToDirectory` call does not bind (`MethodCountCouldNotFindBest`).
+  - **Fix:** `scripts/ensure-ffmpeg.mjs` and `scripts/ensure-bundled-llm.mjs` both use
+    `scripts/lib/extract-archive.mjs` — `tar -xf` (bsdtar ships on Windows 10+,
+    macOS and Linux, and reads zip) with a two-argument .NET fallback. Do **not**
+    reintroduce `Expand-Archive`.
+- **CI packaging:** `ci.yml` is typecheck + tests on three OSes; packing lives in
+  `release.yml` and runs only for `v*` tags. Do not add a pack job to `ci.yml`.
 - **Windows build flakes:** `ELECTRON_MIRROR`, electron-builder cache, retry wrapper in `.github/workflows/ci.yml`.
 - **Linux installer missing audio deps:** `linux-install.sh` installs `pipewire`, `pulseaudio-utils`, and expects **`ffmpeg`** on PATH for loopback.
 
