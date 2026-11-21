@@ -21,6 +21,8 @@ export function useMainMicStt(settings: AppSettings | null) {
   const unsubsRef = useRef<Array<() => void>>([]);
   const lastChunkAt = useRef(0);
   const restartingRef = useRef(false);
+  /** True once the VAD path has delivered an utterance this session (§5.2). */
+  const utterancePathRef = useRef(false);
 
   const onFinal = useCallback((handler: (text: string) => void) => {
     finalRef.current = handler;
@@ -32,6 +34,7 @@ export function useMainMicStt(settings: AppSettings | null) {
       return;
     }
     const gen = ++genRef.current;
+    utterancePathRef.current = false;
     setError('');
     setListening(true);
     setPartial('🎙 starting mic…');
@@ -48,6 +51,53 @@ export function useMainMicStt(settings: AppSettings | null) {
         setPartial('');
         return;
       }
+      // VAD-endpointed utterances are the primary path (§5.2): the detector only
+      // ships audio that contains speech, so the model is never asked to
+      // transcribe a fixed 4 s slice that starts mid-word.
+      const transcribeUtterance = async (ev: {
+        ok: boolean;
+        base64?: string;
+        mimeType?: string;
+        error?: string;
+      }) => {
+        if (genRef.current !== gen) return;
+        if (!ev.ok || !ev.base64) {
+          if (ev.error) setError(ev.error);
+          return;
+        }
+        utterancePathRef.current = true;
+        lastChunkAt.current = Date.now();
+        setPartial('Transcribing…');
+        try {
+          const t = await window.osmos.transcribeAudio({
+            base64: ev.base64,
+            mimeType: ev.mimeType || 'audio/wav',
+            fileName: 'mic-utterance.wav',
+            engine: engineFor(settingsRef.current),
+            model: settingsRef.current?.localSttModel,
+          });
+          if (genRef.current !== gen) return;
+          if (t.ok && t.text?.trim()) {
+            setPartial('');
+            finalRef.current?.(t.text.trim());
+          } else if (
+            t.error &&
+            !/empty text|too short|silent|no speech/i.test(t.error || '')
+          ) {
+            setError(t.error);
+          } else {
+            setPartial('🎙 listening…');
+          }
+        } catch (e) {
+          if (genRef.current !== gen) return;
+          setError(e instanceof Error ? e.message : String(e));
+          setPartial('🎙 listening…');
+        }
+      };
+
+      const unsubUtterance = window.osmos.onMicUtterance?.(transcribeUtterance);
+      if (unsubUtterance) unsubsRef.current.push(unsubUtterance);
+
       const unsubChunk = window.osmos.onMicChunk?.(async (chunk) => {
         if (genRef.current !== gen) return;
         if (!chunk.ok) {
@@ -60,6 +110,9 @@ export function useMainMicStt(settings: AppSettings | null) {
           setPartial('🎙 listening…');
           return;
         }
+        // While the VAD path is alive, chunks are telemetry only — transcribing
+        // both would repeat the same speech twice.
+        if (utterancePathRef.current) return;
         setPartial('Transcribing…');
         try {
           const t = await window.osmos.transcribeAudio({
@@ -98,6 +151,7 @@ export function useMainMicStt(settings: AppSettings | null) {
 
   const stop = useCallback(async () => {
     genRef.current += 1;
+    utterancePathRef.current = false;
     for (const u of unsubsRef.current.splice(0)) {
       try {
         u();

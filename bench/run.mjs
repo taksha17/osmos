@@ -18,12 +18,14 @@ import { build } from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { evaluateStt } from './stt.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const buildDir = path.join(root, '.bench-build');
 const fixturesDir = path.join(root, 'bench', 'fixtures', 'transcripts');
 const triggerFixturesDir = path.join(root, 'bench', 'fixtures', 'triggers');
 const screenFixturesDir = path.join(root, 'bench', 'fixtures', 'screen');
+const audioFixturesDir = path.join(root, 'bench', 'fixtures', 'audio');
 const resultsDir = path.join(root, 'bench', 'results');
 const benchDoc = path.join(root, 'docs', 'BENCHMARKS.md');
 
@@ -47,6 +49,21 @@ const VISION_BUDGET_MS = 3_000;
 const SUMMARY_ENABLED = process.env.BENCH_SUMMARY === '1';
 const SUMMARY_MINUTES = Number(process.env.BENCH_SUMMARY_MINUTES ?? 30);
 const SUMMARY_BUDGET_MS = 60_000;
+
+/**
+ * STT row (Phase 2 exit): BENCH_STT=1 replays the committed audio fixtures
+ * through the shipped endpoint detector and the shipped local engine, reporting
+ * WER and end-of-speech → endpoint latency. Gated: WER ≤ 12 %, endpoint p50 ≤ 600 ms.
+ */
+const STT_ENABLED = process.env.BENCH_STT === '1';
+const STT_MODEL = process.env.OSMOS_WHISPER_MODEL || 'onnx-community/moonshine-tiny-ONNX';
+const STT_CACHE =
+  process.env.BENCH_STT_CACHE ||
+  path.join(
+    process.env.APPDATA || process.env.HOME || root,
+    process.platform === 'win32' ? 'osmos' : '',
+    'whisper-cache',
+  );
 
 const FAKE_FIRST_TOKEN_MS = Number(process.env.BENCH_FAKE_FIRST_TOKEN_MS ?? 120);
 const FAKE_TOKEN_MS = Number(process.env.BENCH_FAKE_TOKEN_MS ?? 6);
@@ -415,6 +432,9 @@ async function main() {
   const summaryPolicy = SUMMARY_ENABLED
     ? await bundle('src/shared/policy/transcriptSummary.ts', 'policy-transcriptSummary.mjs')
     : null;
+  const vadPolicy = STT_ENABLED
+    ? await bundle('src/shared/policy/vadEndpoint.ts', 'policy-vadEndpoint.mjs')
+    : null;
 
   const provider = hasRealProvider ? realProvider(llm) : fakeProvider();
   const triggerEval = evaluateTriggers(trigger);
@@ -502,6 +522,17 @@ async function main() {
     );
   }
 
+  let sttRow = null;
+  if (vadPolicy) {
+    sttRow = await evaluateStt({
+      vad: vadPolicy,
+      fixturesDir: audioFixturesDir,
+      workerScript: path.join(root, 'scripts', 'whisper-worker.mjs'),
+      cacheDir: STT_CACHE,
+      model: STT_MODEL,
+    });
+  }
+
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const report = {
     runAt: new Date().toISOString(),
@@ -513,6 +544,7 @@ async function main() {
     screen: screenEval,
     vision,
     summaryRow,
+    stt: sttRow,
     gates: {
       screen: {
         thresholds: SCREEN_GATES,
@@ -573,6 +605,13 @@ async function main() {
             `- Summary row (${summaryRow.minutes}-minute transcript, ${summaryRow.transcriptWords} words): **${summaryRow.totalMs} ms** total, first token ${summaryRow.firstTokenMs} ms (target ≤ ${SUMMARY_BUDGET_MS} ms) · prompt ${summaryRow.promptChars} chars`,
           ]
         : ['- Summary row: skipped (set `BENCH_SUMMARY=1` with a provider to measure the 30-minute summary target)']),
+      ...(sttRow
+        ? [
+            `- STT row (${sttRow.clips} clips, \`${sttRow.model}\`): WER **${sttRow.wer}** · endpoint p50 **${sttRow.endpointP50Ms} ms** / p95 ${sttRow.endpointP95Ms} ms · decode p50 ${sttRow.decodeP50Ms} ms · end-of-speech → transcript p50 ${sttRow.totalP50Ms} ms`,
+            `- STT gate: **${sttRow.gates.passed ? 'pass' : 'FAIL'}** (WER ≤ ${sttRow.gates.thresholds.wer}, endpoint p50 ≤ ${sttRow.gates.thresholds.endpointP50Ms} ms)`,
+            ...sttRow.gates.failures.map((failure) => `  - GATE FAILED: ${failure}`),
+          ]
+        : ['- STT row: skipped (set `BENCH_STT=1` with the audio fixture set and a model cache)']),
       '',
       table,
       '',
@@ -603,6 +642,17 @@ async function main() {
   } else {
     console.log('[bench] summary row skipped (BENCH_SUMMARY unset)');
   }
+  if (sttRow) {
+    if (sttRow.samples === 0) {
+      console.log(`[bench] stt row skipped (${sttRow.error})`);
+    } else {
+      console.log(
+        `[bench] stt ${sttRow.clips} clips wer=${sttRow.wer} endpoint p50=${sttRow.endpointP50Ms}ms p95=${sttRow.endpointP95Ms}ms decode p50=${sttRow.decodeP50Ms}ms total p50=${sttRow.totalP50Ms}ms`,
+      );
+    }
+  } else {
+    console.log('[bench] stt row skipped (BENCH_STT unset)');
+  }
   if (screenEval) {
     console.log(
       `[bench] screen kinds accuracy=${screenEval.accuracy} code recall=${screenEval.recall.code ?? 'n/a'} (${screenEval.labels} snapshots, ${screenEval.misses.length} misses)`,
@@ -616,8 +666,11 @@ async function main() {
   console.log(`[bench] report → ${path.relative(root, resultPath)}`);
   if (writeDoc) console.log(`[bench] appended → ${path.relative(root, benchDoc)}`);
 
-  if (gateFailures.length > 0) {
-    for (const failure of gateFailures) console.error(`[bench] GATE FAILED: ${failure}`);
+  const sttFailures = sttRow?.samples ? sttRow.gates.failures : [];
+  if (gateFailures.length > 0 || sttFailures.length > 0) {
+    for (const failure of [...gateFailures, ...sttFailures]) {
+      console.error(`[bench] GATE FAILED: ${failure}`);
+    }
     // Reported after the evidence is on disk, so a failing run still leaves numbers.
     process.exitCode = 1;
   }

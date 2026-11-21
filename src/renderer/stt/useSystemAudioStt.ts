@@ -23,6 +23,8 @@ export function useSystemAudioStt(settings: AppSettings | null) {
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const finalHandlerRef = useRef<((text: string) => void) | null>(null);
+  /** True once the VAD path has delivered an utterance this session (§5.2). */
+  const utterancePathRef = useRef(false);
   const generationRef = useRef(0);
   const unsubsRef = useRef<Array<() => void>>([]);
 
@@ -67,6 +69,7 @@ export function useSystemAudioStt(settings: AppSettings | null) {
 
     activeRef.current = true;
     const gen = ++generationRef.current;
+    utterancePathRef.current = false;
     setListening(true);
     setError('');
     setPartial('Starting meeting audio…');
@@ -167,6 +170,17 @@ export function useSystemAudioStt(settings: AppSettings | null) {
               ? `Listening (${res.monitor.split('.').pop() || 'monitor'})…`
               : 'Listening to system audio…',
           );
+          const unsubUtterance = window.osmos.onSystemAudioUtterance?.(
+            async (ev: { ok: boolean; base64?: string; mimeType?: string; error?: string }) => {
+              if (generationRef.current !== gen || !activeRef.current) return;
+              if (!ev.ok || !ev.base64) {
+                if (ev.error) setError(ev.error);
+                return;
+              }
+              utterancePathRef.current = true;
+              await handleWav(ev.base64, ev.mimeType || 'audio/wav', false);
+            },
+          );
           const unsubChunk = window.osmos.onSystemAudioChunk?.(async (chunk) => {
             if (generationRef.current !== gen || !activeRef.current) return;
             if (!chunk.ok) {
@@ -174,11 +188,14 @@ export function useSystemAudioStt(settings: AppSettings | null) {
               return;
             }
             if (!chunk.base64) return;
+            // While the VAD path is alive, non-silent chunks are telemetry only.
+            if (utterancePathRef.current && !chunk.silent) return;
             await handleWav(chunk.base64, chunk.mimeType || 'audio/wav', chunk.silent);
           });
           const unsubStatus = window.osmos.onSystemAudioStatus?.((ev) => {
             if (generationRef.current === gen && ev.text) setPartial(ev.text);
           });
+          if (unsubUtterance) unsubsRef.current.push(unsubUtterance);
           if (unsubChunk) unsubsRef.current.push(unsubChunk);
           if (unsubStatus) unsubsRef.current.push(unsubStatus);
 
