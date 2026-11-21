@@ -531,7 +531,7 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > | Supervisor kill/restart | PASS — 2 chunks → kill → restart logged → 2 more chunks |
 > | Capture smoke, system Node + bundled runtime | PASS — valid WAV both ways |
 > | Unit tests | Linux 80/80, Windows 66/66 |
-> | Windows NSIS install, clean PATH | PASS — `OSMOS Setup 0.6.0.exe` (1.26 GB) installed silently to `%LOCALAPPDATA%\Programs\OSMOS`; with `node`, `python`, `ffmpeg` and `npm` absent from PATH the installed worker produced valid WAV chunks, Moonshine transcribed a SAPI sentence, and the packaged app booted with its renderer and `llama-server` children |
+> | Windows NSIS install, clean PATH | PASS — `OSMOS Setup 0.6.0.exe` (1.26 GB) re-packed from `f3e520b` and installed silently to `%LOCALAPPDATA%\Programs\OSMOS`; with `node`, `python`, `ffmpeg` and `npm` absent from PATH the installed worker captured 2 valid WAV chunks and Moonshine transcribed a SAPI sentence (8/8 probe checks), and the packaged app booted with its renderer and `llama-server` children |
 > | Linux packaged tree, empty PATH | PASS — `release/linux-unpacked` (AppImage 1.5 GB) with `PATH=/tmp/nobin` captured from the real sink monitor through its bundled ffmpeg and transcribed on the bundled runtime, 8/8 checks |
 > | Windows audio endpoints (interactive session) | environment gap — 0 present `AudioEndpoint` devices; bundled ffmpeg's dshow enumeration lists the NVIDIA Broadcast **camera** and prints `Could not enumerate audio only devices (or none found)`, so no live mic source exists on that box |
 >
@@ -546,7 +546,9 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > exposing no endpoint (Realtek/AMD/NVIDIA cards on that box), so the app offered
 > microphones ffmpeg could not open. It now lists `AudioEndpoint` PnP devices, returns
 > nothing on that box, and the UI says no DirectShow microphone is available instead
-> of naming an unopenable device (`AGENTS.md`, Symptom J2).
+> of naming an unopenable device (`AGENTS.md`, Symptom J2). The re-packed app logs
+> `[dshow] no audio devices parsed from ffmpeg stderr; trying audio-endpoint fallback`
+> at startup, so the shipped binary runs the new path.
 >
 > Still open: **macOS**, which has no host on this project at all, and live-device
 > capture on the Windows box, which is an environment gap rather than a code gap — the
