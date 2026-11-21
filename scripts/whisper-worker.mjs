@@ -116,9 +116,36 @@ async function loadAsr(modelId) {
   return pipeline('automatic-speech-recognition', modelId, opts);
 }
 
+/**
+ * Trim leading/trailing silence from a clip.
+ *
+ * Moonshine is trained on speech-only segments: a second of digital silence in
+ * front makes it return an empty string on otherwise clean audio (measured on
+ * the Phase 2 fixture set — two clips came back blank until trimmed). The VAD
+ * already trims most of it in the live path, but a 300 ms pre-roll and a 450 ms
+ * hangover remain, and one-shot recorder uploads carry more.
+ */
+function trimSilence(samples, sampleRate, opts = {}) {
+  const threshold = opts.threshold ?? 10 ** (-45 / 20);
+  const keepMs = opts.keepMs ?? 50;
+  let start = 0;
+  while (start < samples.length && Math.abs(samples[start]) < threshold) start += 1;
+  if (start >= samples.length) return samples; // all silence: let the model answer
+  let end = samples.length - 1;
+  while (end > start && Math.abs(samples[end]) < threshold) end -= 1;
+
+  const keep = Math.round((sampleRate * keepMs) / 1000);
+  const from = Math.max(0, start - keep);
+  const to = Math.min(samples.length, end + keep + 1);
+  // Never hand the model a fragment shorter than the 100 ms it needs.
+  if (to - from < Math.round(sampleRate * 0.1)) return samples;
+  return samples.subarray(from, to);
+}
+
 async function transcribeFile(asr, modelId, filePath) {
-  const { samples, sampleRate } = readWavPcm(filePath);
-  if (samples.length < 1600) throw new Error('Recording too short — speak a bit longer.');
+  const { samples: raw, sampleRate } = readWavPcm(filePath);
+  if (raw.length < 1600) throw new Error('Recording too short — speak a bit longer.');
+  const samples = trimSilence(raw, sampleRate);
   const opts = { sampling_rate: sampleRate, return_timestamps: false };
   if (isWhisper(modelId) && !isEnOnly(modelId)) {
     opts.language = 'english';

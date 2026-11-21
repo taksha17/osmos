@@ -137,24 +137,41 @@ export function measureEndpoint(vad, samples, opts = {}) {
 
   const threshold = (opts.params && opts.params.speechThreshold) ?? vad.VAD_DEFAULTS.speechThreshold;
   let lastVoiceMs = 0;
-  const events = [];
+  let endEvent = null;
+  let startEvent = null;
+  let emittedAtMs = null;
   blocks.forEach((block, index) => {
     const ts = (index + 1) * frameMs;
     const rms = rmsOf(block, 0, block.length);
     if (rms >= threshold) lastVoiceMs = ts;
-    for (const event of detector.push(rms, ts)) events.push(event);
+    for (const event of detector.push(rms, ts)) {
+      if (event.t === 'utterance.start' && !startEvent) startEvent = event;
+      if (event.t === 'utterance.end' && !endEvent) {
+        endEvent = event;
+        // When the detector *emitted* the end, which is what the STT engine sees.
+        emittedAtMs = ts;
+      }
+    }
   });
-  const trailing = detector.flush(blocks.length * frameMs);
-  events.push(...trailing);
-
-  const end = events.find((e) => e.t === 'utterance.end');
-  const start = events.find((e) => e.t === 'utterance.start');
-  if (!end) return { endpointMs: null, speechMs: 0, trueEndMs: lastVoiceMs };
+  if (!endEvent) {
+    // No endpoint before the clip ran out (continuous noise, or speech to the
+    // last frame): flush and mark it, since a real stream would keep waiting.
+    const flushed = detector.flush(blocks.length * frameMs).find((e) => e.t === 'utterance.end');
+    if (flushed) {
+      endEvent = flushed;
+      emittedAtMs = blocks.length * frameMs;
+    }
+  }
+  if (!endEvent) {
+    return { endpointMs: null, speechMs: 0, trueEndMs: lastVoiceMs, flushed: true };
+  }
+  const flushed = emittedAtMs === blocks.length * frameMs;
   return {
-    endpointMs: Math.max(0, Math.round(end.atMs - lastVoiceMs)),
-    startLagMs: start ? Math.max(0, Math.round(start.atMs - (lastVoiceMs - end.speechMs))) : null,
-    speechMs: end.speechMs,
+    endpointMs: Math.max(0, Math.round(emittedAtMs - lastVoiceMs)),
+    startLagMs: startEvent ? Math.max(0, Math.round(startEvent.atMs - (lastVoiceMs - endEvent.speechMs))) : null,
+    speechMs: endEvent.speechMs,
     trueEndMs: lastVoiceMs,
+    flushed,
   };
 }
 
@@ -260,6 +277,9 @@ export async function evaluateStt({
     const reference = fs.existsSync(refPath) ? fs.readFileSync(refPath, 'utf8').trim() : '';
     const samples = readWavPcm16(file);
     const endpoint = measureEndpoint(vad, samples);
+    // The endpoint row is scored on the clean clips: a noisy variant keeps the
+    // energy detector above threshold through the trailing silence, so it can
+    // only report a flush, not a hangover endpoint.
     const transcription = transcriptions.get(file) ?? { ok: false, text: '', decodeMs: 0 };
     return {
       clip: path.basename(file),
@@ -267,7 +287,8 @@ export async function evaluateStt({
       hypothesis: transcription.text,
       error: transcription.error,
       wer: round(wordErrorRate(reference, transcription.text)),
-      endpointMs: endpoint.endpointMs,
+      endpointMs: path.basename(file).includes('-noisy') ? null : endpoint.endpointMs,
+      endpointFlushed: endpoint.flushed,
       speechMs: endpoint.speechMs,
       decodeMs: transcription.decodeMs,
       totalMs:
@@ -276,16 +297,26 @@ export async function evaluateStt({
   });
 
   const werValues = rows.map((row) => row.wer);
-  const endpointValues = rows.map((row) => row.endpointMs).filter((v) => v !== null);
+  const cleanRows = rows.filter((row) => !row.clip.includes('-noisy'));
+  const noisyRows = rows.filter((row) => row.clip.includes('-noisy'));
+  const endpointValues = cleanRows.map((row) => row.endpointMs).filter((v) => v !== null);
+  const flushed = rows.filter((row) => row.endpointFlushed).length;
   const decodeValues = rows.map((row) => row.decodeMs);
   const totalValues = rows.map((row) => row.totalMs).filter((v) => v !== null);
 
   const summary = {
+    samples: rows.length,
     clips: rows.length,
+    cleanClips: cleanRows.length,
+    noisyClips: noisyRows.length,
+    endpointClips: endpointValues.length,
+    flushed,
     model: model || 'default',
     wer: round(werValues.reduce((a, b) => a + b, 0) / Math.max(1, werValues.length)),
     werP50: round(percentile(werValues, 50)),
     werWorst: round(Math.max(...werValues)),
+    werClean: round(cleanRows.reduce((a, r) => a + r.wer, 0) / Math.max(1, cleanRows.length)),
+    werNoisy: round(noisyRows.reduce((a, r) => a + r.wer, 0) / Math.max(1, noisyRows.length)),
     endpointP50Ms: percentile(endpointValues, 50),
     endpointP95Ms: percentile(endpointValues, 95),
     decodeP50Ms: percentile(decodeValues, 50),
