@@ -182,8 +182,11 @@ async function main() {
     await sleep(900);
     const native = await affinityOf(tmpDir, overlay);
     results.affinity = native.affinity;
-    // In-process getter: Electron reports whether the affinity call landed.
-    results.checks.contentProtectionReported = overlay.isContentProtected();
+    // In-process getter where the Electron version has it (34 does not).
+    const maybeGet = (overlay as unknown as { isContentProtected?: () => boolean })
+      .isContentProtected;
+    results.checks.contentProtectionReported =
+      typeof maybeGet === 'function' ? maybeGet.call(overlay) : null;
     // 0x11 = WDA_EXCLUDEFROMCAPTURE, readable from any process.
     results.affinityIsExcludeFromCapture = native.affinity === 0x11;
 
