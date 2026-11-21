@@ -25,6 +25,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import https from 'node:https';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -265,6 +266,22 @@ async function ensureRuntime(platform, arch) {
   return runtimeDir;
 }
 
+function sha256Of(file) {
+  const hash = crypto.createHash('sha256');
+  const fd = fs.openSync(file, 'r');
+  const buf = Buffer.alloc(4 * 1024 * 1024);
+  try {
+    while (true) {
+      const read = fs.readSync(fd, buf, 0, buf.length, null);
+      if (read <= 0) break;
+      hash.update(buf.subarray(0, read));
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return hash.digest('hex');
+}
+
 async function main() {
   if (process.env.OSMOS_SKIP_LLM === '1') {
     console.log('[ensure-bundled-llm] skipped (OSMOS_SKIP_LLM=1)');
@@ -311,6 +328,11 @@ async function main() {
           label: 'OSMOS Fast (Qwen2.5-1.5B)',
           file: `models/${MODEL_FILE}`,
           server: `runtime/${serverNameFor(targetPlatform)}`,
+          // A lite install downloads this file and verifies the hash before it
+          // is allowed to replace a local model.
+          url: MODEL_URL,
+          sha256: sha256Of(modelPath),
+          bytes: fs.statSync(modelPath).size,
           platform: targetPlatform,
           arch,
           license: 'Apache-2.0',

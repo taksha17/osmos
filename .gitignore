@@ -9,6 +9,7 @@ dist-electron/
 .test-build/
 .bench-build/
 .stealth-probe/
+electron-builder.lite.json
 release/
 out/
 *.asar

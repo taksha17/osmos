@@ -8,6 +8,7 @@ import path from 'node:path';
 import { app } from 'electron';
 import { fileURLToPath } from 'node:url';
 import type { ProviderConfig } from '../../shared/types.js';
+import { downloadModelPack, readPackManifest } from './modelPackService.js';
 
 const PORT = 39281;
 const HOST = '127.0.0.1';
@@ -110,10 +111,18 @@ export function startBundledLlm(): Promise<boolean> {
   if (startPromise) return startPromise;
 
   startPromise = (async () => {
-    const { server, model, runtimeDir } = bundledLlmPaths();
-    if (!server || !model) {
-      console.warn('[bundledLlm] not vendored — run: node scripts/ensure-bundled-llm.mjs');
+    let { server, model, runtimeDir } = bundledLlmPaths();
+    if (!server) {
+      console.warn('[bundledLlm] runtime not vendored — run: node scripts/ensure-bundled-llm.mjs');
       return false;
+    }
+
+    // Lite installs ship the runtime but not the weights (§15 "download on first
+    // run"). Fetch once, verify the hash, then carry on as if it were bundled.
+    if (!model) {
+      model = await fetchMissingModel();
+      if (!model) return false;
+      ({ server, runtimeDir } = bundledLlmPaths());
     }
 
     try {
@@ -191,6 +200,51 @@ export function startBundledLlm(): Promise<boolean> {
   })();
 
   return startPromise;
+}
+
+let modelDownload: Promise<string | null> | null = null;
+
+/**
+ * Download the GGUF described by `model.json` into the pack root.
+ *
+ * Only runs when the manifest carries a URL and a SHA-256 — a pack without them
+ * cannot be verified, and an unverified 1 GB download is worse than none.
+ */
+async function fetchMissingModel(): Promise<string | null> {
+  if (modelDownload) return modelDownload;
+  modelDownload = (async () => {
+    const { root } = bundledLlmPaths();
+    const manifest = readPackManifest(root);
+    if (!manifest?.url || !manifest.sha256) {
+      console.warn('[bundledLlm] weights missing and model.json has no url/sha256');
+      return null;
+    }
+    const dest = path.join(root, manifest.file);
+    console.log(`[bundledLlm] downloading ${manifest.label} (${manifest.bytes ?? 'unknown size'})`);
+    let lastReported = 0;
+    const result = await downloadModelPack({
+      url: manifest.url,
+      destPath: dest,
+      sha256: manifest.sha256,
+      expectedBytes: manifest.bytes ?? null,
+      onProgress: (progress) => {
+        const pct = Math.round(progress.ratio * 100);
+        if (progress.phase === 'done' || pct >= lastReported + 10) {
+          lastReported = pct;
+          console.log(`[bundledLlm] ${progress.phase} ${pct}%`);
+        }
+      },
+    });
+    if (!result.ok) {
+      console.warn(`[bundledLlm] download failed: ${result.error}`);
+      return null;
+    }
+    console.log(`[bundledLlm] verified ${result.bytes} bytes (${result.sha256})`);
+    return fs.existsSync(dest) ? dest : null;
+  })().finally(() => {
+    modelDownload = null;
+  });
+  return modelDownload;
 }
 
 export function stopBundledLlm(): void {

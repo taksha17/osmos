@@ -859,6 +859,36 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > - **Exit:** matrix filled for Win/macOS with Zoom/Teams/Meet/Webex/OBS; overlay never takes focus in the focus-loss test.
 
 ### Phase 7: Distribution (ongoing, parallel)
+
+> **Phase 7 status (2026-11-21): lite/full installers and the tag-only pack matrix
+> are in; signing is blocked on certificates and is not faked.**
+>
+> - **Full installer:** `npm run pack` (existing), weights included.
+> - **Lite installer:** `npm run pack:lite` (or `node scripts/pack.mjs --lite`) ships
+>   the `llama-server` runtime but no GGUF. `build/llm/model.json` now carries
+>   `url`, `sha256` and `bytes` (written by `ensure-bundled-llm.mjs` from the staged
+>   file), and `src/main/services/modelPackService.ts` downloads on first run —
+>   resumable via `Range`, written to `.partial`, SHA-256-verified, then renamed.
+>   The decisions (state, resume vs restart, size formatting) are pure and tested in
+>   `shared/policy/modelPack.ts`.
+> - **Pack matrix:** `.github/workflows/release.yml` runs typecheck + tests + pack on
+>   Ubuntu, macOS and Windows **for `v*` tags only**, uploading full and lite
+>   artefacts. Pull-request CI stays typecheck/test, so the minutes that made the
+>   old matrix unaffordable are not spent.
+> - **Manual path unchanged:** `npm run release:upload` still publishes a locally
+>   built release.
+>
+> **Exit row — installers pass Gatekeeper/SmartScreen without override: not met,
+> and not claimed.** This project has no Apple Developer ID and no Windows OV/EV
+> certificate, so every build is unsigned: macOS needs the right-click → Open
+> bypass and Windows shows SmartScreen's "More info → Run anyway". Both are
+> documented on the release page. Buying the certificates is an owner action, not
+> a code change; the signing hooks (`CSC_LINK` / `CSC_KEY_PASSWORD`,
+> notarization) are electron-builder defaults once they exist.
+>
+> Still open: model **size** display in Settings (the download is console-logged
+> today), delta updates, and a lite-installer install test on a clean VM.
+
 - Code signing, notarization, update feed, full/lite installers, restored CI pack matrix.
 - **Exit:** installers pass Gatekeeper/SmartScreen without manual override.
 

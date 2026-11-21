@@ -6,6 +6,7 @@
  * `npm run release:upload` (no GitHub Actions pack matrix).
  */
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -36,12 +37,39 @@ function runNode(script) {
   });
 }
 
-await runNode('ensure-ffmpeg.mjs');
-await runNode('ensure-bundled-llm.mjs');
+// `--skip-vendor` reuses artefacts already staged (CI builds full then lite).
+const skipVendor = process.argv.includes('--skip-vendor');
+if (!skipVendor) {
+  await runNode('ensure-ffmpeg.mjs');
+  await runNode('ensure-bundled-llm.mjs');
+}
 
-console.log(`[pack] Host=${process.platform} → electron-builder ${args.join(' ')}`);
+/**
+ * `--lite` (Architecture v2 §15): ship the llama-server runtime but not the GGUF
+ * weights. The app downloads and SHA-256-verifies them on first run, so the
+ * installer drops from ~1.3 GB to a few hundred MB.
+ */
+const lite = process.argv.includes('--lite');
+const configArgs = [];
+if (lite) {
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  const config = structuredClone(pkg.build);
+  config.extraResources = (config.extraResources || []).filter((entry) => entry.to !== 'llm');
+  config.extraResources.push({
+    from: 'build/llm',
+    to: 'llm',
+    filter: ['**/*', '!models/**', '!**/_extract/**', '!**/*.partial', '!**/*.tar.gz', '!**/*.zip'],
+  });
+  config.artifactName = '${productName}-${version}-lite-${os}-${arch}.${ext}';
+  const configPath = path.join(root, 'electron-builder.lite.json');
+  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  configArgs.push('--config', configPath);
+  console.log('[pack] lite build — weights are downloaded on first run');
+}
 
-const child = spawn('npx', ['electron-builder', ...args, '--publish', 'never'], {
+console.log(`[pack] Host=${process.platform} → electron-builder ${[...args, ...configArgs].join(' ')}`);
+
+const child = spawn('npx', ['electron-builder', ...args, ...configArgs, '--publish', 'never'], {
   cwd: root,
   stdio: 'inherit',
   shell: false,

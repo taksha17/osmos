@@ -1,0 +1,62 @@
+name: Release
+
+# Phase 7 of docs/ARCHITECTURE-V2.md: the pack matrix runs only for a tagged
+# release, so pull requests never spend the minutes that PR typecheck/tests do.
+#
+# Each OS builds its own artefacts because electron-builder cannot cross-build a
+# working mac/win package from Linux. The lite installer is built next to the full
+# one: same app, no GGUF weights, which the app downloads and SHA-256-verifies on
+# first run.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  ELECTRON_MIRROR: https://registry.npmmirror.com/-/binary/electron/
+
+jobs:
+  pack:
+    name: Pack (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            script: pack:linux
+          - os: macos-latest
+            script: pack:mac
+          - os: windows-latest
+            script: pack:win
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      # Weights are downloaded only where they are needed (macOS images have the
+      # least disk headroom); the lite build never downloads them.
+      - name: Vendor ffmpeg + bundled LLM (full build)
+        run: node scripts/ensure-ffmpeg.mjs && node scripts/ensure-bundled-llm.mjs
+
+      - name: Build full installer
+        run: npm run ${{ matrix.script }}
+
+      - name: Build lite installer
+        run: node scripts/pack.mjs --lite --skip-vendor
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: osmos-${{ matrix.os }}
+          path: |
+            release/*.exe
+            release/*.AppImage
+            release/*.deb
+            release/*.dmg
+          if-no-files-found: error
