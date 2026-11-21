@@ -38,9 +38,30 @@ await build({
   logLevel: 'warning',
 });
 
-const electron = (await import('electron')).default;
+/**
+ * Locate the Electron binary without `require('electron')`, which throws when a
+ * checkout has the dist folder but no `path.txt` (a common partial install).
+ */
+function resolveElectronBinary() {
+  const pkgDir = path.join(root, 'node_modules', 'electron');
+  const pathFile = path.join(pkgDir, 'path.txt');
+  if (fs.existsSync(pathFile)) {
+    const rel = fs.readFileSync(pathFile, 'utf8').trim();
+    if (rel) return path.join(pkgDir, 'dist', rel);
+  }
+  const candidates = [
+    path.join(pkgDir, 'dist', 'electron.exe'),
+    path.join(pkgDir, 'dist', 'electron'),
+    path.join(pkgDir, 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron'),
+  ];
+  const found = candidates.find((file) => fs.existsSync(file));
+  if (!found) {
+    throw new Error('Electron is not installed (run `npm install` or `node node_modules/electron/install.js`)');
+  }
+  return found;
+}
 
-const child = spawn(electron, [outfile], { stdio: 'inherit' });
+const child = spawn(resolveElectronBinary(), [outfile], { stdio: 'inherit' });
 const watchdog = setTimeout(() => {
   console.error(`[stealth-probe] timed out after ${TIMEOUT_MS / 1000}s`);
   child.kill('SIGKILL');
