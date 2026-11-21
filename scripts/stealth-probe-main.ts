@@ -74,8 +74,8 @@ $fg = [AffinityProbe]::GetForegroundWindow()
 Write-Output ("{0},{1},{2},{3}" -f $ok, $affinity, $ex, $fg.ToInt64())
 `;
 
-function runPowerShell(scriptPath, args) {
-  return new Promise((resolve, reject) => {
+function runPowerShell(scriptPath: string, args: Array<string | number>): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
     execFile(
       'powershell.exe',
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, ...args.map(String)],
@@ -88,7 +88,7 @@ function runPowerShell(scriptPath, args) {
   });
 }
 
-async function captureMean(tmpDir) {
+async function captureMean(tmpDir: string) {
   const script = path.join(tmpDir, 'capture-mean.ps1');
   fs.writeFileSync(script, CAPTURE_SCRIPT);
   const raw = await runPowerShell(script, [RECT.x, RECT.y, RECT.width, RECT.height]);
@@ -96,7 +96,7 @@ async function captureMean(tmpDir) {
   return { r, g, b };
 }
 
-async function affinityOf(tmpDir, win) {
+async function affinityOf(tmpDir: string, win: BrowserWindow) {
   const script = path.join(tmpDir, 'affinity.ps1');
   fs.writeFileSync(script, AFFINITY_SCRIPT);
   const handle = win.getNativeWindowHandle();
@@ -106,7 +106,7 @@ async function affinityOf(tmpDir, win) {
   return { ok: ok === 'True', affinity: Number(affinity), exStyle: Number(exStyle), foreground: Number(foreground) };
 }
 
-function nearMagenta(color) {
+function nearMagenta(color: { r: number; g: number; b: number }) {
   return (
     Math.abs(color.r - MAGENTA.r) <= MAGENTA_TOLERANCE &&
     Math.abs(color.g - MAGENTA.g) <= MAGENTA_TOLERANCE &&
@@ -116,7 +116,21 @@ function nearMagenta(color) {
 
 async function main() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'osmos-stealth-'));
-  const results = { platform: process.platform, checks: {}, ok: true };
+  const results: {
+    platform: NodeJS.Platform;
+    checks: Record<string, boolean | null>;
+    ok: boolean;
+    blurEvents?: number;
+    exStylesBeforeProtection?: number;
+    exStylesAfterProtection?: number;
+    affinity?: number | null;
+    affinityIsExcludeFromCapture?: boolean;
+    exclusionEnvironmentLimited?: boolean;
+    controlCapture?: { r: number; g: number; b: number };
+    protectedCapture?: { r: number; g: number; b: number };
+    failed: string[];
+    environmentLimited: string[];
+  } = { platform: process.platform, checks: {}, ok: true, failed: [], environmentLimited: [] };
 
   const meeting = new BrowserWindow({
     x: 0,

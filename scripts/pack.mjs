@@ -69,11 +69,24 @@ if (lite) {
 
 console.log(`[pack] Host=${process.platform} → electron-builder ${[...args, ...configArgs].join(' ')}`);
 
-const child = spawn('npx', ['electron-builder', ...args, ...configArgs, '--publish', 'never'], {
-  cwd: root,
-  stdio: 'inherit',
-  shell: false,
-  env: process.env,
-});
+// Spawn electron-builder's CLI through this Node instead of `npx`: on Windows
+// `npx` is `npx.cmd` and a shell-less spawn fails with ENOENT (it broke the lite
+// build on the Windows box before this).
+const cli = path.join(root, 'node_modules', 'electron-builder', 'out', 'cli', 'cli.js');
+const child = fs.existsSync(cli)
+  ? spawn(process.execPath, [cli, ...args, ...configArgs, '--publish', 'never'], {
+      cwd: root,
+      stdio: 'inherit',
+      env: process.env,
+    })
+  : spawn('npx', ['electron-builder', ...args, ...configArgs, '--publish', 'never'], {
+      cwd: root,
+      stdio: 'inherit',
+      env: process.env,
+    });
 
+child.on('error', (error) => {
+  console.error('[pack] could not start electron-builder:', error.message);
+  process.exit(1);
+});
 child.on('exit', (code) => process.exit(code ?? 1));

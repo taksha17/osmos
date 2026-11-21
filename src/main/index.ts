@@ -50,6 +50,7 @@ import { memoryHits, rememberSession, startMemory } from './services/memory.js';
 import { answerContextForChat } from './services/answerContext.js';
 import { startBundledLlm, stopBundledLlm } from './services/bundledLlm.js';
 import { loadHistory, saveHistory, upsertSession, deleteSession, clearAllHistory } from './services/history.js';
+import { exportSessionReport } from './services/sessionExport.js';
 import { checkForUpdates } from './services/updates.js';
 import { retrieveChunks } from './services/retrieval.js';
 import { extractTextFromUpload } from './services/documentExtract.js';
@@ -1339,6 +1340,17 @@ ipcMain.handle('audio:capture-mic', async (_e, req: SystemAudioRequest): Promise
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
   });
+
+  // Phase 5 exit row: a session report can leave the app as markdown, offline.
+  ipcMain.handle(
+    'history:export-report',
+    async (event, id: string): Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string; summary?: string }> => {
+      const session = loadHistory().find((s) => s.id === id);
+      if (!session) return { ok: false, error: 'session not found' };
+      const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      return exportSessionReport(session, win);
+    },
+  );
 
   ipcMain.handle('question:list', async (): Promise<QuestionBankResponse> => {
     try {

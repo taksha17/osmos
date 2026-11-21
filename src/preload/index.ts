@@ -167,6 +167,7 @@ const api = {
     updatedAt: number;
   }) => ipcRenderer.invoke('history:save', session),
   deleteHistory: (id: string) => ipcRenderer.invoke('history:delete', id),
+  exportSessionReport: (id: string) => ipcRenderer.invoke('history:export-report', id),
   listQuestions: () => ipcRenderer.invoke('question:list'),
   addQuestion: (item: {
     id: string;

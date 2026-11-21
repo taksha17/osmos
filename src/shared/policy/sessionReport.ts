@@ -137,6 +137,26 @@ function clip(text: string, max: number): string {
   return single.length <= max ? single : `${single.slice(0, max - 1)}…`;
 }
 
+/**
+ * Default file name for an offline export: stable, sortable, and free of the
+ * characters Windows rejects in a file name (an interview mode can contain a
+ * slash or a colon).
+ */
+export function reportFileName(report: SessionReport): string {
+  const date = new Date(report.startedAt || Date.now());
+  const stamp = [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+  const mode = clean(report.mode || 'chat')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 24);
+  return `osmos-${mode || 'chat'}-${stamp}.md`;
+}
+
 /** Markdown export of a report — the format the History panel copies out. */
 export function renderReportMarkdown(
   report: SessionReport,

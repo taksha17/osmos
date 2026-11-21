@@ -154,6 +154,7 @@ declare global {
       saveHistory: (session: { id: string; mode: string; messages: Array<{ role: string; content: string; createdAt: number }>; createdAt: number; updatedAt: number }) =>
         Promise<{ ok: boolean; sessions?: Array<{ id: string; mode: string; messages: Array<{ role: string; content: string; createdAt: number }>; createdAt: number; updatedAt: number }>; error?: string }>;
       deleteHistory: (id: string) => Promise<{ ok: boolean; sessions?: Array<{ id: string; mode: string; messages: Array<{ role: string; content: string; createdAt: number }>; createdAt: number; updatedAt: number }>; error?: string }>;
+      exportSessionReport: (id: string) => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string; summary?: string }>;
       listQuestions: () => Promise<{ ok: boolean; items?: import('@shared/types').QuestionBankItem[]; error?: string }>;
       addQuestion: (item: import('@shared/types').QuestionBankItem) =>
         Promise<{ ok: boolean; items?: import('@shared/types').QuestionBankItem[]; error?: string }>;

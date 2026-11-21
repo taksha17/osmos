@@ -11,6 +11,8 @@
  *
  * `src/main/providers` is included because those adapters must stay Electron-free
  * so `bench/` can drive them; a test there is the check that keeps it that way.
+ * `src/main/services` is included for the same reason: a service that gains a test
+ * must stay importable without Electron (the model-pack downloader is one).
  * Nothing else under `src/main` is walked.
  */
 import { build } from 'esbuild';
@@ -21,7 +23,11 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const srcDir = path.join(root, 'src');
-const testRoots = [path.join(srcDir, 'shared'), path.join(srcDir, 'main', 'providers')];
+const testRoots = [
+  path.join(srcDir, 'shared'),
+  path.join(srcDir, 'main', 'providers'),
+  path.join(srcDir, 'main', 'services'),
+];
 const outDir = path.join(root, '.test-build');
 
 /** Every `*.test.ts` below `dir`, sorted, walked recursively. */
@@ -41,7 +47,7 @@ function collectTests(dir) {
 const sources = testRoots.flatMap((dir) => collectTests(dir));
 
 if (sources.length === 0) {
-  console.error('[test] no *.test.ts found under src/shared or src/main/providers');
+  console.error('[test] no *.test.ts found under src/shared, src/main/providers or src/main/services');
   process.exit(1);
 }
 

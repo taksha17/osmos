@@ -107,6 +107,8 @@ export async function downloadModelPack(opts: {
   signal?: AbortSignal;
   onProgress?: (progress: ModelPackProgress) => void;
   progressMs?: number;
+  /** Internal: set after one restart so a broken server cannot loop forever. */
+  restarted?: boolean;
 }): Promise<DownloadResult> {
   const { url, destPath, expectedBytes = null, signal, onProgress } = opts;
   const partial = `${destPath}.partial`;
@@ -139,6 +141,22 @@ export async function downloadModelPack(opts: {
     // A previous run fully downloaded but died before the rename.
     const verified = await finishDownload(partial, destPath, opts.sha256, onProgress);
     return { ...verified, resumedFrom: partialBytes };
+  }
+
+  if (plan.mode === 'restart' && response.status === 206) {
+    // The server answered the range with a different start, so the body is only a
+    // slice. Drop it and fetch the whole file rather than writing a corrupt mix.
+    await response.body?.cancel().catch(() => undefined);
+    await fsp.rm(partial, { force: true });
+    if (opts.restarted) {
+      return {
+        ok: false,
+        bytes: 0,
+        resumedFrom: 0,
+        error: `server returned a partial range (${response.status}) without a matching Range request`,
+      };
+    }
+    return downloadModelPack({ ...opts, restarted: true });
   }
 
   if (!response.ok && response.status !== 206) {

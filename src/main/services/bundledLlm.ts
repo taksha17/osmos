@@ -111,19 +111,26 @@ export function startBundledLlm(): Promise<boolean> {
   if (startPromise) return startPromise;
 
   startPromise = (async () => {
-    let { server, model, runtimeDir } = bundledLlmPaths();
-    if (!server) {
+    let paths = bundledLlmPaths();
+    if (!paths.server) {
       console.warn('[bundledLlm] runtime not vendored — run: node scripts/ensure-bundled-llm.mjs');
       return false;
     }
 
     // Lite installs ship the runtime but not the weights (§15 "download on first
     // run"). Fetch once, verify the hash, then carry on as if it were bundled.
-    if (!model) {
-      model = await fetchMissingModel();
-      if (!model) return false;
-      ({ server, runtimeDir } = bundledLlmPaths());
+    if (!paths.model) {
+      const downloaded = await fetchMissingModel();
+      if (!downloaded) return false;
+      paths = bundledLlmPaths();
     }
+    if (!paths.server || !paths.model) {
+      console.warn('[bundledLlm] runtime or weights still missing after download');
+      return false;
+    }
+    const server = paths.server;
+    const model = paths.model;
+    const runtimeDir = paths.runtimeDir;
 
     try {
       const already = await fetch(`http://${HOST}:${PORT}/health`, {
@@ -148,7 +155,7 @@ export function startBundledLlm(): Promise<boolean> {
       }
     }
 
-    child = spawn(
+    const proc = spawn(
       server,
       [
         '-m',
@@ -172,17 +179,18 @@ export function startBundledLlm(): Promise<boolean> {
       },
     );
 
-    child.stdout?.on('data', (buf) => {
+    child = proc;
+    proc.stdout?.on('data', (buf) => {
       const line = String(buf);
       if (/listening|server is listening|HTTP server/i.test(line)) {
         /* noisy but useful in dev */
       }
     });
-    child.stderr?.on('data', (buf) => {
+    proc.stderr?.on('data', (buf) => {
       const line = String(buf).trim();
       if (line) console.warn('[bundledLlm]', line.slice(0, 240));
     });
-    child.on('exit', (code) => {
+    proc.on('exit', (code) => {
       console.warn('[bundledLlm] llama-server exited', code);
       ready = false;
       child = null;

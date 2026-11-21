@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ChatSession } from '../types.ts';
-import { buildSessionReport, renderReportMarkdown } from './sessionReport.ts';
+import type { SessionReport } from './sessionReport.ts';
+import { buildSessionReport, renderReportMarkdown, reportFileName } from './sessionReport.ts';
 
 const START = 1_700_000_000_000;
 
@@ -141,4 +142,18 @@ test('the export clips long answers instead of pasting the transcript', () => {
   assert.ok(answerLine, 'the clipped answer should still be present');
   assert.ok(answerLine!.length <= 60, `expected ≤ 60 chars, got ${answerLine!.length}`);
   assert.ok(answerLine!.endsWith('…'), 'a clipped answer should be marked as clipped');
+});
+
+test('the export file name is sortable and safe on every OS', () => {
+  const base = buildSessionReport(session([]));
+  const named: SessionReport = { ...base, mode: 'Interview / Live: v2' as SessionReport['mode'] };
+  const name = reportFileName(named);
+  assert.match(name, /^osmos-interview-live-v2-\d{4}-\d{2}-\d{2}\.md$/);
+  for (const bad of ['\\', '/', ':', '*', '?', '"', '<', '>', '|']) {
+    assert.ok(!name.includes(bad), `file name should not contain ${bad}`);
+  }
+
+  // A mode that sanitizes away entirely still yields a usable name.
+  const blank: SessionReport = { ...base, mode: '   ' as SessionReport['mode'] };
+  assert.match(reportFileName(blank), /^osmos-chat-\d{4}-\d{2}-\d{2}\.md$/);
 });
