@@ -607,19 +607,26 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > | Check | Result |
 > |---|---|
 > | Trigger precision / recall, 43 labelled utterances | **1.000 / 1.000** (gate ≥ 0.9 / ≥ 0.85; first run 0.952, both misses fixed by two classifier rules) |
-> | Unit tests | 110/110, 30 of them new for §7.2–§7.4 |
+> | Unit tests | 121/121, 41 of them new for §7.2–§7.4 and the wiring seam |
 > | Replay set through `npm run bench` | 7 answerable utterances; 2 correctly skipped (one meeting cue, one self-speech) |
 > | **End-of-question → first token, real model** | **p50 49 ms / p95 348 ms** (gate ≤ 1.5 s / ≤ 2.5 s), bundled Qwen2.5-1.5B Q4_K_M through the packaged `llama-server`, 7 samples |
 >
-> Still open: wiring `planLanes` and the §7.2 context packet into the chat path (both
-> require `src/main/index.ts`, held by another agent's uncommitted work), so the lane plan
-> is bench-only and `buildContextPacket` has no production caller yet; speculative start,
-> which needs the partial utterances Phase 2 is adding; the cloud/quality lane of the
-> latency gate (measured on the local 1.5B fast lane only — no provider key on the test
-> box); and an accuracy set for `pickEasyMaxWords`, so the boundary stays at the v0.6
-> default of 18 words. Trigger quality is measured on a hand-written 43-utterance set, and
-> the first run's two misses were fixed by the rules derived from them — an independent
-> corpus is needed before 1.000 is treated as a general result (`docs/BENCHMARKS.md`).
+> **Ready to flip:** `src/shared/policy/answerContext.ts` assembles the `ContextPacket`
+> and the `LanePlan` in one call (code-screen detection for the §12 hard rule, résumé/JD
+> fact splitting, screen presence) and `src/main/services/answerContext.ts` maps
+> `AppSettings` onto it. The chat handler needs two lines —
+> `const ctx = answerContextForChat(settings, message, screen)`, then route on
+> `ctx.plan.primary` and read prompt sections from `ctx.packet` — but it is not called
+> yet: prompt assembly is inline in `src/main/index.ts`, which currently carries another
+> agent's uncommitted work, and editing it there would be reverted by their next commit.
+>
+> Still open: that call site; speculative start, which needs the partial utterances
+> Phase 2 is adding; the cloud/quality lane of the latency gate (measured on the local
+> 1.5B fast lane only — no provider key on the test box); and an accuracy set for
+> `pickEasyMaxWords`, so the boundary stays at the v0.6 default of 18 words. Trigger
+> quality is measured on a hand-written 43-utterance set, and the first run's two misses
+> were fixed by the rules derived from them — an independent corpus is needed before
+> 1.000 is treated as a general result (`docs/BENCHMARKS.md`).
 
 - Implement Orchestrator, Context Engine, Trigger Policy, request cancellation/deadlines.
 - Router v2 with eval-driven thresholds and fallback chain.
