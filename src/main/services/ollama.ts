@@ -12,6 +12,8 @@ export async function chatOllama(opts: {
   system: string;
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   signal?: AbortSignal;
+  /** Base64 images for the vision path (§6.4); Ollama attaches them per message. */
+  images?: string[];
 }): Promise<string> {
   let full = '';
   for await (const chunk of streamChatOllama(opts)) {
@@ -34,8 +36,15 @@ export async function* streamChatOllama(opts: {
   system: string;
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   signal?: AbortSignal;
+  images?: string[];
 }): AsyncGenerator<OllamaStreamChunk, void, unknown> {
   const url = `${opts.baseUrl.replace(/\/+$/, '')}/api/chat`;
+  // Ollama takes images beside the turn that owns them, not at the top level.
+  const messages = opts.images?.length
+    ? opts.messages.map((message, index) =>
+        index === opts.messages.length - 1 ? { ...message, images: opts.images } : message,
+      )
+    : opts.messages;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -44,7 +53,7 @@ export async function* streamChatOllama(opts: {
       stream: true,
       messages: [
         { role: 'system', content: opts.system },
-        ...opts.messages,
+        ...messages,
       ],
     }),
     signal: opts.signal ?? AbortSignal.timeout(300_000),

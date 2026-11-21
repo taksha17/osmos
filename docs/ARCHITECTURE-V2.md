@@ -666,10 +666,22 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 > detection (`liveScreenStream.ts` pixel diff, `imageHash.ts`), overlay masking
 > (`stripOverlayEcho` in `shared/screenContext.ts`), and the silent grabbers per OS.
 >
-> Still open: multimodal provider support (providers are text-only, so `includeImage`
-> has no consumer yet); coding mode with a rolling snapshot history; and the exit row
-> **screenshot → first token ≤ 3 s with a cloud vision model**, which cannot be
-> measured without a provider key on the test box.
+> **Multimodal providers (slice 2):** `src/main/providers/llm/vision.ts` owns the image
+> layer — `providerAcceptsVision` decides from the configured id + model (a name
+> heuristic: an OpenAI key does not make `gpt-3.5` multimodal), `resolveImage` takes
+> a `data:` URL or a path and validates mime and the 4 MB limit, and the two wire
+> formats are `image_url` content parts (OpenAI-compatible) and an `images` array on
+> the turn (Ollama). `capabilities.vision` is now real, so an image sent to a
+> non-vision provider throws instead of being silently dropped, and a text-only
+> request stays byte-identical (the content builder returns a plain string).
+> `scripts/run-shared-tests.mjs` also walks `src/main/providers` now, because those
+> adapters must stay Electron-free for `bench/` — 142/142 tests pass.
+>
+> Still open: the capture plumbing that puts a real image into `ChatRequest` (the
+> screen path still sends OCR text, so `includeImage` has no producer); coding mode
+> with a rolling snapshot history; and the exit row **screenshot → first token ≤ 3 s
+> with a cloud vision model**, which cannot be measured without a provider key on the
+> test box.
 
 - Frame grabber with change detection and overlay masking.
 - Multimodal provider support; OCR as async text path.

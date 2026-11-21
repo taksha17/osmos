@@ -1,5 +1,6 @@
 import { chatOllama, streamChatOllama } from './ollama.js';
 import type { ProviderConfig } from '../../shared/types.js';
+import { ollamaImages, openAiMessagesWithImages, type ResolvedImage } from '../providers/llm/vision.js';
 
 export type ProviderStreamChunk =
   | { kind: 'thinking'; text: string }
@@ -9,7 +10,7 @@ function isOpenAICompatible(provider: ProviderConfig): boolean {
   return ['openai', 'groq', 'openrouter', 'litellm'].includes(provider.id);
 }
 
-async function chatOpenAICompatible(provider: ProviderConfig, system: string, messages: Array<{ role: string; content: string }>, signal?: AbortSignal): Promise<{ text: string }> {
+async function chatOpenAICompatible(provider: ProviderConfig, system: string, messages: Array<{ role: string; content: string }>, signal?: AbortSignal, images: readonly ResolvedImage[] = []): Promise<{ text: string }> {
   const url = `${provider.baseUrl.replace(/\/+$/, '')}/chat/completions`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -23,7 +24,7 @@ async function chatOpenAICompatible(provider: ProviderConfig, system: string, me
       model: provider.model,
       messages: [
         { role: 'system', content: system },
-        ...messages,
+        ...openAiMessagesWithImages(messages, images),
       ],
     }),
     signal: signal ?? AbortSignal.timeout(300_000),
@@ -39,7 +40,7 @@ async function chatOpenAICompatible(provider: ProviderConfig, system: string, me
   return { text: String(text).trim() };
 }
 
-export async function* streamOpenAICompatible(provider: ProviderConfig, system: string, messages: Array<{ role: string; content: string }>, signal?: AbortSignal): AsyncGenerator<ProviderStreamChunk, void, unknown> {
+export async function* streamOpenAICompatible(provider: ProviderConfig, system: string, messages: Array<{ role: string; content: string }>, signal?: AbortSignal, images: readonly ResolvedImage[] = []): AsyncGenerator<ProviderStreamChunk, void, unknown> {
   const url = `${provider.baseUrl.replace(/\/+$/, '')}/chat/completions`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -54,7 +55,7 @@ export async function* streamOpenAICompatible(provider: ProviderConfig, system: 
       stream: true,
       messages: [
         { role: 'system', content: system },
-        ...messages,
+        ...openAiMessagesWithImages(messages, images),
       ],
     }),
     signal: signal ?? AbortSignal.timeout(300_000),
@@ -97,6 +98,7 @@ export async function chatWithProvider(
   system: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   signal?: AbortSignal,
+  images: readonly ResolvedImage[] = [],
 ): Promise<string> {
   if (provider.id === 'ollama') {
     return chatOllama({
@@ -105,11 +107,12 @@ export async function chatWithProvider(
       system,
       messages,
       signal,
+      images: ollamaImages(images),
     });
   }
 
   if (isOpenAICompatible(provider)) {
-    const { text } = await chatOpenAICompatible(provider, system, messages, signal);
+    const { text } = await chatOpenAICompatible(provider, system, messages, signal, images);
     return text;
   }
 
@@ -121,14 +124,22 @@ export async function* streamWithProvider(
   system: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   signal?: AbortSignal,
+  images: readonly ResolvedImage[] = [],
 ): AsyncGenerator<ProviderStreamChunk, void, unknown> {
   if (provider.id === 'ollama') {
-    yield* streamChatOllama({ baseUrl: provider.baseUrl, model: provider.model, system, messages, signal });
+    yield* streamChatOllama({
+      baseUrl: provider.baseUrl,
+      model: provider.model,
+      system,
+      messages,
+      signal,
+      images: ollamaImages(images),
+    });
     return;
   }
 
   if (isOpenAICompatible(provider)) {
-    yield* streamOpenAICompatible(provider, system, messages, signal);
+    yield* streamOpenAICompatible(provider, system, messages, signal, images);
     return;
   }
 

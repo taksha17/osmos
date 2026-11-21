@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 /**
- * Run every `*.test.ts` under `src/shared` on any supported Node version.
+ * Run every `*.test.ts` under `src/shared` and `src/main/providers` on any
+ * supported Node version.
  *
  * The tests are TypeScript that rely on `node --test` type stripping, which needs
  * Node >= 22.18. Electron dev hosts may still run Node 20, so bundle each test
  * with the esbuild that already ships as a devDependency and then hand the built
  * `.mjs` files to `node --test` explicitly (a directory argument is resolved
  * differently across Node versions).
+ *
+ * `src/main/providers` is included because those adapters must stay Electron-free
+ * so `bench/` can drive them; a test there is the check that keeps it that way.
+ * Nothing else under `src/main` is walked.
  */
 import { build } from 'esbuild';
 import fs from 'node:fs';
@@ -15,7 +20,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const sharedDir = path.join(root, 'src', 'shared');
+const srcDir = path.join(root, 'src');
+const testRoots = [path.join(srcDir, 'shared'), path.join(srcDir, 'main', 'providers')];
 const outDir = path.join(root, '.test-build');
 
 /** Every `*.test.ts` below `dir`, sorted, walked recursively. */
@@ -32,10 +38,10 @@ function collectTests(dir) {
   return found;
 }
 
-const sources = collectTests(sharedDir);
+const sources = testRoots.flatMap((dir) => collectTests(dir));
 
 if (sources.length === 0) {
-  console.error('[test] no src/shared/**/*.test.ts found');
+  console.error('[test] no *.test.ts found under src/shared or src/main/providers');
   process.exit(1);
 }
 
@@ -45,7 +51,7 @@ fs.mkdirSync(outDir, { recursive: true });
 const built = (
   await Promise.all(
     sources.map(async (source) => {
-      const relative = path.relative(sharedDir, source).replace(/\.ts$/, '.mjs');
+      const relative = path.relative(srcDir, source).replace(/\.ts$/, '.mjs');
       const outfile = path.join(outDir, relative);
       await build({
         entryPoints: [source],

@@ -13,7 +13,10 @@ export type ChatTurn = {
   content: string;
 };
 
-/** Reference to an image on disk (never inline base64 across a worker boundary). */
+/**
+ * Reference to an image: a `data:` URL, or a path the adapter resolves itself
+ * (never inline base64 across a worker boundary).
+ */
 export type LlmImageInput = {
   mime: string;
   dataRef: string;

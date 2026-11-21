@@ -8,6 +8,7 @@
  * Imports no Electron APIs, so `bench/run.mjs` can drive it from plain Node.
  */
 
+import fs from 'node:fs';
 import type { ProviderConfig } from '../../../shared/types.js';
 import type {
   LlmCapabilities,
@@ -16,13 +17,14 @@ import type {
   LlmStreamRequest,
 } from '../../../shared/contracts/llm.js';
 import { chatWithProvider, streamWithProvider } from '../../services/providers.js';
+import { providerAcceptsVision, resolveImage } from './vision.js';
 
 const LOOPBACK = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])/i;
 
 function capabilitiesFor(provider: ProviderConfig): LlmCapabilities {
   return {
-    // v0.6 has no image path (§6.4 lands in Phase 4); callers get OCR text.
-    vision: false,
+    // Phase 4: model-dependent, so a heuristic over the configured id + model.
+    vision: providerAcceptsVision(provider),
     streaming: true,
     // Unknown per model — the v0.6 config does not carry a context window.
     maxContext: 0,
@@ -43,12 +45,17 @@ export function llmProviderFromConfig(provider: ProviderConfig): LlmProvider {
           `${provider.label || provider.id} has no vision support; pass OCR text instead`,
         );
       }
+      // §6.4: an image the provider cannot take is an error, never a silent drop.
+      const images = (req.images ?? []).map((image) =>
+        resolveImage(image, (path) => fs.readFileSync(path)),
+      );
 
       for await (const chunk of streamWithProvider(
         provider,
         req.system,
         req.messages,
         req.signal,
+        images,
       )) {
         if (chunk.kind === 'content') yield { kind: 'delta', text: chunk.text };
         else yield { kind: 'thinking', text: chunk.text };

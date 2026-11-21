@@ -36,7 +36,7 @@ npm run dev              # Vite :5179 + Electron (OSMOS_DEV=1)
 npm run build            # renderer + electron bundles
 npm run build:electron   # main/preload only (fast after main/preload edits)
 npm run typecheck
-npm test                 # pure shared unit tests (router + question bank)
+npm test                 # unit tests: src/shared/** + src/main/providers/**
 npm run pack             # package for **current OS only** → release/
 npm run pack:linux       # AppImage + deb + tar.gz (Linux host)
 npm run pack:mac         # dmg (must run on macOS host)
@@ -164,6 +164,8 @@ Capture and STT run in **supervised external processes**, never inline in main.
 - `src/shared/policy/screenSnapshot.ts` is the only screen classifier: `classifySnapshot(ocrText)` → `{ kind, confidence, requiresVision, hint }`. `looksLikeCodeScreen` is derived from it, so do not add a second "is this code" heuristic at a call site. A misclassification changes routing, so a new rule needs a labelled case in `bench/fixtures/screen/labelled.jsonl`.
 - `requiresVision` is true for code and problem statements only (§12). Do not make slides or chats force the vision lane — that would take easy screens off the local lane.
 - `context.snapshot.hint` is the one sentence the screen section carries. Add a kind's instruction to `HINTS` in that module, not inline in `src/main/index.ts`.
+- Vision providers: `src/main/providers/llm/vision.ts` owns capability detection (`providerAcceptsVision`, model-name based — a provider id alone proves nothing) and payload building. Images reach a provider as `LlmImageInput` (a `data:` URL or a path the adapter reads) and are resolved in `config.ts`; an image offered to `capabilities.vision === false` must throw, never be dropped. Without images the OpenAI content stays a plain string, so text-only requests remain byte-identical — keep it that way.
+- `src/main/providers/**` is walked by `npm test` because those adapters must stay Electron-free for `bench/`; put new provider adapters there, not in `src/main/services/`.
 - Screen kinds are measured by `npm run bench` (accuracy + per-kind recall) and **gated**: the run exits non-zero when accuracy < 0.9, code recall < 0.85, or the fixture set contains no code snapshots. The report and doc section are still written on failure. Trigger and latency rows are deliberately advisory — do not turn them into gates until their corpora are independent.
 - The gate is measured on **holdout** fixtures whenever they exist and only falls back to the tuning set when none have been captured. Any fixture line may carry `"split":"holdout"`; the hand-written lines are the tuning set and must not be relabelled to make the gate pass. Capture real ones with `npm run capture:fixtures -- screen --dir <folder>` (label = filename prefix, e.g. `code-two-sum.png`) or `npm run capture:fixtures -- triggers --file <tsv>`. Add `--out` to write a separate file and `--dry` to preview.
 
