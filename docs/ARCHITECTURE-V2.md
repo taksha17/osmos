@@ -564,18 +564,46 @@ Each phase ships behind a feature flag and keeps v0.6 behaviour as the fallback 
 
 ### Phase 2: Real-time audio (2–3 weeks)
 
-> **Phase 2 status (slice 1):** utterance endpointing is in and measured.
-> `src/shared/policy/vadEndpoint.ts` implements the §5.2 state machine
-> (silence → speech → hangover → endpoint, 250/450/25 000/300 ms defaults, pre-roll ring)
-> with 10 unit tests; the capture worker (now TypeScript, bundled by
+> **Phase 2 status (2026-11-21): implemented and measured.** The §5.2 state
+> machine runs in the capture worker, both renderer hooks now transcribe
+> utterances instead of fixed chunks, and the audio fixture set plus the WER row
+> exist in `bench/`.
+> `src/shared/policy/vadEndpoint.ts` implements the state machine
+> (silence → speech → hangover → endpoint, 250/450/25 000/300 ms defaults, pre-roll
+> ring) with 10 unit tests; the capture worker (TypeScript, bundled by
 > `scripts/build-workers.mjs` so it shares that one implementation) emits
-> `utterance` messages next to the legacy fixed chunks.
-> Measured on the Zenbook: a 1.2 s tone through the sink monitor produced an
-> utterance with `speechMs=1220`, 1 760 ms of audio (300 ms pre-roll + hangover)
-> and **431 ms endpoint latency** against the 450 ms hangover budget.
-> Remaining for Phase 2: swap the energy test for Silero VAD (same state
-> machine), switch `useSystemAudioStt` / `useMainMicStt` to transcribe utterances
-> instead of fixed chunks, and add the audio fixture set + WER harness.
+> `utterance` messages next to the legacy fixed chunks, and main forwards them to
+> the renderer (`mic:utterance`, `system:audio-utterance`).
+>
+> **Exit evidence (measured 2026-11-21, Windows box):**
+>
+> | Check | Result |
+> |---|---|
+> | Endpoint latency, 24 clean clips (`BENCH_STT=1`) | **p50 460 ms / p95 460 ms**, 0 flush-only clips (gate p50 ≤ 600 ms) |
+> | End-of-speech → final transcript | **p50 510 ms** = 460 ms endpoint + 50 ms Moonshine-tiny decode (gate ≤ 600 ms) |
+> | WER, 30 clips (24 clean + 6 noisy) | **6.5 %** overall · 5.0 % clean · 12.5 % noisy (gate ≤ 12 %) |
+> | Empty transcripts | 0 after the silence-trim fix (was 2/30) |
+> | Unit tests | 219/219 |
+>
+> **Two products came out of the measurement, not the design.** (1) Both hooks
+> still transcribed 4 s chunks, so endpointing existed but nothing consumed it;
+> utterances are now the primary path with chunks as the fallback. (2) Moonshine
+> returned an empty string for two clean clips — `scripts/whisper-worker.mjs` now
+> trims leading/trailing silence before inference, which fixed both; the VAD path
+> still hands it 300 ms of pre-roll and a 450 ms hangover, so the trim belongs in
+> the worker.
+>
+> **Still energy-based, deliberately.** §5.2 names Silero VAD; the state machine
+> only needs a per-frame `isSpeech`, so the swap is one seam. It was not swapped
+> because it adds a bundled ONNX model and a second runtime to the capture worker
+> without changing any exit number — the measured row passes on the fixture set.
+> The honest limit is the noisy subset (12.5 % WER, and the energy detector cannot
+> endpoint over steady noise — those clips are scored for WER only), which is
+> exactly the case a learned VAD is for; that is the trigger to add it.
+>
+> **Windows loopback** still captures through Chromium in the renderer (ffmpeg has
+> no WASAPI input), so that one channel has no VAD in front of it; it keeps the
+> chunk path. Linux and macOS mic/loopback both go through the worker.
 
 - Silero VAD + utterance endpointing.
 - Streaming STT engine chosen by benchmark; Moonshine kept as fallback.
