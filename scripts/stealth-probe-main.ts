@@ -145,7 +145,11 @@ async function main() {
   });
   await overlay.loadURL('data:text/html,<body style="margin:0;background:%23ff00aa"></body>');
   // Same wiring as src/main/index.ts: blur returns the overlay to passive.
-  overlay.on('blur', () => releaseOverlayFocus(overlay, true));
+  let blurEvents = 0;
+  overlay.on('blur', () => {
+    blurEvents += 1;
+    releaseOverlayFocus(overlay, true);
+  });
 
   applyNonActivating(overlay, true);
   presentOverlay(overlay, true);
@@ -163,7 +167,15 @@ async function main() {
   // non-focusable state, which is the policy under test.
   overlay.blur();
   await sleep(600);
+  results.blurEvents = blurEvents;
   results.checks.focusReleasedAfterBlur = !overlay.isFocusable();
+  if (!results.checks.focusReleasedAfterBlur) {
+    // setFocusable(false) can be deferred while the OS still reports the window
+    // as foreground; re-assert once the blur has actually settled.
+    releaseOverlayFocus(overlay, true);
+    await sleep(300);
+    results.checks.focusReleasedAfterSettledBlur = !overlay.isFocusable();
+  }
 
   if (process.platform === 'win32') {
     markToolWindow(overlay);
