@@ -11,9 +11,18 @@ type Props = {
   micDevices: MicDevice[];
   onRefreshMics?: () => void;
   onUpdate: (patch: Partial<AppSettings>) => Promise<void> | void;
+  liveScreen?: boolean;
+  onToggleLiveScreen?: () => void;
 };
 
-export function OverlayQuickMenu({ settings, micDevices, onRefreshMics, onUpdate }: Props) {
+export function OverlayQuickMenu({
+  settings,
+  micDevices,
+  onRefreshMics,
+  onUpdate,
+  liveScreen,
+  onToggleLiveScreen,
+}: Props) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const profiles = settings.profiles?.length
@@ -104,6 +113,21 @@ export function OverlayQuickMenu({ settings, micDevices, onRefreshMics, onUpdate
               </button>
             ))}
           </div>
+
+          {onToggleLiveScreen ? (
+            <div className="overlay-menu__section">
+              <div className="overlay-menu__heading">Screen</div>
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={liveScreen === true}
+                className={`overlay-menu__item${liveScreen ? ' overlay-menu__item--active' : ''}`}
+                onClick={onToggleLiveScreen}
+              >
+                Background reading {liveScreen ? 'on' : 'off'}
+              </button>
+            </div>
+          ) : null}
 
           <div className="overlay-menu__section">
             <div className="overlay-menu__heading">Microphone</div>

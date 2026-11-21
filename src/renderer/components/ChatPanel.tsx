@@ -1,8 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppSettings, ChatStreamEvent, StarTemplate } from '../../shared/types';
-import { fusedAssistPrompt, SCREEN_CONTEXT_FRESH_MS } from '@shared/continuousAssist';
+import {
+  fusedAssistPrompt,
+  latestUtterancePrompt,
+  SCREEN_CONTEXT_FRESH_MS,
+  transcriptAssistPrompt,
+} from '@shared/continuousAssist';
 import { createOrchestrator } from '@shared/policy/orchestrator';
-import { prepareScreenContext, SCREEN_CONTEXT_MAX_CHARS } from '@shared/screenContext';
+import {
+  asksAboutScreen,
+  prepareScreenContext,
+  SCREEN_CONTEXT_MAX_CHARS,
+} from '@shared/screenContext';
+import { isSttStatusLine } from '@shared/sttStatus';
 import { useMainMicStt } from '../stt/useMainMicStt';
 import { useSystemAudioStt } from '../stt/useSystemAudioStt';
 import { extractTextFromBase64 } from '../stt/ocr';
@@ -21,10 +31,6 @@ function sttEngine(settings: AppSettings | null): 'local' | 'openai' {
   return settings?.sttProvider === 'openai-whisper' ? 'openai' : 'local';
 }
 
-/** Status strings from the STT hooks — not words the user/meeting just said. */
-function isSttStatusLine(text: string): boolean {
-  return /^(starting|listening|waiting|ready|no laptop|ocr|screen read|👁|📄)/i.test(text.trim());
-}
 
 type Msg = {
   role: 'user' | 'assistant';
@@ -55,7 +61,6 @@ type Props = {
 
 const OVERLAY_PROMPTS = {
   assist: 'Help me respond to what is being discussed right now. Be concise and speakable.',
-  whatToSay: 'What should I say next? Give a short, natural response I can use immediately.',
   followUp: 'Suggest 3 smart follow-up questions based on the conversation.',
   recap: 'Give me a brief recap of the key points discussed so far.',
 } as const;
@@ -109,6 +114,10 @@ export function ChatPanel({
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const cancelRef = useRef<null | (() => void)>(null);
+  /** Synchronous busy flag: a second Ctrl+Enter can land before React re-renders. */
+  const busyRef = useRef(false);
+  /** Monotonic request id; stale stream callbacks must not touch the UI. */
+  const activeRequestRef = useRef(0);
   const sessionIdRef = useRef(typeof crypto !== 'undefined' && crypto.randomUUID?.() || `session-${Date.now()}`);
   const mainMicStopRef = useRef(mainMic.stop);
   const mainMicStartRef = useRef(() => mainMic.start());
@@ -166,12 +175,36 @@ export function ChatPanel({
    * Historically ears only (re)started inside sendMessage's completion handler,
    * so a fresh Smart session captured nothing until the first manual assist —
    * and any listener death stayed dead. This watchdog starts each wanted ear
-   * as soon as Smart is on and revives it after failures with a 5s backoff.
+   * as soon as Smart is on and revives it after failures.
+   *
+   * Retries back off (4s → 10s → 30s → 60s) and stop entirely once a listener
+   * reports a fatal device problem — otherwise a machine with no audio endpoint
+   * re-opens capture every few seconds forever.
    */
+  const micBackoffRef = useRef({ fails: 0, nextAt: 0 });
+  const sysBackoffRef = useRef({ fails: 0, nextAt: 0 });
+  const backoffDelay = (fails: number) => [4000, 10000, 30000, 60000][Math.min(fails, 3)]!;
+  /**
+   * Turning Smart on is an explicit retry: clear the backoff and, when a device
+   * was missing, re-probe it (the user may have just plugged one in).
+   */
+  const toggleContinuous = useCallback(() => {
+    const next = !continuousRef.current;
+    // Keep the ref in step synchronously: a fast double-toggle used to read the
+    // pre-render value and turn Smart on twice instead of off.
+    continuousRef.current = next;
+    setContinuousEnabled(next);
+    if (!next) return;
+    micBackoffRef.current = { fails: 0, nextAt: 0 };
+    sysBackoffRef.current = { fails: 0, nextAt: 0 };
+    if (mainMic.fatal) void mainMicStartRef.current();
+    if (system.fatal) void systemStartRef.current();
+    // Both flags are primitives, so this callback stays stable until a status
+    // actually changes (start functions are read through refs).
+  }, [mainMic.fatal, system.fatal]);
   useEffect(() => {
     if (!wantsMic && !wantsSystem) return;
     let cancelled = false;
-    const lastAttempt = { mic: 0, system: 0 };
 
     const tick = () => {
       if (cancelled || pausedRef.current) return;
@@ -179,21 +212,21 @@ export function ChatPanel({
 
       // Never fire a start while a previous attempt may still be initializing
       // (start() tears down any existing session first).
-      if (wantsMic && !mainMic.listening && now - lastAttempt.mic >= 4000) {
-        lastAttempt.mic = now;
-        const cooledDown = !mainMic.error || now - micFailRef.current >= 5000;
-        if (cooledDown) {
-          if (mainMic.error) micFailRef.current = now;
-          void mainMicStartRef.current();
-        }
+      const micB = micBackoffRef.current;
+      if (wantsMic && !mainMic.listening && !mainMic.fatal && now >= micB.nextAt) {
+        if (mainMic.error) micB.fails += 1;
+        else micB.fails = 0;
+        micB.nextAt = now + backoffDelay(micB.fails);
+        micFailRef.current = now;
+        void mainMicStartRef.current();
       }
-      if (wantsSystem && !system.listening && now - lastAttempt.system >= 4000) {
-        lastAttempt.system = now;
-        const cooledDown = !system.error || now - systemFailRef.current >= 5000;
-        if (cooledDown) {
-          if (system.error) systemFailRef.current = now;
-          void systemStartRef.current();
-        }
+      const sysB = sysBackoffRef.current;
+      if (wantsSystem && !system.listening && !system.fatal && now >= sysB.nextAt) {
+        if (system.error) sysB.fails += 1;
+        else sysB.fails = 0;
+        sysB.nextAt = now + backoffDelay(sysB.fails);
+        systemFailRef.current = now;
+        void systemStartRef.current();
       }
     };
 
@@ -447,28 +480,126 @@ export function ChatPanel({
         ? 'Meeting'
         : 'General';
 
+  /** Recent unique live speech for manual overlay asks (no status lines). */
+  const transcriptEntriesForAsk = useCallback((): string[] => {
+    const seen = new Set<string>();
+    const entries: string[] = [];
+    for (const entry of transcriptRef.current) {
+      if (isSttStatusLine(entry.text)) continue;
+      const text = entry.text.trim();
+      if (!text) continue;
+      const key = text.toLowerCase().replace(/\s+/g, ' ');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      entries.push(text);
+    }
+    return entries.slice(-8);
+  }, []);
+
+  /**
+   * Quick-action buttons and Ctrl+Enter used to send only "what is being
+   * discussed?" with no transcript, so the model could only ask for a topic.
+   * The newest utterance is the one to answer; older lines are context only,
+   * otherwise an old date/location question gets re-answered forever.
+   */
+  const promptWithLiveContext = useCallback(
+    (text: string): string => {
+      if (!overlay) return text;
+      const entries = transcriptEntriesForAsk();
+      if (!entries.length) return text;
+      const activeMode = settings?.activeMode || 'general';
+      if (text === OVERLAY_PROMPTS.assist) {
+        return latestUtterancePrompt({
+          latest: entries[entries.length - 1]!,
+          earlier: entries.slice(0, -1).join('\n'),
+          activeMode,
+        });
+      }
+      if (text === OVERLAY_PROMPTS.followUp || text === OVERLAY_PROMPTS.recap) {
+        return transcriptAssistPrompt({
+          instruction: text,
+          transcript: entries.join('\n'),
+          activeMode,
+        });
+      }
+      return text;
+    },
+    [overlay, settings?.activeMode, transcriptEntriesForAsk],
+  );
+
   const sendMessage = useCallback(async (textIn?: string) => {
     const text = (textIn ?? input).trim();
-    if (!text || busy) return;
+    if (!text) return;
+
+    // Ctrl+Enter means "answer this now". If an answer is still streaming,
+    // supersede it instead of silently dropping the new question. The token
+    // makes every callback from the old stream a no-op.
+    const superseding = busyRef.current;
+    if (superseding) cancelRef.current?.();
+    const requestId = ++activeRequestRef.current;
+    busyRef.current = true;
     setBusy(true);
     setError('');
-    setStreamMeta('');
+    setStreamMeta(superseding ? 'Replacing previous answer…' : '');
     setInput('');
-    const history = messagesRef.current;
+
+    let history = messagesRef.current;
+    if (superseding && history.length) {
+      // Drop the in-flight turn (assistant partial, then its user message).
+      if (history[history.length - 1]?.role === 'assistant') history = history.slice(0, -1);
+      if (history[history.length - 1]?.role === 'user') history = history.slice(0, -1);
+    }
     const next = [...history, { role: 'user' as const, content: text }];
-    setMessages([...next, { role: 'assistant', content: '' }]);
+    const pending = [...next, { role: 'assistant' as const, content: '' }];
+    messagesRef.current = pending;
+    setMessages(pending);
 
     // Attach fresh screen context (📷 or 👁 Live). Main injects it into the
     // system prompt — the visible user message stays clean.
-    const screen = freshScreen();
+    let screen = freshScreen();
+    // A one-shot 📷 capture can be up to 45s old and the window may have changed
+    // since. Re-read it at ask time instead of answering from the previous
+    // screen; 👁 Live already refreshes every ~2s. A question that explicitly
+    // asks about the screen also triggers a first grab when nothing is attached.
+    const screenRequested = asksAboutScreen(text);
+    const hadScreen = Boolean(lastScreenRef.current.text);
+    const canReuseLive = liveScreen && Boolean(screen);
+    if (overlay && (screenRequested || hadScreen) && !canReuseLive) {
+      setOcrStatus(screen ? 'Refreshing screen…' : 'Reading screen…');
+      try {
+        const grabbed = await window.osmos.grabScreen?.();
+        if (activeRequestRef.current !== requestId) return;
+        if (grabbed?.ok && grabbed.text) {
+          const n = applyScreenText(grabbed.text, grabbed.at || Date.now(), 'shot');
+          screen = n ? lastScreenRef.current : null;
+        } else {
+          screen = null;
+        }
+      } catch {
+        screen = null;
+      } finally {
+        if (activeRequestRef.current === requestId) setOcrStatus('');
+      }
+      if (!screen) {
+        // Never answer about the previous window just because it was captured
+        // once. A blank/unreadable screen is better than stale screen text.
+        lastScreenRef.current = { text: '', at: 0 };
+        setScreenInfo({ chars: 0, at: 0, preview: '' });
+        if (screenRequested) {
+          setError('Could not read the screen — make sure the content is visible, then retry.');
+        }
+      }
+    }
+    const modelText = promptWithLiveContext(text);
     const stream = window.osmos.askStream(
       {
-        message: text,
+        message: modelText,
         history,
         screenText: screen?.text,
         screenAt: screen?.at,
       },
       (ev: ChatStreamEvent) => {
+      if (activeRequestRef.current !== requestId) return;
       if (ev.type === 'meta') {
         const routeBit = ev.route
           ? ev.route.lane === 'draft-upgrade'
@@ -565,9 +696,15 @@ export function ChatPanel({
     try {
       await stream.done;
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (activeRequestRef.current === requestId) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     } finally {
+      // A newer Ctrl+Enter already owns the UI; this old stream must not clear
+      // its busy state or replace its answer.
+      if (activeRequestRef.current !== requestId) return;
       cancelRef.current = null;
+      busyRef.current = false;
       if (activeAnswerRef.current) {
         orchestratorRef.current.complete(activeAnswerRef.current);
         activeAnswerRef.current = null;
@@ -576,14 +713,23 @@ export function ChatPanel({
       setStreamMeta('');
       if (!overlay || !continuousRef.current || pausedRef.current || !settings) return;
       const source = settings.assistAudioSource || 'system';
-      if ((source === 'system' || source === 'both') && !system.listening) {
+      if ((source === 'system' || source === 'both') && !system.listening && !system.fatal) {
         if (!system.error || Date.now() - systemFailRef.current >= 5000) {
           void system.start();
         }
       }
       // Mic ear is owned by the self-healing watchdog (main-process stream).
     }
-  }, [busy, input, overlay, settings, system]);
+  }, [
+    applyScreenText,
+    freshScreen,
+    input,
+    liveScreen,
+    overlay,
+    promptWithLiveContext,
+    settings,
+    system,
+  ]);
 
   const sendRef = useRef(sendMessage);
   sendRef.current = sendMessage;
@@ -612,6 +758,8 @@ export function ChatPanel({
       const cleaned = text.trim();
       if (!cleaned) return;
       if (pausedRef.current) return;
+      // Hook status text ("🎙 starting mic…") is not speech — never list it.
+      if (isSttStatusLine(cleaned)) return;
       // Whisper emits non-speech markers ([Music], ♪, [Applause]) on songs /
       // room noise. They carry no note value — drop them entirely.
       if (/^\W*(\[(music|applause|laughter|silence|blank_audio|noise)\]|♪+)[\W]*$/i.test(cleaned)) {
@@ -808,6 +956,10 @@ export function ChatPanel({
         e.preventDefault();
         e.stopPropagation();
         void sendRef.current(input.trim() || OVERLAY_PROMPTS.assist);
+      } else if ((e.ctrlKey || e.metaKey) && e.key === '.') {
+        e.preventDefault();
+        e.stopPropagation();
+        cancelRef.current?.();
       }
     };
     window.addEventListener('keydown', onKey, true);
@@ -821,16 +973,6 @@ export function ChatPanel({
       if (action === 'capture') void captureScreenRef.current();
     });
   }, [overlay]);
-
-  const captureAudio = async () => {
-    if (system.listening) {
-      system.stop();
-      return;
-    }
-    // Toggle continuous system listen (Smart loopback). Shift-click path unused —
-    // one-shot still available from Chat 🔊.
-    void system.start();
-  };
 
   const captureAudioOnce = async () => {
     setOcrStatus('Capturing audio…');
@@ -875,18 +1017,12 @@ export function ChatPanel({
               micDevices={micDevices}
               onRefreshMics={() => void refreshMicDevices()}
               onUpdate={updateSettingsPatch}
+              liveScreen={liveScreen}
+              onToggleLiveScreen={toggleLiveScreen}
             />
           ) : (
             <span className="meta">Loading…</span>
           )}
-          <button
-            type="button"
-            className="overlay-cta"
-            disabled={busy}
-            onClick={() => void sendMessage(OVERLAY_PROMPTS.whatToSay)}
-          >
-            What should I say?
-          </button>
         </div>
 
         <div className="overlay-main">
@@ -952,10 +1088,6 @@ export function ChatPanel({
             ✦ Assist
           </button>
           <span className="overlay-actions__dot" aria-hidden>·</span>
-          <button type="button" disabled={busy} onClick={() => void sendMessage(OVERLAY_PROMPTS.whatToSay)}>
-            What should I say?
-          </button>
-          <span className="overlay-actions__dot" aria-hidden>·</span>
           <button type="button" disabled={busy} onClick={() => void sendMessage(OVERLAY_PROMPTS.followUp)}>
             Follow-up questions
           </button>
@@ -981,16 +1113,16 @@ export function ChatPanel({
         <div className="overlay-tools">
           <button
             type="button"
-            className={`overlay-tool${mainMic.listening ? ' overlay-tool--live' : ''}`}
-            onClick={() => void mainMic.toggle()}
-            disabled={busy || continuousEnabled}
+            className={`overlay-tool${continuousEnabled ? ' overlay-tool--live' : ''}`}
+            onClick={toggleContinuous}
+            disabled={busy}
             title={
               continuousEnabled
-                ? 'Managed by ⚡ Smart — turn Smart off for manual control'
-                : 'Microphone'
+                ? 'Stop listening'
+                : 'Listen to the conversation (mic/system source is set in Settings)'
             }
           >
-            Mic
+            {continuousEnabled ? 'Listening' : 'Listen'}
           </button>
           <button
             type="button"
@@ -1001,49 +1133,12 @@ export function ChatPanel({
           >
             Screen
           </button>
-          <button
-            type="button"
-            className={`overlay-tool${liveScreen ? ' overlay-tool--live' : ''}`}
-            onClick={toggleLiveScreen}
-            disabled={busy}
-            title={
-              liveScreen
-                ? `Stop background screen reading${liveScreenStatus ? ` (${liveScreenStatus})` : ''}`
-                : 'Read the screen in the background (no share dialog on GNOME Linux)'
-            }
-          >
-            {liveScreen ? '👁 Live' : '👁'}
-          </button>
-          <button
-            type="button"
-            className={`overlay-tool${system.listening ? ' overlay-tool--live' : ''}`}
-            onClick={() => void captureAudio()}
-            disabled={busy || continuousEnabled}
-            title={
-              continuousEnabled
-                ? 'Managed by ⚡ Smart — turn Smart off for manual control'
-                : system.listening
-                  ? 'Stop system audio listen'
-                  : 'Listen to system / meeting audio'
-            }
-          >
-            Audio
-          </button>
-          <button
-            type="button"
-            className="overlay-tool overlay-tool--soft"
-            onClick={() => setShowShortcuts(true)}
-            title="Keyboard shortcuts"
-            aria-label="Keyboard shortcuts"
-          >
-            ?
-          </button>
           {busy ? (
             <button type="button" className="overlay-tool overlay-tool--live" onClick={() => cancelRef.current?.()}>
               Stop
             </button>
           ) : null}
-          {(mainMic.listening || system.listening) && (
+          {((mainMic.listening && !mainMic.error) || (system.listening && !system.error)) && (
             <span
               className="rec-chip"
               title="Audio capture active — make sure everyone in the call knows they may be transcribed"
@@ -1094,15 +1189,6 @@ export function ChatPanel({
         )}
 
         <div className="overlay-composer">
-          <button
-            type="button"
-            className={`overlay-smart${continuousEnabled ? ' overlay-smart--on' : ''}`}
-            onClick={() => setContinuousEnabled((v) => !v)}
-            disabled={busy}
-            title="Auto-listen and assist"
-          >
-            ⚡ Smart
-          </button>
           <input
             className="overlay-composer__input"
             value={input}
@@ -1112,6 +1198,11 @@ export function ChatPanel({
               if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                 e.preventDefault();
                 void sendMessage(input.trim() || OVERLAY_PROMPTS.assist);
+                return;
+              }
+              if ((e.ctrlKey || e.metaKey) && e.key === '.') {
+                e.preventDefault();
+                cancelRef.current?.();
                 return;
               }
               if (e.key === 'Enter' && !e.shiftKey) {
@@ -1142,7 +1233,8 @@ export function ChatPanel({
         <>
           <h2>Chat</h2>
           <p>
-            Speak or type. Replies stream token-by-token from Ollama.
+            Speak or type — replies stream from{' '}
+            {settings?.providers?.[settings.activeProvider]?.label || settings?.activeProvider || 'your model'}.
             Mode: {modeLabel} · Mic: {sttLabel}
             {settings?.webSearchProvider && settings.webSearchProvider !== 'off'
               ? ` · Web: ${settings.webSearchProvider}`
@@ -1164,7 +1256,7 @@ export function ChatPanel({
         <button
           type="button"
           className={`mic-btn ${continuousEnabled ? 'mic-btn--live' : ''}`}
-          onClick={() => setContinuousEnabled((v) => !v)}
+          onClick={toggleContinuous}
           disabled={busy}
           title="Toggle continuous assistant"
         >
@@ -1266,6 +1358,16 @@ export function ChatPanel({
             <div className="typing-dot" />
           </div>
         )}
+        {messages.length === 0 && !busy && (
+          <div className="chat-empty">
+            <p className="chat-empty__title">Ask anything with your context loaded</p>
+            <ul className="chat-empty__hints">
+              <li>Ctrl/⌘+Enter — Assist on the conversation</li>
+              <li>📷 — read the screen once</li>
+              <li>Start mic — dictation and live transcript</li>
+            </ul>
+          </div>
+        )}
         </div>
 
         {transcriptOpen ? (
@@ -1326,6 +1428,11 @@ export function ChatPanel({
               void sendMessage(input.trim() || OVERLAY_PROMPTS.assist);
               return;
             }
+            if ((e.ctrlKey || e.metaKey) && e.key === '.') {
+              e.preventDefault();
+              cancelRef.current?.();
+              return;
+            }
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
               void sendMessage();
@@ -1345,6 +1452,7 @@ function StealthBadge() {
   const [status, setStatus] = useState<{
     ok: boolean;
     supported: boolean;
+    mechanism?: 'capture-exclusion' | 'gnome-bridge';
     detail: string;
     checkedAt: number;
   } | null>(null);
@@ -1385,26 +1493,38 @@ function StealthBadge() {
     );
   }
   const age = Math.max(0, Math.floor((Date.now() - status.checkedAt) / 1000));
+  // Ubuntu/GNOME hides the window through the Shell bridge; that is not the
+  // same claim as a Windows/macOS capture-exclusion flag, so it never reads
+  // "Verified invisible".
+  const label =
+    status.mechanism === 'gnome-bridge'
+      ? 'Bridge · hides during shares'
+      : status.ok
+        ? 'Verified invisible'
+        : 'Off';
   return (
     <span
       className={`stealth-chip ${status.ok ? 'stealth-chip--ok' : 'stealth-chip--warn'}`}
       title={`${status.detail} · checked ${age}s ago`}
     >
-      ⌖ {status.ok ? 'Verified invisible' : 'Off'} · {age}s
+      ⌖ {label} · {age}s
     </span>
   );
 }
 
 function ShortcutsModal({ onClose }: { onClose: () => void }) {
+  // Mirrors `registerShortcuts()` in main — never list a key that is not wired.
+  const isMac = /mac/i.test(navigator.userAgent);
+  const mod = isMac ? 'Cmd' : 'Alt';
   const rows: { key: string; desc: string }[] = [
     { key: '?', desc: 'Show this shortcuts panel' },
     { key: 'Esc', desc: 'Close dialogs and overlays' },
-    { key: 'Ctrl/⌘ + Enter', desc: 'Send the current question' },
-    { key: 'Ctrl/⌘ + .', desc: 'Cancel a streaming response' },
-    { key: 'Alt+Shift+Space', desc: 'Toggle the overlay' },
-    { key: 'Alt+Shift+A', desc: 'Ask the assistant' },
-    { key: 'Alt+Shift+C', desc: 'Capture screen (OCR)' },
-    { key: 'Alt+Shift+M', desc: 'Toggle microphone' },
+    { key: `${mod}+Shift+Space`, desc: 'Toggle the overlay' },
+    { key: `${mod}+Shift+A`, desc: 'Ask about what is being said' },
+    { key: `${mod}+Shift+C`, desc: 'Capture screen (OCR)' },
+    { key: `${mod}+Shift+X`, desc: 'Toggle click-through' },
+    { key: 'Ctrl/⌘ + Enter', desc: 'Assist on what you typed' },
+    { key: 'Ctrl/⌘ + .', desc: 'Stop a streaming answer' },
   ];
   return (
     <div className="shortcuts-backdrop" role="dialog" aria-label="Keyboard shortcuts" onClick={onClose}>
