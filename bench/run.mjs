@@ -56,7 +56,7 @@ const SUMMARY_BUDGET_MS = 60_000;
  * WER and end-of-speech → endpoint latency. Gated: WER ≤ 12 %, endpoint p50 ≤ 600 ms.
  */
 const STT_ENABLED = process.env.BENCH_STT === '1';
-const STT_MODEL = process.env.OSMOS_WHISPER_MODEL || 'onnx-community/moonshine-tiny-ONNX';
+const STT_MODEL = process.env.OSMOS_WHISPER_MODEL || 'Xenova/whisper-base.en';
 const STT_CACHE =
   process.env.BENCH_STT_CACHE ||
   path.join(

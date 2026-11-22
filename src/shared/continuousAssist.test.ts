@@ -5,6 +5,7 @@ import {
   latestUtterancePrompt,
   transcriptAssistPrompt,
 } from './continuousAssist.ts';
+import { modeDef } from './modes.ts';
 
 test('fused assist carries the live transcript into the model prompt', () => {
   const prompt = fusedAssistPrompt({
@@ -14,6 +15,15 @@ test('fused assist carries the live transcript into the model prompt', () => {
   assert.match(prompt, /Audio transcript:/);
   assert.match(prompt, /Which day is it today\?/);
   assert.match(prompt, /What should I say in response\?/);
+  assert.match(prompt, /never invent a garbled name/);
+  assert.match(prompt, /No preamble, delivery tips, or placeholders/);
+});
+
+test('interview guidance forbids placeholders and invented profile facts', () => {
+  const addon = modeDef('interview').systemAddon;
+  assert.match(addon, /never invent experience/);
+  assert.match(addon, /Never output bracketed placeholders/);
+  assert.match(addon, /If a name, company, or technology is not clear/);
 });
 
 test('manual overlay actions keep their instruction and add the transcript', () => {

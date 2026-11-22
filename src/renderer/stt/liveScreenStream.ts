@@ -123,7 +123,7 @@ export async function startLiveScreenStream(
       framesSeen++;
       const diff = prevLuma ? meanAbsDiff(luma, prevLuma) : Infinity;
       if (diff < changeThreshold) {
-        opts.onStatus?.(`👁 watching ${label} · unchanged`);
+        opts.onStatus?.(`watching ${label} · unchanged`);
         return;
       }
       prevLuma = luma;
@@ -135,7 +135,7 @@ export async function startLiveScreenStream(
       const dataUrl = full.toDataURL('image/jpeg', 0.8);
       latestFrame = { dataUrl, at: Date.now() };
       framesOcr++;
-      opts.onStatus?.(`👁 reading ${label}…`);
+      opts.onStatus?.(`reading ${label}…`);
       await opts.onFrame(latestFrame);
     } catch (e) {
       opts.onError(e instanceof Error ? e.message : String(e));
@@ -166,7 +166,7 @@ export async function startLiveScreenStream(
   });
 
   activeStop = stop;
-  opts.onStatus?.(`👁 watching ${label}`);
+  opts.onStatus?.(`watching ${label}`);
   // First sample soon so the user sees it working, then steady interval.
   setTimeout(() => void sample(), 400);
   timer = setInterval(() => void sample(), intervalMs);

@@ -3,7 +3,7 @@
 Where the project actually stands, what is next, and what is blocked on hardware or certificates rather than on code.
 Every claim here is backed by `docs/ARCHITECTURE-V2.md` (specification + phase exit criteria) and `docs/BENCHMARKS.md` (measurements).
 
-**Version:** 0.6.3 · **Tests:** 294 passing on Windows / Linux / macOS CI · **Licence:** MIT
+**Version:** 0.6.4 · **Tests:** 301 passing on Windows / Linux / macOS CI · **Licence:** MIT
 
 ---
 
@@ -12,7 +12,7 @@ Every claim here is backed by `docs/ARCHITECTURE-V2.md` (specification + phase e
 - [x] Electron + React + TypeScript app, frameless always-on-top overlay, launcher hub
 - [x] Streaming chat: Ollama first-class, OpenAI / Anthropic / Groq / OpenRouter / LiteLLM behind one OpenAI-compatible surface
 - [x] Mic + speaker capture: ffmpeg pulse / pw-record (Linux), Chromium loopback (Windows), AVFoundation + BlackHole (macOS)
-- [x] Local STT worker (Moonshine tiny default, Whisper base.en optional) — no Python, no audible prompts
+- [x] Local STT worker (Whisper base.en default, Moonshine tiny optional) — no Python, no audible prompts
 - [x] Screen OCR in the main process (Tesseract) through silent per-OS backends
 - [x] Profiles, named multi-profiles, modes, company intel, document RAG, question bank + STAR
 - [x] Hybrid routing: bundled Qwen2.5-1.5B fast lane, draft-then-upgrade, provider warmup

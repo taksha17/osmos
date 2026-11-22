@@ -9,7 +9,7 @@
  *               the true last voice frame. That is the "end of question → final
  *               transcript" half the VAD owns (target p50 ≤ 600 ms).
  *   wer       — transcribe the same clips with the shipped local engine
- *               (`scripts/whisper-worker.mjs`, Moonshine q8 by default) and score
+ *               (`scripts/whisper-worker.mjs`, Whisper base.en by default) and score
  *               word error rate against the reference text (target ≤ 12 %).
  *
  * Decode time is reported per clip too, so the row shows the honest total the

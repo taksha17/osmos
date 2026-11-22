@@ -3,6 +3,7 @@ import type { AppSettings, CopilotMode } from '@shared/types';
 import { MODE_DEFS } from '@shared/modes';
 import { activeSavedProfile, modeLabel } from '@shared/profiles';
 import { DEFAULT_SAVED_PROFILE } from '@shared/types';
+import { Icon } from './Icon';
 
 type MicDevice = { deviceId: string; label: string };
 
@@ -65,7 +66,7 @@ export function OverlayQuickMenu({
           {modeLabel(settings.activeMode)} · {micLabel.length > 22 ? `${micLabel.slice(0, 20)}…` : micLabel}
         </span>
         <span className="overlay-menu__caret" aria-hidden>
-          ▾
+          <Icon name="chevron-down" size={14} />
         </span>
       </button>
 

@@ -42,10 +42,18 @@ export function fusedAssistPrompt(opts: {
     mode === 'interview' ? 'interview' : mode === 'meeting' ? 'meeting' : 'session';
   const transcript = (opts.transcript || '').trim();
   const screen = (opts.screenText || '').trim().slice(0, 3500);
-  const parts: string[] = [`Live ${ctx} assist. Be concise and speakable.`];
+  const parts: string[] = [
+    `Live ${ctx} assist. Answer with words the user can say. Be concise and speakable. No preamble, delivery tips, or placeholders.`,
+  ];
 
   if (transcript) {
-    parts.push('', 'Audio transcript:', `"${transcript}"`);
+    parts.push(
+      '',
+      'The transcript may contain speech-recognition errors. Infer intent from context, but never invent a garbled name, company, or fact.',
+      '',
+      'Audio transcript:',
+      `"${transcript}"`,
+    );
   }
   if (screen) {
     parts.push('', 'On-screen text (OCR):', '---', screen, '---');
@@ -116,7 +124,9 @@ export function latestUtterancePrompt(opts: {
         ? 'meeting'
         : 'session';
   const parts = [
-    `Live ${ctx} assist. Answer the newest utterance only. Be concise and speakable.`,
+    `Live ${ctx} assist. Answer the newest utterance only. Be concise and speakable. Give the answer itself: no preamble, delivery tips, or placeholders.`,
+    '',
+    'The transcript may contain speech-recognition errors; never invent a garbled name, company, or fact.',
     '',
     `Newest utterance:\n"${latest}"`,
   ];

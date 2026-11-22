@@ -116,7 +116,7 @@ export type AppSettings = {
   overlayOpacity: number;
   stealthEnabled: boolean;
   sttProvider: SttProvider;
-  /** Local STT model id (transformers.js ONNX) — e.g. moonshine-base-ONNX or whisper-base.en. */
+  /** Local STT model id (transformers.js ONNX) — e.g. whisper-base.en or moonshine-tiny. */
   localSttModel: string;
   sttLanguage: string;
   micDeviceId: string;
@@ -129,6 +129,8 @@ export type AppSettings = {
   continuousScreenAssist: boolean;
   /** One-time migration flag: legacy 'system'-default installs move to 'both'. */
   assistSourceMigrated?: boolean;
+  /** One-time migration flag: the old implicit Moonshine default moves to Whisper base.en. */
+  sttModelMigrated?: boolean;
   /** Explicit settings schema version — bump when a breaking migration runs. */
   schemaVersion?: number;
   /** Audio chunk size in ms (2000–8000). Lower = snappier responses, more CPU. */
@@ -200,7 +202,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   overlayOpacity: 0.92,
   stealthEnabled: false,
   sttProvider: 'local-whisper',
-  localSttModel: 'onnx-community/moonshine-tiny-ONNX',
+  localSttModel: 'Xenova/whisper-base.en',
   sttLanguage: 'en-US',
   micDeviceId: '',
   assistAudioSource: 'both',

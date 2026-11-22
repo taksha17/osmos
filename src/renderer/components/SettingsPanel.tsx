@@ -8,6 +8,7 @@ import {
   type UbuntuBridgeState,
 } from '@shared/policy/ubuntuBridge';
 import WebAccessSettings from './WebAccessSettings';
+import { Icon, type IconName } from './Icon';
 
 type Info = {
   name: string;
@@ -29,6 +30,17 @@ type Props = {
   onClose?: () => void;
 };
 
+type ActionNoteState = { id: string; tone: 'ok' | 'err' | 'info'; text: string };
+
+function ActionNote({ note, id }: { note: ActionNoteState | null; id: string }) {
+  if (!note || note.id !== id) return null;
+  return (
+    <span className={`settings-action-note settings-action-note--${note.tone}`} role="status">
+      {note.text}
+    </span>
+  );
+}
+
 type Section =
   | 'general'
   | 'ai'
@@ -39,15 +51,15 @@ type Section =
   | 'updates'
   | 'about';
 
-const SECTIONS: Array<{ id: Section; label: string; icon: string }> = [
-  { id: 'general', label: 'General', icon: '☰' },
-  { id: 'ai', label: 'AI Providers', icon: '✦' },
-  { id: 'web', label: 'Web Access', icon: '◈' },
-  { id: 'speech', label: 'Audio & Speech', icon: '♫' },
-  { id: 'stealth', label: 'Low-profile', icon: '◌' },
-  { id: 'keybinds', label: 'Keybinds', icon: '⌨' },
-  { id: 'updates', label: 'Setup & Help', icon: '?' },
-  { id: 'about', label: 'About', icon: 'ⓘ' },
+const SECTIONS: Array<{ id: Section; label: string; icon: IconName }> = [
+  { id: 'general', label: 'General', icon: 'sliders' },
+  { id: 'ai', label: 'AI Providers', icon: 'sparkles' },
+  { id: 'web', label: 'Web Access', icon: 'globe' },
+  { id: 'speech', label: 'Audio & Speech', icon: 'mic' },
+  { id: 'stealth', label: 'Low-profile', icon: 'shield' },
+  { id: 'keybinds', label: 'Keybinds', icon: 'keyboard' },
+  { id: 'updates', label: 'Setup & Help', icon: 'download' },
+  { id: 'about', label: 'About', icon: 'book' },
 ];
 
 function providerDefaults(id: AppSettings['activeProvider'], current?: AppSettings['providers'][AppSettings['activeProvider']]) {
@@ -64,8 +76,13 @@ function providerDefaults(id: AppSettings['activeProvider'], current?: AppSettin
 
 export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Props) {
   const [section, setSection] = useState<Section>('general');
-  const [status, setStatus] = useState('');
-  const [error, setError] = useState('');
+  const [actionNote, setActionNote] = useState<ActionNoteState | null>(null);
+  const note = (id: string, tone: ActionNoteState['tone'], text: string) =>
+    setActionNote({ id, tone, text });
+
+  useEffect(() => {
+    setActionNote(null);
+  }, [section]);
   const [micTest, setMicTest] = useState<{
     on: boolean;
     level: number;
@@ -101,7 +118,6 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
 
   const startMicTest = useCallback(async () => {
     stopMicTest();
-    setError('');
     try {
       const dev = settings?.micDeviceId || '';
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -146,7 +162,7 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
       };
       setMicTest({ on: true, level: 0, peak: 0, label });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      note('mic', 'err', e instanceof Error ? e.message : String(e));
       setMicTest({ on: false, level: 0, peak: 0, label: '' });
     }
   }, [settings?.micDeviceId, stopMicTest]);
@@ -190,15 +206,15 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
 
   const save = async (patch?: Partial<AppSettings>) => {
     setSaving(true);
-    setError('');
     try {
       const next = await window.osmos.updateSettings(patch || settings);
       onSaved(next);
-      setStatus('Saved');
-      setTimeout(() => setStatus(''), 2000);
+      note('save', 'ok', 'Saved');
+      setTimeout(() => setActionNote((current) => (current?.id === 'save' ? null : current)), 2200);
       return next;
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      note('save', 'err', message);
       return null;
     } finally {
       setSaving(false);
@@ -224,7 +240,7 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
       <aside className="hub-modal__nav">
         {onClose ? (
           <button type="button" className="hub-modal__close" onClick={onClose} aria-label="Close">
-            ×
+            <Icon name="x" size={16} />
           </button>
         ) : null}
         <div className="hub-modal__nav-label">Settings</div>
@@ -236,7 +252,7 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
               className={`hub-nav-item${section === s.id ? ' hub-nav-item--active' : ''}`}
               onClick={() => setSection(s.id)}
             >
-              <span aria-hidden>{s.icon}</span>
+              <Icon name={s.icon} size={17} />
               {s.label}
             </button>
           ))}
@@ -251,10 +267,6 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
       </aside>
 
       <div className="hub-modal__body">
-        {(error || status) && (
-          <div className={`hub-toast${error ? ' hub-toast--err' : ''}`}>{error || status}</div>
-        )}
-
         {section === 'general' && (
           <div className="settings-section">
             <header className="settings-section__head">
@@ -265,7 +277,7 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
             <div className="settings-rows">
               <div className="settings-row">
                 <div className="settings-row__icon" aria-hidden>
-                  ◌
+                  <Icon name="shield" size={18} />
                 </div>
                 <div className="settings-row__copy">
                   <strong>Low-profile</strong>
@@ -287,7 +299,7 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
 
               <div className="settings-row">
                 <div className="settings-row__icon" aria-hidden>
-                  ▶
+                  <Icon name="volume" size={18} />
                 </div>
                 <div className="settings-row__copy">
                   <strong>Smart assist audio</strong>
@@ -309,7 +321,7 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
 
               <div className="settings-row">
                 <div className="settings-row__icon" aria-hidden>
-                  ⌁
+                  <Icon name="sliders" size={18} />
                 </div>
                 <div className="settings-row__copy">
                   <strong>Audio profile</strong>
@@ -322,12 +334,12 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
 
               <div className="settings-row">
                 <div className="settings-row__icon" aria-hidden>
-                  👁
+                  <Icon name="screen" size={18} />
                 </div>
                 <div className="settings-row__copy">
                   <strong>Continuous screen assist</strong>
                   <p>
-                    Allow 👁 Live background screen reading. Silent on GNOME (Mutter),
+                    Allow Live background screen reading. Silent on GNOME (Mutter),
                     Windows (GDI), and macOS (screencapture). macOS needs Screen Recording
                     in System Settings once. Answers automatically see fresh on-screen text.
                   </p>
@@ -346,7 +358,7 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
 
               <div className="settings-row">
                 <div className="settings-row__icon" aria-hidden>
-                  ✎
+                  <Icon name="sparkles" size={18} />
                 </div>
                 <div className="settings-row__copy">
                   <strong>Auto-ask on final speech</strong>
@@ -364,7 +376,7 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
 
               <div className="settings-row">
                 <div className="settings-row__icon" aria-hidden>
-                  ◈
+                  <Icon name="message" size={18} />
                 </div>
                 <div className="settings-row__copy">
                   <strong>Active mode</strong>
@@ -382,33 +394,6 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                 </select>
               </div>
 
-              <div className="settings-row">
-                <div className="settings-row__icon" aria-hidden>
-                  ↻
-                </div>
-                <div className="settings-row__copy">
-                  <strong>Version</strong>
-                  <p>You are currently using Osmos version {info?.version || '…'}</p>
-                </div>
-                <button
-                  type="button"
-                  className="hub-upload__btn"
-                  onClick={async () => {
-                    const res = await window.osmos.checkUpdates();
-                    if (res.error) setError(res.error);
-                    else if (res.available) setStatus(`Update available: v${res.version}`);
-                    else setStatus(`Up to date (v${res.version || info?.version || ''})`);
-                  }}
-                >
-                  Check
-                </button>
-              </div>
-            </div>
-
-            <div className="row" style={{ marginTop: 18 }}>
-              <button className="primary" type="button" disabled={saving} onClick={() => void save()}>
-                {saving ? 'Saving…' : 'Save'}
-              </button>
             </div>
           </div>
         )}
@@ -556,16 +541,16 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                         if (!next) return;
                         const res = await window.osmos.listOllamaModels(next.ollamaBaseUrl);
                         if (!res.ok) {
-                          setError(res.error || `Ollama failed at ${res.baseUrl || next.ollamaBaseUrl}`);
+                          note('ollama', 'err', res.error || `Ollama failed at ${res.baseUrl || next.ollamaBaseUrl}`);
                         } else {
                           setModels(res.models);
-                          setError('');
-                          setStatus(`${res.models.length} models @ ${res.baseUrl || next.ollamaBaseUrl}`);
+                          note('ollama', 'ok', `${res.models.length} models @ ${res.baseUrl || next.ollamaBaseUrl}`);
                         }
                       }}
                     >
                       Probe Ollama
                     </button>
+                    <ActionNote note={actionNote} id="ollama" />
                     {models.length > 0 && <span className="meta">{models.slice(0, 6).join(', ')}</span>}
                   </div>
                   <p className="meta">Install Ollama from ollama.com, pull a model, then Probe.</p>
@@ -615,15 +600,14 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                       onClick={async () => {
                         const provider = settings.providers?.[settings.activeProvider];
                         if (!provider?.baseUrl || !provider?.model) {
-                          setError('Enter base URL and model first');
+                          note('provider', 'err', 'Enter base URL and model first');
                           return;
                         }
                         await save({
                           activeProvider: settings.activeProvider,
                           providers: settings.providers,
                         });
-                        setStatus('Testing provider…');
-                        setError('');
+                        note('provider', 'info', 'Testing provider…');
                         try {
                           const res = await fetch(
                             `${provider.baseUrl.replace(/\/+$/, '')}/chat/completions`,
@@ -644,19 +628,22 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                           );
                           if (!res.ok) {
                             const text = await res.text().catch(() => '');
-                            setError(
+                            note(
+                              'provider',
+                              'err',
                               `${provider.label} test failed (${res.status}): ${text.slice(0, 120)}`,
                             );
                           } else {
-                            setStatus(`${provider.label} OK`);
+                            note('provider', 'ok', `${provider.label} OK`);
                           }
                         } catch (e) {
-                          setError(e instanceof Error ? e.message : String(e));
+                          note('provider', 'err', e instanceof Error ? e.message : String(e));
                         }
                       }}
                     >
                       Test {settings.providers?.[settings.activeProvider]?.label || settings.activeProvider}
                     </button>
+                    <ActionNote note={actionNote} id="provider" />
                   </div>
                 </>
               )}
@@ -742,21 +729,19 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                 />
               </div>
 
-              <div className="row" style={{ marginBottom: 14, gap: 8 }}>
+              <div className="row settings-action-row" style={{ marginBottom: 14, gap: 8 }}>
                 <button
                   className="ghost"
                   style={{ height: 38 }}
                   type="button"
                   onClick={async () => {
-                    setStatus('Warming provider…');
-                    setError('');
+                    note('routing', 'info', 'Warming provider…');
                     const res = await window.osmos.warmupProvider();
                     if (!res?.ok) {
-                      setError(res?.error || 'Warmup failed');
-                      setStatus('');
+                      note('routing', 'err', res?.error || 'Warmup failed');
                       return;
                     }
-                    setStatus(`Warmed ${res.providerId}/${res.model} in ${res.ms}ms`);
+                    note('routing', 'ok', `Warmed ${res.providerId}/${res.model} in ${res.ms}ms`);
                   }}
                 >
                   Warm up provider
@@ -767,19 +752,18 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                   type="button"
                   disabled={!settings.lumenGatewayEnabled}
                   onClick={async () => {
-                    setStatus('Probing Lumen…');
-                    setError('');
+                    note('routing', 'info', 'Probing Lumen…');
                     const res = await window.osmos.probeLumenGateway(settings.lumenGatewayUrl);
                     if (!res?.ok) {
-                      setError(res?.error || 'Lumen gateway not reachable');
-                      setStatus('');
+                      note('routing', 'err', res?.error || 'Lumen gateway not reachable');
                       return;
                     }
-                    setStatus('Lumen gateway OK');
+                    note('routing', 'ok', 'Lumen gateway OK');
                   }}
                 >
                   Probe Lumen
                 </button>
+                <ActionNote note={actionNote} id="routing" />
               </div>
             </div>
           )}
@@ -888,10 +872,11 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                       tavilyApiKey: next.tavilyApiKey,
                       searxngBaseUrl: next.searxngBaseUrl,
                     });
-                    if (!res.ok) setError(res.error || 'Web search failed');
+                    if (!res.ok) note('web', 'err', res.error || 'Web search failed');
                     else {
-                      setError('');
-                      setStatus(
+                      note(
+                        'web',
+                        'ok',
                         res.provider === 'off'
                           ? 'Web search off'
                           : `${res.provider} ok — ${res.resultCount ?? 0} results`,
@@ -901,6 +886,7 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                 >
                   Test web search
                 </button>
+                <ActionNote note={actionNote} id="web" />
               </div>
 
               <WebAccessSettings
@@ -939,6 +925,8 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                 <p className="meta">Local Whisper is the default — offline and private.</p>
               </header>
 
+              <p className="settings-group-label">Transcription</p>
+
               <div className="field">
                 <label>STT provider</label>
                 <select
@@ -969,33 +957,157 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                   <option value="mic">Microphone only</option>
                   <option value="both">Both mic + system</option>
                 </select>
+                <p className="meta">
+                  Smart mode listens to <strong>meeting/system audio</strong> — what your speakers
+                  play. Continuous screen assist lives in General and never steals the Zoom/Meet
+                  share portal on Wayland.
+                </p>
               </div>
 
-              <div className="field" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                <div>
-                  <label style={{ marginBottom: 4 }}>Continuous screen assist</label>
-                  <p className="meta" style={{ margin: 0 }}>
-                    Allow 👁 Live background screen reading. Silent on GNOME, Windows, and
-                    macOS (macOS: grant Screen Recording once). No share picker on those paths.
-                  </p>
+              {settings.sttProvider === 'local-whisper' && (
+                <div className="field">
+                  <label>Local STT model</label>
+                  <select
+                    value={settings.localSttModel || 'Xenova/whisper-base.en'}
+                    onChange={(e) => set({ localSttModel: e.target.value })}
+                  >
+                    <option value="Xenova/whisper-base.en">
+                      Whisper base.en (recommended — most accurate)
+                    </option>
+                    <option value="onnx-community/moonshine-tiny-ONNX">
+                      Moonshine tiny (fastest, lower accuracy)
+                    </option>
+                    <option value="Xenova/whisper-tiny.en">Whisper tiny.en (lightest Whisper)</option>
+                  </select>
+                  <p className="meta">Switching models triggers a one-time download on first use.</p>
                 </div>
-                <button
-                  type="button"
-                  className={`home-switch${settings.continuousScreenAssist !== false ? ' home-switch--on' : ''}`}
-                  aria-label="Toggle continuous screen assist"
-                  onClick={() =>
-                    set({ continuousScreenAssist: settings.continuousScreenAssist === false })
-                  }
-                >
-                  <span className="home-switch__knob" />
-                </button>
+              )}
+
+              {settings.sttProvider === 'webspeech' && (
+                <p className="meta" style={{ marginBottom: 14 }}>
+                  Web Speech often fails on Linux with a network error. Prefer Local Whisper.
+                </p>
+              )}
+
+              <div className="field">
+                <label>STT language</label>
+                <input
+                  value={settings.sttLanguage}
+                  onChange={(e) => set({ sttLanguage: e.target.value })}
+                  placeholder="en-US"
+                />
               </div>
 
+              <div className="field">
+                <label>Response latency (chunk size): {settings.transcribeChunkMs} ms</label>
+                <input
+                  type="range"
+                  min={2000}
+                  max={8000}
+                  step={500}
+                  value={settings.transcribeChunkMs}
+                  onChange={(e) => set({ transcribeChunkMs: Number(e.target.value) })}
+                  style={{ width: '100%' }}
+                />
+                <p className="meta" style={{ margin: '4px 0 0' }}>
+                  Lower = snappier answers, more CPU. Higher = less chatty for long monologues.
+                </p>
+              </div>
+
+              <label className="settings-check">
+                <input
+                  type="checkbox"
+                  checked={settings.autoAskOnFinal}
+                  onChange={(e) => set({ autoAskOnFinal: e.target.checked })}
+                />
+                <span>Auto-ask when speech is finalized</span>
+              </label>
+
+              {settings.sttProvider === 'openai-whisper' && (
+                <>
+                  <div className="field">
+                    <label>OpenAI API key (Whisper)</label>
+                    <input
+                      type="password"
+                      value={settings.openaiApiKey}
+                      onChange={(e) => set({ openaiApiKey: e.target.value })}
+                      placeholder="sk-…"
+                    />
+                  </div>
+                  <div className="field">
+                    <label>OpenAI base URL</label>
+                    <input
+                      value={settings.openaiBaseUrl}
+                      onChange={(e) => set({ openaiBaseUrl: e.target.value })}
+                    />
+                  </div>
+                </>
+              )}
+
+              <p className="settings-group-label">Microphone</p>
+
+              <div className="settings-action-card">
+                <div className="settings-action-card__head">
+                  <div>
+                    <strong>Microphone</strong>
+                    <p>Choose the input OSMOS listens to, then test the level without leaving this page.</p>
+                  </div>
+                  <button
+                    className="primary"
+                    type="button"
+                    onClick={() => (micTest.on ? stopMicTest() : void startMicTest())}
+                  >
+                    {micTest.on ? 'Stop test' : <><Icon name="mic" size={14} /> Test mic</>}
+                  </button>
+                </div>
+                <div className="settings-control-row">
+                  <select
+                    value={settings.micDeviceId}
+                    onChange={(e) => set({ micDeviceId: e.target.value })}
+                  >
+                    <option value="">System default</option>
+                    {micDevices.map((d) => (
+                      <option key={d.deviceId} value={d.deviceId}>
+                        {d.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button className="ghost" type="button" onClick={() => void refreshMicDevices()}>
+                    Refresh
+                  </button>
+                </div>
+                <ActionNote note={actionNote} id="mic" />
+                {micTest.on ? (
+                  <div className="mic-test" style={{ marginTop: 10 }}>
+                    <div className="mic-meter" aria-hidden>
+                      <div
+                        className="mic-meter__fill"
+                        style={{ width: `${Math.min(100, micTest.level)}%` }}
+                      />
+                      <div
+                        className="mic-meter__peak"
+                        style={{ left: `${Math.min(100, micTest.peak)}%` }}
+                      />
+                    </div>
+                    <div className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
+                      <span className="meta">
+                        {micTest.level > 2 ? 'Hearing audio ✓' : 'Silence… speak now'}
+                      </span>
+                      <span className="meta" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                        {micTest.level}%
+                      </span>
+                    </div>
+                    <p className="meta" style={{ margin: '4px 0 0' }}>{micTest.label}</p>
+                  </div>
+                ) : null}
+              </div>
+
+              <p className="settings-group-label">System audio</p>
               <p className="meta" style={{ marginBottom: 14 }}>
-                Overlay Smart mode listens to <strong>meeting/system audio</strong> (what your
-                speakers play). Continuous screen assist is optional and never steals the Zoom/Meet
-                share portal on Wayland.
+                Capture meeting/system audio for transcription. Requires platform audio utilities.
+                Leave the loopback device blank to auto-detect.
               </p>
+
               {audioWarning ? (
                 <p className="settings-callout" style={{ marginBottom: 14 }}>
                   {audioWarning}
@@ -1028,207 +1140,59 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                     }
                   />
                 )}
+                <p className="meta">
+                  {info?.platform === 'darwin'
+                    ? 'macOS cannot tap Zoom/Meet audio without a virtual cable. Install BlackHole (existential.audio/blackhole), then create a Multi-Output Device (speakers + BlackHole) in Audio MIDI Setup and set it as system output.'
+                    : info?.platform === 'win32'
+                      ? 'Windows uses Chromium desktop loopback by default (no ffmpeg WASAPI). Override only if you need a named virtual cable.'
+                      : 'Linux uses a PipeWire/Pulse monitor source. Pick the output you want to hear, or leave it blank to auto-detect the default monitor.'}
+                </p>
               </div>
-              {info?.platform === 'darwin' ? (
-                <p className="meta" style={{ marginBottom: 14 }}>
-                  macOS cannot tap Zoom/Meet audio without a virtual cable. Install BlackHole
-                  (existential.audio/blackhole), then in Audio MIDI Setup create a Multi-Output Device
-                  (speakers + BlackHole) and set it as system output. OSMOS auto-picks a BlackHole /
-                  Loopback / Soundflower device, or use the field above.
-                </p>
-              ) : (
-                <p className="meta" style={{ marginBottom: 14 }}>
-                  Leave blank to auto-detect. On Windows, Smart listen uses Chromium desktop
-                  loopback (no ffmpeg WASAPI). Override only if you need a named Linux/macOS
-                  virtual cable.
-                </p>
-              )}
 
-              {/* P0: end-to-end diagnostics — exercises every audio path in one click. */}
-              <DiagnosticsPanel settings={settings} />
-
-              {settings.sttProvider === 'local-whisper' && (
-                <>
-                  <p className="meta" style={{ marginBottom: 14 }}>
-                    Runs fully offline via a local Node worker (moonshine by default — no cloud
-                    keys involved). First run downloads the model once.
-                  </p>
-                  <div className="field" style={{ marginBottom: 14 }}>
-                    <label>Local STT model</label>
-                    <select
-                      value={settings.localSttModel || 'onnx-community/moonshine-tiny-ONNX'}
-                      onChange={(e) => set({ localSttModel: e.target.value })}
-                    >
-                      <option value="onnx-community/moonshine-tiny-ONNX">
-                        Moonshine tiny (recommended — fast + accurate)
-                      </option>
-                      <option value="Xenova/whisper-base.en">
-                        Whisper base.en (slower, strong on accents)
-                      </option>
-                      <option value="Xenova/whisper-tiny.en">Whisper tiny.en (lightest)</option>
-                    </select>
-                    <p className="meta" style={{ marginTop: 6 }}>
-                      Switching models triggers a one-time download on first use.
-                    </p>
+              <div className="settings-action-card">
+                <div className="settings-action-card__head">
+                  <div>
+                    <strong>System audio test</strong>
+                    <p>Play something on this machine and capture five seconds of the selected loopback.</p>
                   </div>
-                </>
-              )}
-              {settings.sttProvider === 'webspeech' && (
-                <p className="meta" style={{ marginBottom: 14 }}>
-                  Web Speech often fails on Linux with a network error. Prefer Local Whisper.
-                </p>
-              )}
-
-              <div className="field">
-                <label>Microphone</label>
-                <div className="row">
-                  <select
-                    style={{ flex: 1 }}
-                    value={settings.micDeviceId}
-                    onChange={(e) => set({ micDeviceId: e.target.value })}
-                  >
-                    <option value="">System default</option>
-                    {micDevices.map((d) => (
-                      <option key={d.deviceId} value={d.deviceId}>
-                        {d.label}
-                      </option>
-                    ))}
-                  </select>
                   <button
                     className="primary"
-                    style={{ height: 38 }}
                     type="button"
-                    onClick={() => void refreshMicDevices()}
+                    onClick={async () => {
+                      note('capture', 'info', 'Capturing system audio…');
+                      try {
+                        const { captureElectronLoopback, isWindowsPlatform } = await import(
+                          '../stt/electronLoopback'
+                        );
+                        const res = (await isWindowsPlatform())
+                          ? await captureElectronLoopback(5000)
+                          : await window.osmos.captureSystemAudio({
+                              durationMs: 5000,
+                              device: settings.systemAudioDevice,
+                            });
+                        if (!res.ok) {
+                          note('capture', 'err', res.error || 'System audio capture failed');
+                        } else if ((res as { silent?: boolean }).silent) {
+                          note('capture', 'err', 'Captured silence — play audio on speakers and retry.');
+                        } else {
+                          note(
+                            'capture',
+                            'ok',
+                            `Captured ${res.mimeType || 'audio'} (${((res.base64?.length || 0) / 1024) | 0} KB)`,
+                          );
+                        }
+                      } catch (e) {
+                        note('capture', 'err', e instanceof Error ? e.message : String(e));
+                      }
+                    }}
                   >
-                    Refresh
-                  </button>
-                  <button
-                    className="primary"
-                    style={{ height: 38, marginLeft: 8 }}
-                    type="button"
-                    onClick={() => (micTest.on ? stopMicTest() : void startMicTest())}
-                  >
-                    {micTest.on ? 'Stop' : '🎙 Test mic'}
+                    Capture 5s
                   </button>
                 </div>
-                {micTest.on ? (
-                  <div className="mic-test" style={{ marginTop: 10 }}>
-                    <div className="mic-meter" aria-hidden>
-                      <div
-                        className="mic-meter__fill"
-                        style={{ width: `${Math.min(100, micTest.level)}%` }}
-                      />
-                      <div
-                        className="mic-meter__peak"
-                        style={{ left: `${Math.min(100, micTest.peak)}%` }}
-                      />
-                    </div>
-                    <div className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
-                      <span className="meta">
-                        {micTest.level > 2 ? 'Hearing audio ✓' : 'Silence… speak now'}
-                      </span>
-                      <span className="meta" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {micTest.level}%
-                      </span>
-                    </div>
-                    <p className="meta" style={{ margin: '4px 0 0' }}>{micTest.label}</p>
-                  </div>
-                ) : null}
+                <ActionNote note={actionNote} id="capture" />
               </div>
 
-              <div className="field">
-                <label>STT language</label>
-                <input
-                  value={settings.sttLanguage}
-                  onChange={(e) => set({ sttLanguage: e.target.value })}
-                  placeholder="en-US"
-                />
-              </div>
-
-              <div className="field">
-                <label>Response latency (chunk size): {settings.transcribeChunkMs} ms</label>
-                <input
-                  type="range"
-                  min={2000}
-                  max={8000}
-                  step={500}
-                  value={settings.transcribeChunkMs}
-                  onChange={(e) => set({ transcribeChunkMs: Number(e.target.value) })}
-                  style={{ width: '100%' }}
-                />
-                <p className="meta" style={{ margin: '4px 0 0' }}>
-                  Lower = snappier answers, more CPU. Higher = less chatty for long monologues.
-                </p>
-              </div>
-
-              <label className="meta" style={{ display: 'block', marginBottom: 14 }}>
-                <input
-                  type="checkbox"
-                  checked={settings.autoAskOnFinal}
-                  onChange={(e) => set({ autoAskOnFinal: e.target.checked })}
-                />{' '}
-                Auto-ask when speech is finalized
-              </label>
-
-              {settings.sttProvider === 'openai-whisper' && (
-                <>
-                  <div className="field">
-                    <label>OpenAI API key (Whisper)</label>
-                    <input
-                      type="password"
-                      value={settings.openaiApiKey}
-                      onChange={(e) => set({ openaiApiKey: e.target.value })}
-                      placeholder="sk-…"
-                    />
-                  </div>
-                  <div className="field">
-                    <label>OpenAI base URL</label>
-                    <input
-                      value={settings.openaiBaseUrl}
-                      onChange={(e) => set({ openaiBaseUrl: e.target.value })}
-                    />
-                  </div>
-                </>
-              )}
-
-              <h4 style={{ marginTop: 18, marginBottom: 8 }}>System audio</h4>
-              <p className="meta" style={{ marginBottom: 10 }}>
-                Capture meeting/system audio for transcription. Requires platform audio utilities.
-              </p>
-              <button
-                className="primary"
-                style={{ height: 38 }}
-                type="button"
-                onClick={async () => {
-                  setStatus('Capturing system audio…');
-                  setError('');
-                  try {
-                    const { captureElectronLoopback, isWindowsPlatform } = await import(
-                      '../stt/electronLoopback'
-                    );
-                    const res = (await isWindowsPlatform())
-                      ? await captureElectronLoopback(5000)
-                      : await window.osmos.captureSystemAudio({
-                          durationMs: 5000,
-                          device: settings.systemAudioDevice,
-                        });
-                    if (!res.ok) setError(res.error || 'System audio capture failed');
-                    else if ((res as { silent?: boolean }).silent) {
-                      setError('Captured silence — play audio on speakers and retry.');
-                    } else {
-                      setStatus(
-                        `Captured ${res.mimeType || 'audio'} (${(res.base64?.length || 0) / 1024 | 0} KB)`,
-                      );
-                    }
-                  } catch (e) {
-                    setError(e instanceof Error ? e.message : String(e));
-                  } finally {
-                    setTimeout(() => setStatus(''), 2000);
-                  }
-                }}
-              >
-                Capture system audio (5s)
-              </button>
+              <DiagnosticsPanel settings={settings} />
             </div>
           )}
 
@@ -1259,7 +1223,7 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                 </p>
               )}
 
-              <label className="meta" style={{ display: 'block', marginBottom: 14 }}>
+              <label className="settings-check">
                 <input
                   type="checkbox"
                   checked={settings.stealthEnabled}
@@ -1268,25 +1232,30 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                     set({ stealthEnabled });
                     void save({ stealthEnabled });
                   }}
-                />{' '}
-                Enable stealth mode (hide Osmos from screen share)
+                />
+                <span>Enable stealth mode (hide Osmos from screen share)</span>
               </label>
 
                 <div className="field" style={{ marginTop: 14 }}>
                   <label>Local data</label>
                   <button
+                    className="ghost settings-danger"
                     type="button"
                     style={{ height: 38 }}
                     onClick={() => {
                       if (!window.confirm('Delete ALL saved sessions and transcripts?')) return;
                       void window.osmos.clearAllHistory().then(() => {
-                        setStatus('All sessions and transcripts deleted');
-                        setTimeout(() => setStatus(''), 2500);
+                        note('delete', 'ok', 'All sessions and transcripts deleted');
+                        setTimeout(
+                          () => setActionNote((current) => (current?.id === 'delete' ? null : current)),
+                          2600,
+                        );
                       });
                     }}
                   >
                     Delete all sessions & transcripts
                   </button>
+                  <ActionNote note={actionNote} id="delete" />
                   <p className="meta" style={{ margin: '6px 0 0' }}>
                     Transcripts of other people are personal data — delete what you don't need.
                   </p>
@@ -1334,35 +1303,40 @@ export function SettingsPanel({ settings, info, onChange, onSaved, onClose }: Pr
                 <label>Update feed URL</label>
                 <input id="update-url" placeholder="https://example.com/update.json" defaultValue="" />
               </div>
-              <button
-                className="primary"
-                style={{ height: 38 }}
-                type="button"
-                onClick={async () => {
-                  const url =
-                    (document.getElementById('update-url') as HTMLInputElement | null)?.value || '';
-                  const res: UpdateStatus = await window.osmos.checkUpdates(url);
-                  if (res.error) setError(res.error);
-                  else if (res.available) setStatus(`Update available: v${res.version}`);
-                  else setStatus(`Up to date (v${res.version || info?.version || ''})`);
-                }}
-              >
-                Check for updates
-              </button>
+              <div className="row settings-action-row">
+                <button
+                  className="primary"
+                  style={{ height: 38 }}
+                  type="button"
+                  onClick={async () => {
+                    const url =
+                      (document.getElementById('update-url') as HTMLInputElement | null)?.value || '';
+                    const res: UpdateStatus = await window.osmos.checkUpdates(url);
+                    if (res.error) note('updates', 'err', res.error);
+                    else if (res.available) note('updates', 'ok', `Update available: v${res.version}`);
+                    else note('updates', 'ok', `Up to date (v${res.version || info?.version || ''})`);
+                  }}
+                >
+                  Check for updates
+                </button>
+                <ActionNote note={actionNote} id="updates" />
+              </div>
             </div>
           )}
 
-          <div className="settings-footer">
-            <button
-              className="primary"
-              style={{ height: 40 }}
-              type="button"
-              disabled={saving}
-              onClick={() => void save()}
-            >
-              {saving ? 'Saving…' : 'Save settings'}
-            </button>
-          </div>
+      </div>
+
+      <div className="settings-footer">
+        <button
+          className="primary"
+          style={{ height: 40 }}
+          type="button"
+          disabled={saving}
+          onClick={() => void save()}
+        >
+          {saving ? 'Saving…' : 'Save settings'}
+        </button>
+        <ActionNote note={actionNote} id="save" />
       </div>
     </div>
   );
@@ -1665,28 +1639,30 @@ function DiagnosticsPanel({ settings }: { settings: AppSettings }) {
   }, [running, settings.micDeviceId]);
 
   return (
-    <div className="field">
-      <label>Run diagnostics</label>
-      <p className="meta" style={{ marginBottom: 8 }}>
-        Tests mic, system audio, speech model, and stealth in ~10 seconds.
-      </p>
-      <button
-        type="button"
-        className="primary"
-        style={{ height: 38 }}
-        onClick={() => void run()}
-        disabled={running}
-      >
-        {running ? 'Running…' : 'Run diagnostics'}
-      </button>
+    <div className="settings-action-card">
+      <div className="settings-action-card__head">
+        <div>
+          <strong>Run diagnostics</strong>
+          <p>Tests mic, system audio, speech model, stealth and mic lifecycle in ~10 seconds.</p>
+        </div>
+        <button
+          type="button"
+          className="primary"
+          style={{ height: 38 }}
+          onClick={() => void run()}
+          disabled={running}
+        >
+          {running ? 'Running…' : 'Run diagnostics'}
+        </button>
+      </div>
       {results.length ? (
-        <ul className="diag-list" style={{ marginTop: 12, listStyle: 'none', padding: 0 }}>
+        <ul className="diag-list" role="status">
           {results.map((r) => (
-            <li key={r.name} className={`diag-row diag-row--${r.status}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
-              <span className="diag-row__icon" aria-hidden style={{ width: 18, display: 'inline-block', textAlign: 'center' }}>
+            <li key={r.name} className={`diag-row diag-row--${r.status}`}>
+              <span className="diag-row__icon" aria-hidden>
                 {r.status === 'ok' ? '✓' : r.status === 'warn' ? '!' : r.status === 'fail' ? '✗' : '…'}
               </span>
-              <div>
+              <div className="diag-row__copy">
                 <strong>{r.name}</strong>
                 <div className="meta">{r.detail}</div>
               </div>

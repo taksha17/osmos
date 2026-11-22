@@ -192,6 +192,19 @@ export function getSettings(): AppSettings {
     next.assistSourceMigrated = true;
   }
 
+  // One-time: Whisper base.en replaced Moonshine tiny as the accuracy-first
+  // default. Existing installs that still carry the old implicit default move
+  // once; a later explicit choice in Settings is preserved.
+  if (!raw.sttModelMigrated) {
+    if (
+      !raw.localSttModel ||
+      raw.localSttModel === 'onnx-community/moonshine-tiny-ONNX'
+    ) {
+      next.localSttModel = 'Xenova/whisper-base.en';
+    }
+    next.sttModelMigrated = true;
+  }
+
   const active = activeSavedProfile(next.profiles, next.activeProfileId);
   next.documents = active.documents || [];
 
@@ -206,6 +219,7 @@ export function getSettings(): AppSettings {
       !(raw.profiles || []).some((p) => (p.documents || []).length > 0)) ||
     (next.sttProvider === 'local-whisper' && raw.sttProvider === 'webspeech' && process.platform === 'linux') ||
     next.assistSourceMigrated !== raw.assistSourceMigrated ||
+    next.sttModelMigrated !== raw.sttModelMigrated ||
     (raw.schemaVersion ?? 1) < SETTINGS_SCHEMA_VERSION
   ) {
     // `next` here is still the as-stored (possibly encrypted, possibly

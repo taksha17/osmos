@@ -13,8 +13,8 @@
  * Audio must be WAV (PCM). The renderer converts mic recordings to 16 kHz mono WAV.
  *
  * Supported models (transformers.js v3+ / ONNX):
- *   - onnx-community/moonshine-tiny-ONNX  (MIT, fast streaming STT — default)
- *   - Xenova/whisper-base.en              (MIT, strong on accents)
+ *   - Xenova/whisper-base.en              (MIT, default — best accuracy)
+ *   - onnx-community/moonshine-tiny-ONNX  (MIT, fast CPU fallback)
  */
 
 import { pipeline, env } from '@huggingface/transformers';
@@ -100,9 +100,10 @@ function readWavPcm(filePath) {
 env.cacheDir = cacheDir;
 env.allowLocalModels = false;
 
-// Moonshine tiny is fast enough for real-time chunk transcription on CPU.
-// Override with OSMOS_WHISPER_MODEL if needed (e.g. Xenova/whisper-base.en).
-const DEFAULT_MODEL = process.env.OSMOS_WHISPER_MODEL || 'onnx-community/moonshine-tiny-ONNX';
+// Whisper base.en is the accuracy-first default: in the 2026-11 stress set it
+// measured 4.7 % WER vs Moonshine tiny's 14.3 %. Override with
+// OSMOS_WHISPER_MODEL=onnx-community/moonshine-tiny-ONNX on slow CPUs.
+const DEFAULT_MODEL = process.env.OSMOS_WHISPER_MODEL || 'Xenova/whisper-base.en';
 
 const isWhisper = (m) => /whisper/i.test(m);
 const isMoonshine = (m) => /moonshine/i.test(m);

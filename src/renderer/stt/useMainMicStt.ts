@@ -48,7 +48,9 @@ export function useMainMicStt(settings: AppSettings | null) {
     setError('');
     setFatal(false);
     setListening(true);
-    setPartial('🎙 starting mic…');
+    setPartial('starting mic…');
+    /** Fixed chunks already in flight become stale when VAD endpoints. */
+    let utteranceEpoch = 0;
     try {
       lastChunkAt.current = Date.now();
       const res = await window.osmos.startMicListen({
@@ -80,6 +82,7 @@ export function useMainMicStt(settings: AppSettings | null) {
           return;
         }
         utterancePathRef.current = true;
+        utteranceEpoch += 1;
         lastChunkAt.current = Date.now();
         setPartial('Transcribing…');
         try {
@@ -100,12 +103,12 @@ export function useMainMicStt(settings: AppSettings | null) {
           ) {
             setError(t.error);
           } else {
-            setPartial('🎙 listening…');
+            setPartial('listening…');
           }
         } catch (e) {
           if (genRef.current !== gen) return;
           setError(e instanceof Error ? e.message : String(e));
-          setPartial('🎙 listening…');
+          setPartial('listening…');
         }
       };
 
@@ -138,13 +141,14 @@ export function useMainMicStt(settings: AppSettings | null) {
         lastChunkAt.current = Date.now();
         if (!chunk.base64) return;
         if (chunk.silent) {
-          setPartial('🎙 listening…');
+          setPartial('listening…');
           return;
         }
         // While the VAD path is alive, chunks are telemetry only — transcribing
         // both would repeat the same speech twice.
         if (utterancePathRef.current) return;
         setPartial('Transcribing…');
+        const epochAtStart = utteranceEpoch;
         try {
           const t = await window.osmos.transcribeAudio({
             base64: chunk.base64,
@@ -154,6 +158,7 @@ export function useMainMicStt(settings: AppSettings | null) {
             model: settingsRef.current?.localSttModel,
           });
           if (genRef.current !== gen) return;
+          if (epochAtStart !== utteranceEpoch) return;
           if (t.ok && t.text?.trim()) {
             setPartial('');
             finalRef.current?.(t.text.trim());
@@ -163,12 +168,12 @@ export function useMainMicStt(settings: AppSettings | null) {
           ) {
             setError(t.error);
           } else {
-            setPartial('🎙 listening…');
+            setPartial('listening…');
           }
         } catch (e) {
           if (genRef.current !== gen) return;
           setError(e instanceof Error ? e.message : String(e));
-          setPartial('🎙 listening…');
+          setPartial('listening…');
         }
       });
       if (unsubChunk) unsubsRef.current.push(unsubChunk);
@@ -232,7 +237,7 @@ export function useMainMicStt(settings: AppSettings | null) {
             /* ignore */
           }
         }
-        setPartial('🎙 reconnecting…');
+        setPartial('reconnecting…');
         await startRef.current();
         restartingRef.current = false;
       })();

@@ -23,7 +23,7 @@ import { planWorkerCommand } from '../../shared/policy/workerRuntime.js';
 import { getSettings } from './settingsStore.js';
 
 /** Default local STT model when settings/env don't specify one. */
-const DEFAULT_LOCAL_MODEL = 'onnx-community/moonshine-tiny-ONNX';
+const DEFAULT_LOCAL_MODEL = 'Xenova/whisper-base.en';
 
 function getSettingsModel(): string {
   try {
@@ -204,7 +204,7 @@ function ensureServe(): Promise<void> {
           ...workerRuntime().env,
           OSMOS_ROOT: root,
           UNCON_ROOT: root,
-          OSMOS_WHISPER_MODEL: process.env.OSMOS_WHISPER_MODEL || 'onnx-community/moonshine-tiny-ONNX',
+          OSMOS_WHISPER_MODEL: process.env.OSMOS_WHISPER_MODEL || DEFAULT_LOCAL_MODEL,
           // Help system Node find unpacked deps next to the worker.
           NODE_PATH: [path.join(root, 'node_modules'), process.env.NODE_PATH]
             .filter(Boolean)

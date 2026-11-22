@@ -13,6 +13,7 @@ import {
   SCREEN_CONTEXT_MAX_CHARS,
 } from '@shared/screenContext';
 import { isSttStatusLine } from '@shared/sttStatus';
+import { reconcileFinalTranscript } from '@shared/transcriptDedupe';
 import { useMainMicStt } from '../stt/useMainMicStt';
 import { useSystemAudioStt } from '../stt/useSystemAudioStt';
 import { extractTextFromBase64 } from '../stt/ocr';
@@ -26,6 +27,7 @@ import type { TranscriptEntry } from './TranscriptTimeline';
 import { MarkdownText } from './MarkdownText';
 import { EvidencePanel } from './EvidencePanel';
 import { OverlayQuickMenu } from './OverlayQuickMenu';
+import { Icon } from './Icon';
 
 function sttEngine(settings: AppSettings | null): 'local' | 'openai' {
   return settings?.sttProvider === 'openai-whisper' ? 'openai' : 'local';
@@ -134,6 +136,10 @@ export function ChatPanel({
   const lastScreenRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
   const transcriptRef = useRef<TranscriptEntry[]>([]);
   transcriptRef.current = transcript;
+  /** Last displayed final per channel, for duplicate/prefix reconciliation. */
+  const lastFinalRef = useRef<
+    Record<'me' | 'them', { id: string; text: string; at: number } | null>
+  >({ me: null, them: null });
   const inputRef = useRef('');
   inputRef.current = input;
   const micFailRef = useRef(0);
@@ -256,7 +262,7 @@ export function ChatPanel({
       if (text.length < 12) return 0;
       lastScreenRef.current = { text, at };
       setScreenInfo({ chars: text.length, at, preview: text.slice(0, 280) });
-      if (source === 'live') setLiveScreenStatus(`👁 screen read · ${text.length} chars`);
+      if (source === 'live') setLiveScreenStatus(`screen read · ${text.length} chars`);
       return text.length;
     },
     [ownOverlayTexts],
@@ -313,7 +319,7 @@ export function ChatPanel({
     }
     setError('');
     setLiveScreen(true);
-    setLiveScreenStatus('👁 starting screen read…');
+    setLiveScreenStatus('starting screen read…');
 
     const isLinux = /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent);
 
@@ -323,8 +329,8 @@ export function ChatPanel({
       wireMainEngineText();
       setLiveScreenStatus(
         main.backend === 'mutter-screencast'
-          ? '👁 watching (no prompt)'
-          : `👁 watching${main.backend ? ` (${main.backend})` : ''}`,
+          ? 'watching (no prompt)'
+          : `watching${main.backend ? ` (${main.backend})` : ''}`,
       );
       console.log('[liveScreen] main engine started:', main.backend);
       return;
@@ -349,17 +355,17 @@ export function ChatPanel({
             const res = await window.osmos.ocrExtract({ base64: frame.dataUrl });
             if (res.ok && res.text?.trim()) {
               const n = applyScreenText(res.text, frame.at, 'live');
-              if (!n) setLiveScreenStatus('👁 watching · no readable text');
+              if (!n) setLiveScreenStatus('watching · no readable text');
             } else if (res.error && !/no text/i.test(res.error)) {
-              setLiveScreenStatus(`👁 OCR: ${res.error}`);
+              setLiveScreenStatus(`OCR: ${res.error}`);
             } else {
-              setLiveScreenStatus('👁 watching · no readable text');
+              setLiveScreenStatus('watching · no readable text');
             }
           } finally {
             liveOcrBusyRef.current = false;
           }
         },
-        onStatus: (text) => setLiveScreenStatus((prev) => (prev.startsWith('👁 screen read') && /unchanged/.test(text) ? prev : text)),
+        onStatus: (text) => setLiveScreenStatus((prev) => (prev.startsWith('screen read') && /unchanged/.test(text) ? prev : text)),
         onError: (err) => {
           setError(err);
           setLiveScreen(false);
@@ -387,7 +393,7 @@ export function ChatPanel({
       setLiveScreenStatus('');
       return;
     }
-    setLiveScreenStatus(`👁 watching${res.backend ? ` (${res.backend})` : ''}`);
+    setLiveScreenStatus(`watching${res.backend ? ` (${res.backend})` : ''}`);
     wireMainEngineText();
   }, [applyScreenText, settings?.continuousScreenAssist, wireMainEngineText]);
 
@@ -765,15 +771,36 @@ export function ChatPanel({
       if (/^\W*(\[(music|applause|laughter|silence|blank_audio|noise)\]|♪+)[\W]*$/i.test(cleaned)) {
         return;
       }
-      setTranscript((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID?.() || `t-${Date.now()}`,
-          text: cleaned,
-          timestamp: Date.now(),
-          isFinal: true,
-        },
-      ]);
+
+      // VAD and fixed chunks can both finalize one question, and a chunk can
+      // end on a growing prefix. Reconcile per channel before display or the
+      // orchestrator sees the same speech twice.
+      const now = Date.now();
+      const previous = lastFinalRef.current[channel];
+      const decision = reconcileFinalTranscript(previous, cleaned, now);
+      if (decision.action === 'skip') return;
+
+      const entryId = crypto.randomUUID?.() || `t-${now}`;
+      setTranscript((prev) => {
+        // The live partial is the same speech; the final replaces it instead
+        // of leaving a second, stale line above.
+        const next = prev.length && !prev[prev.length - 1]!.isFinal ? prev.slice(0, -1) : [...prev];
+        if (decision.action === 'replace' && previous) {
+          const index = next.findIndex((entry) => entry.id === previous.id);
+          if (index >= 0) {
+            next[index] = { ...next[index]!, text: decision.text };
+            return next;
+          }
+        }
+        next.push({ id: entryId, text: decision.text, timestamp: now, isFinal: true });
+        return next;
+      });
+
+      if (decision.action === 'replace' && previous) {
+        lastFinalRef.current[channel] = { ...previous, text: decision.text, at: now };
+        return;
+      }
+      lastFinalRef.current[channel] = { id: entryId, text: decision.text, at: now };
 
       const mode = settings?.activeMode || 'general';
       const smart = continuousRef.current && overlay && !pausedRef.current;
@@ -788,11 +815,11 @@ export function ChatPanel({
       // duplicate — the ad-hoc 5 s prefix check this replaced could not tell
       // those cases apart.
       const actions = orchestratorRef.current.final({
-        text: cleaned,
+        text: decision.text,
         channel,
         mode,
         smartMode: smart,
-        nowMs: Date.now(),
+        nowMs: now,
       });
       const start = actions.find(
         (action) => action.type === 'start' || action.type === 'restart',
@@ -803,8 +830,8 @@ export function ChatPanel({
       // do not also paste it into the user message.
       const prompt =
         smart && overlay
-          ? fusedAssistPrompt({ transcript: cleaned, activeMode: mode })
-          : cleaned;
+          ? fusedAssistPrompt({ transcript: decision.text, activeMode: mode })
+          : decision.text;
 
       const send = () => {
         activeAnswerRef.current = start.requestId;
@@ -1085,15 +1112,15 @@ export function ChatPanel({
 
         <div className="overlay-actions">
           <button type="button" disabled={busy} onClick={() => void sendMessage(OVERLAY_PROMPTS.assist)}>
-            ✦ Assist
+            <Icon name="sparkles" size={14} /> Assist
           </button>
           <span className="overlay-actions__dot" aria-hidden>·</span>
           <button type="button" disabled={busy} onClick={() => void sendMessage(OVERLAY_PROMPTS.followUp)}>
-            Follow-up questions
+            <Icon name="message" size={14} /> Follow-up
           </button>
           <span className="overlay-actions__dot" aria-hidden>·</span>
           <button type="button" disabled={busy} onClick={() => void sendMessage(OVERLAY_PROMPTS.recap)}>
-            ↻ Recap
+            <Icon name="refresh" size={14} /> Recap
           </button>
           {starTemplates[0] ? (
             <>
@@ -1122,7 +1149,7 @@ export function ChatPanel({
                 : 'Listen to the conversation (mic/system source is set in Settings)'
             }
           >
-            {continuousEnabled ? 'Listening' : 'Listen'}
+            <Icon name="mic" size={13} /> {continuousEnabled ? 'Listening' : 'Listen'}
           </button>
           <button
             type="button"
@@ -1131,11 +1158,11 @@ export function ChatPanel({
             disabled={busy}
             title="Read the screen once (silent — no share dialog, no screenshot flash)"
           >
-            Screen
+            <Icon name="screen" size={13} /> Screen
           </button>
           {busy ? (
             <button type="button" className="overlay-tool overlay-tool--live" onClick={() => cancelRef.current?.()}>
-              Stop
+              <Icon name="stop" size={11} /> Stop
             </button>
           ) : null}
           {((mainMic.listening && !mainMic.error) || (system.listening && !system.error)) && (
@@ -1156,14 +1183,14 @@ export function ChatPanel({
             }
           >
             {paused
-              ? 'Paused — tap ▶ to resume'
+              ? 'Paused — resume to keep listening'
               : (() => {
                   const ears = [
                     mainMic.listening ? 'mic' : '',
                     system.listening ? 'spk' : '',
                   ].filter(Boolean);
                   const badge = continuousEnabled
-                    ? `⚡ Smart${ears.length ? ` (${ears.join('+')})` : ''} · `
+                    ? `Listening${ears.length ? ` (${ears.join('+')})` : ''} · `
                     : '';
                   const screenAge = screenInfo.at ? Date.now() - screenInfo.at : Infinity;
                   const screenBadge =
@@ -1177,7 +1204,7 @@ export function ChatPanel({
                     mainMic.error ||
                     streamMeta ||
                     (liveScreen ? liveScreenStatus : '') ||
-                    (listening ? 'Listening…' : '') ||
+                    (listening ? 'Live' : '') ||
                     'Ready';
                   return `${badge}${screenBadge}${body}`;
                 })()}
@@ -1218,7 +1245,7 @@ export function ChatPanel({
             onClick={() => void sendMessage()}
             aria-label="Send"
           >
-            ▶
+            <Icon name="arrow-up" size={16} />
           </button>
         </div>
         {showShortcuts ? <ShortcutsModal onClose={() => setShowShortcuts(false)} /> : null}
@@ -1251,7 +1278,7 @@ export function ChatPanel({
           disabled={busy}
           title="Start/stop microphone"
         >
-          {mainMic.listening ? 'Stop mic' : 'Start mic'}
+          <Icon name="mic" size={14} /> {mainMic.listening ? 'Stop mic' : 'Start mic'}
         </button>
         <button
           type="button"
@@ -1260,7 +1287,7 @@ export function ChatPanel({
           disabled={busy}
           title="Toggle continuous assistant"
         >
-          {continuousEnabled ? 'Continuous on' : 'Continuous'}
+          <Icon name="sparkles" size={14} /> {continuousEnabled ? 'Listening' : 'Listen'}
         </button>
         <button
           type="button"
@@ -1292,7 +1319,7 @@ export function ChatPanel({
           disabled={busy}
           title="Capture screen region and OCR"
         >
-          📷
+          <Icon name="screen" size={15} />
         </button>
         <button
           type="button"
@@ -1301,11 +1328,11 @@ export function ChatPanel({
           disabled={busy}
           title="Capture 5s of system audio and transcribe"
         >
-          🔊
+          <Icon name="volume" size={15} />
         </button>
         {busy ? (
           <button type="button" className="mic-btn mic-btn--live" onClick={() => cancelRef.current?.()}>
-            Stop reply
+            <Icon name="stop" size={11} /> Stop reply
           </button>
         ) : null}
         <span className="meta">
@@ -1362,9 +1389,9 @@ export function ChatPanel({
           <div className="chat-empty">
             <p className="chat-empty__title">Ask anything with your context loaded</p>
             <ul className="chat-empty__hints">
-              <li>Ctrl/⌘+Enter — Assist on the conversation</li>
-              <li>📷 — read the screen once</li>
-              <li>Start mic — dictation and live transcript</li>
+              <li><Icon name="command" size={13} /> Ctrl/⌘ + Enter — Assist</li>
+              <li><Icon name="screen" size={13} /> Screen — read once</li>
+              <li><Icon name="mic" size={13} /> Mic — live transcript</li>
             </ul>
           </div>
         )}
@@ -1531,7 +1558,7 @@ function ShortcutsModal({ onClose }: { onClose: () => void }) {
       <div className="shortcuts-modal" onClick={(e) => e.stopPropagation()}>
         <div className="shortcuts-modal__head">
           <h2>Keyboard shortcuts</h2>
-          <button type="button" className="link-btn" onClick={onClose} aria-label="Close">×</button>
+          <button type="button" className="link-btn" onClick={onClose} aria-label="Close"><Icon name="x" size={15} /></button>
         </div>
         <table className="shortcuts-table">
           <tbody>

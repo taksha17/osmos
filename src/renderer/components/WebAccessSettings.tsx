@@ -105,7 +105,7 @@ export default function WebAccessSettings({ value, onChange, onTest }: Props) {
         />
       </div>
 
-      <div className="row" style={{ marginTop: 12, marginBottom: 8 }}>
+      <div className="row settings-action-row">
         <button
           className="primary"
           style={{ height: 38 }}
@@ -115,8 +115,15 @@ export default function WebAccessSettings({ value, onChange, onTest }: Props) {
         >
           {testing ? 'Testing…' : 'Test connection'}
         </button>
+        {result ? (
+          <span
+            className={`settings-action-note settings-action-note--${result.startsWith('✓') ? 'ok' : 'err'}`}
+            role="status"
+          >
+            {result.replace(/^[✓✗]\s*/, '')}
+          </span>
+        ) : null}
       </div>
-      {result ? <p role="status" className="meta">{result}</p> : null}
       <p className="settings-callout">
         Privacy: <strong>{v.privacy}</strong> · Local-only never touches cloud tiers. Target sites still
         see your IP; respect robots.txt and site terms.

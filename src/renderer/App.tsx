@@ -13,6 +13,7 @@ import { resolveAgent } from '@shared/agents';
 import { DEFAULT_SAVED_PROFILE } from '@shared/types';
 import type { UbuntuBridgeMode, UbuntuBridgeState } from '@shared/policy/ubuntuBridge';
 import startOsmosIcon from '@resources/Start_Osmos_64.png';
+import { Icon } from './components/Icon';
 
 type Tab = 'home' | 'chat' | 'history';
 type Modal = null | 'profile' | 'settings';
@@ -323,6 +324,7 @@ function OverlayApp() {
             alt="OSMOS"
             width={28}
             height={28}
+            className="overlay-pill__logo"
             style={{ display: 'block', margin: 'auto' }}
           />
           {settings && (() => {
@@ -338,7 +340,7 @@ function OverlayApp() {
             if (agentName && agentName !== profileLabel) {
               return (
                 <span className="overlay-pill__agent" title={`Agent: ${agentName}`}>
-                  <span aria-hidden>◈</span>
+                  <Icon name="sparkles" size={12} />
                   {agentName}
                 </span>
               );
@@ -350,7 +352,7 @@ function OverlayApp() {
             className="overlay-pill__btn"
             onClick={() => void window.osmos.toggleOverlay()}
           >
-            Hide <span aria-hidden>▾</span>
+            Hide <Icon name="chevron-down" size={13} />
           </button>
           <button
             type="button"
@@ -359,7 +361,7 @@ function OverlayApp() {
             aria-label={paused ? 'Resume session' : 'Pause session'}
             title={paused ? 'Resume listening' : 'Pause listening'}
           >
-            <span aria-hidden>{paused ? '▶' : '❚❚'}</span>
+            <Icon name={paused ? 'play' : 'pause'} size={12} />
           </button>
           <button
             type="button"
@@ -377,7 +379,7 @@ function OverlayApp() {
                 : 'Click-through off — the overlay takes clicks'
             }
           >
-            <span aria-hidden>{clickThrough ? '⤢' : '⤡'}</span>
+            <Icon name="pointer" size={13} />
           </button>
           <button
             type="button"
@@ -394,7 +396,7 @@ function OverlayApp() {
                 : 'Low-profile off — enable to hide from screen shares (Windows/macOS)'
             }
           >
-            <span aria-hidden>◌</span>
+            <Icon name="shield" size={14} />
           </button>
         </div>
 

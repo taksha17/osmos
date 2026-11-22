@@ -3,6 +3,7 @@ import type { AppSettings } from '@shared/types';
 import { APP_NAME, APP_TAGLINE } from '@shared/brand';
 import { createSavedProfile } from '@shared/profiles';
 import { BrandLogo } from './BrandLogo';
+import { Icon } from './Icon';
 
 type Props = {
   settings: AppSettings;
@@ -11,6 +12,14 @@ type Props = {
 };
 
 type Step = 'welcome' | 'llm' | 'mic' | 'profile' | 'done';
+
+const STEP_META: Record<Step, { n: number; label: string }> = {
+  welcome: { n: 1, label: 'Welcome' },
+  llm: { n: 2, label: 'Your model' },
+  mic: { n: 3, label: 'Microphone' },
+  profile: { n: 4, label: 'Your profile' },
+  done: { n: 4, label: 'Ready' },
+};
 
 export function OnboardingWizard({ settings, onComplete, onSkip }: Props) {
   const [step, setStep] = useState<Step>('welcome');
@@ -111,8 +120,32 @@ export function OnboardingWizard({ settings, onComplete, onSkip }: Props) {
 
   return (
     <div className="onboard">
-      <div className="onboard__card">
+      <aside className="onboard__aside">
         <BrandLogo variant="hero" />
+        <p className="onboard__kicker">The quiet co-pilot</p>
+        <h2>Be present in the conversation. OSMOS handles the rest.</h2>
+        <p className="onboard__lede">
+          Live listening, screen context, and answers grounded in your own story — without a bot
+          joining the call.
+        </p>
+        <ul className="onboard__points">
+          <li><Icon name="shield" size={15} /> Private by default, local-first</li>
+          <li><Icon name="screen" size={15} /> Sees the screen only when you ask</li>
+          <li><Icon name="sparkles" size={15} /> Answers that sound like you</li>
+        </ul>
+        <span className="onboard__aside-note">No account. No subscription. MIT licensed.</span>
+      </aside>
+      <div className="onboard__card" data-step={String(STEP_META[step].n).padStart(2, '0')}>
+        <div className="onboard__step-row">
+          <span className="onboard__eyebrow">Setup · {STEP_META[step].label}</span>
+          <span className="onboard__step-count">{STEP_META[step].n} / 4</span>
+        </div>
+        <div className="onboard__progress" aria-hidden>
+          {[1, 2, 3, 4].map((n) => (
+            <span key={n} className={n <= STEP_META[step].n ? 'is-done' : ''} />
+          ))}
+        </div>
+        <div className="onboard__step-body">
         {step === 'welcome' ? (
           <>
             <h1>Welcome to {APP_NAME}</h1>
@@ -233,6 +266,11 @@ export function OnboardingWizard({ settings, onComplete, onSkip }: Props) {
             </div>
           </>
         ) : null}
+        </div>
+        <div className="onboard__foot">
+          <Icon name="shield" size={14} />
+          Local-first. Your résumé, conversations, and keys stay on this machine.
+        </div>
       </div>
     </div>
   );

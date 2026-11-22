@@ -10,7 +10,7 @@
 - GitHub: `https://github.com/taksha17/osmos` (public)
 - **Not** a fork or rebrand of Natively. Natively at `/media/taksha/New Volume/natively` is **personal reference only** — study ideas, never copy proprietary/source-available code.
 - License: MIT (`LICENSE`)
-- Current version: **0.6.3** (`package.json`)
+- Current version: **0.6.4** (`package.json`)
 - Reference product: Cluely (real-time interview/meeting copilot). We match core UX: desktop overlay, live transcription, screen context, answer suggestions. We do **not** copy proprietary code or data.
 
 ## Stack
@@ -22,7 +22,7 @@
 | Local LLM | Ollama HTTP (`/api/chat` NDJSON stream) |
 | Cloud LLMs | OpenAI / Anthropic / Groq / OpenRouter / NVIDIA NIM / LiteLLM via OpenAI-compatible `/chat/completions` |
 | Web search | DuckDuckGo (default) / Tavily / SearXNG |
-| Offline STT | System Node worker + `@huggingface/transformers` v4 — **Moonshine tiny (default, MIT)** or Whisper base.en |
+| Offline STT | System Node worker + `@huggingface/transformers` v4 — **Whisper base.en (default, MIT)** or Moonshine tiny (fast CPU fallback) |
 | Screen OCR | Main-process `tesseract.js` via `ocr:extract` IPC. Continuous 👁 Live prefers a **silent main backend** on every OS: **Mutter ScreenCast** (GNOME), **GDI/PowerShell** (Windows), **`screencapture -x`** (macOS), CLI (`spectacle`/`grim`/`scrot`) elsewhere. Renderer `getDisplayMedia` is Windows/macOS fallback only — **never** on Linux |
 | Audio loopback | Platform adapters: Linux `ffmpeg` pulse / `pw-record` on sink `*.monitor` (not `parec`), Windows `ffmpeg` WASAPI, macOS `ffmpeg`/`rec` + BlackHole |
 | Settings | `electron-store` → `~/.config/OSMOS/osmos-settings.json` (Linux); migrates from legacy `Unconventionally/` |
@@ -375,7 +375,8 @@ Documented so the next agent does not reintroduce these bugs:
 
 - **Do not** run `@huggingface/transformers` / onnxruntime in the Electron **renderer**.
 - Path: MediaRecorder or native WAV → IPC `stt:transcribe` → `localWhisper.ts` → `scripts/whisper-worker.mjs` (system Node, `--serve` warm model).
-- **Default model: `onnx-community/moonshine-tiny-ONNX`** (MIT, fast CPU streaming STT). Alternative: `Xenova/whisper-base.en`. Selectable via `AppSettings.localSttModel` (Settings → Local STT model) and `TranscribeRequest.model`.
+- **Default model: `Xenova/whisper-base.en`** (MIT, strongest accuracy on the endpointed utterance path; measured 4.7 % WER vs 14.3 % for Moonshine on the stress-question set, at 4.7 s vs 1.1 s per turn on CPU). Alternative: `onnx-community/moonshine-tiny-ONNX` for low-end CPUs. Selectable via `AppSettings.localSttModel` (Settings → Local STT model) and `TranscribeRequest.model`.
+  - Installs that still carry the old implicit Moonshine default are moved to Whisper base.en once by `sttModelMigrated` in `settingsStore.ts`.
 - **Moonshine gotchas (do not regress):**
   - Requires `@huggingface/transformers` **v3/v4**, not v2 `@xenova/transformers`.
   - fp32 ONNX export **silently transcribes empty** — worker pins `dtype: 'q8'` for moonshine. fp16 fails to init on CPU; q4 also yields empty. Use q8.

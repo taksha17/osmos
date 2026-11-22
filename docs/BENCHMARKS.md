@@ -131,3 +131,26 @@ were not produced here (no hosts); CI does them per tag.
 | interview-basic | Why do you want to work here? | quality | 120 | 265 |
 | meeting-action-item | Can you send the deck by Friday? | fast | 120 | 265 |
 | meeting-action-item | We should probably revisit the pricing page copy before laun | fast | 120 | 266 |
+
+## Run 2026-11-22T02-46-11-995Z
+
+- Platform: `linux-x64` · Node v20.20.2 · provider: `bench-fake` (deterministic fake)
+- Samples: 7 · skipped by trigger policy: 2 · first token p50 **121 ms** / p95 122 ms
+- Lanes: {"fast":4,"quality":3}
+- Trigger quality: precision **1** · recall **1** on 43 labelled utterances (tp 22 / fp 0 / fn 0 / tn 21)
+- Screen kinds (all 31 snapshots): accuracy **1** · code recall **1** · per kind {"code":1,"terminal":1,"error":1,"slide":1,"chat":1,"document":1,"unknown":1}
+- Screen gate: **pass** on the tune set (31 snapshots; accuracy ≥ 0.9, code recall ≥ 0.85)
+- Vision row: skipped (set `BENCH_VISION_IMAGE=<png>` with `BENCH_PROVIDER_BASE_URL`/`MODEL` to measure screenshot → first token)
+- Summary row: skipped (set `BENCH_SUMMARY=1` with a provider to measure the 30-minute summary target)
+- STT row (30 clips, `Xenova/whisper-base.en`): WER **0.032** · endpoint p50 **460 ms** / p95 460 ms · decode p50 4200 ms · end-of-speech → transcript p50 4660 ms
+- STT gate: **pass** (WER ≤ 0.12, endpoint p50 ≤ 600 ms)
+
+| Fixture | Question | Lane | First token (ms) | Total (ms) |
+|---|---|---|---:|---:|
+| easy-question | What does JVM stand for? | fast | 122 | 268 |
+| easy-question | What is a mutex? | fast | 121 | 266 |
+| easy-question | What is 12 * 12? | fast | 121 | 266 |
+| interview-basic | Tell me about a time you led a project. | quality | 120 | 265 |
+| interview-basic | Tell me about yourself | quality | 121 | 265 |
+| interview-basic | Why do you want to work here? | quality | 121 | 266 |
+| meeting-action-item | Can you send the deck by Friday? | fast | 121 | 267 |

@@ -87,6 +87,10 @@ export function useSystemAudioStt(settings: AppSettings | null) {
     let nextSeq = 0;
     const held = new Map<number, string | null>();
     let silentStreak = 0;
+    /** Once any speech has transcribed, silence is normal, not an error. */
+    let heardSpeech = false;
+    /** Chunk jobs already in flight are stale once VAD endpointing fires. */
+    let utteranceEpoch = 0;
     let lastWinDiagnostics: { trackLevel?: number; wavRms?: number } | null = null;
 
     const emitReady = () => {
@@ -98,11 +102,18 @@ export function useSystemAudioStt(settings: AppSettings | null) {
       }
     };
 
-    const handleWav = async (base64: string, mimeType: string, silent?: boolean) => {
+    const handleWav = async (
+      base64: string,
+      mimeType: string,
+      silent?: boolean,
+      source: 'chunk' | 'utterance' = 'chunk',
+    ) => {
       if (generationRef.current !== gen || !activeRef.current) return;
       if (silent) {
         silentStreak += 1;
-        if (silentStreak >= 4) {
+        // Only a listener that has never heard speech can have a device
+        // problem. After normal speech, pauses are not an error.
+        if (silentStreak >= 4 && !heardSpeech) {
           const win = await isWindowsPlatform();
           if (win && lastWinDiagnostics) {
             const { trackLevel, wavRms } = lastWinDiagnostics;
@@ -117,22 +128,21 @@ export function useSystemAudioStt(settings: AppSettings | null) {
                 'Hearing silence from Windows loopback. Check: ① media plays through the DEFAULT output device (Settings → Sound), ② Spatial sound (Atmos/Realtek enhancements) is off for that device, ③ no app holds the device in exclusive mode.',
               );
             }
-          } else {
+          } else if (win) {
             setError(
-              win
-                ? 'Windows loopback is active but still silent. Play audio on speakers, then toggle Listen off/on once.'
-                : 'System audio is active but still silent. Play audio on speakers and retry.',
+              'Windows loopback is active but still silent. Play audio on speakers, then toggle Listen off/on once.',
             );
           }
         }
         setPartial(
-          silentStreak > 2
-            ? 'No laptop audio — play media on THIS machine (TV/phone audio won’t appear)'
-            : 'Listening to system audio…',
+          heardSpeech
+            ? 'Listening to system audio…'
+            : 'Waiting for meeting audio…',
         );
         return;
       }
       silentStreak = 0;
+      const epochAtStart = utteranceEpoch;
       while (pending.size >= CONTINUOUS_MAX_IN_FLIGHT) {
         setPartial('Transcribing (queue)…');
         await Promise.race(pending);
@@ -144,7 +154,15 @@ export function useSystemAudioStt(settings: AppSettings | null) {
         try {
           const transcription = await transcribeBase64(base64, mimeType);
           if (generationRef.current !== gen) return;
+          // A fixed chunk that was already transcribing when VAD endpointed
+          // the same speech must not emit a second final behind it.
+          if (source === 'chunk' && epochAtStart !== utteranceEpoch) {
+            held.set(seq, null);
+            emitReady();
+            return;
+          }
           if (transcription.ok && transcription.text?.trim()) {
+            heardSpeech = true;
             held.set(seq, transcription.text.trim());
             setError('');
           } else {
@@ -186,7 +204,9 @@ export function useSystemAudioStt(settings: AppSettings | null) {
                 return;
               }
               utterancePathRef.current = true;
-              await handleWav(ev.base64, ev.mimeType || 'audio/wav', false);
+              utteranceEpoch += 1;
+              setPartial('Transcribing meeting audio…');
+              await handleWav(ev.base64, ev.mimeType || 'audio/wav', false, 'utterance');
             },
           );
           const unsubChunk = window.osmos.onSystemAudioChunk?.(async (chunk) => {

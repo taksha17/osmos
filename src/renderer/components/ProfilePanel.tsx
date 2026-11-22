@@ -5,6 +5,7 @@ import { createSavedProfile, guessCompanyFromUrl } from '../../shared/profiles';
 import { resolveAgent, effectiveProvider, allSupportedSkills, allSupportedMcps, renderSkillLabel, renderMcpLabel } from '../../shared/agents';
 import { DocumentsTab } from './DocumentsTab';
 import { QuestionBankTab } from './QuestionBankTab';
+import { Icon, type IconName } from './Icon';
 
 type ProfileSection = 'identity' | 'profile' | 'company' | 'documents' | 'questions';
 
@@ -16,12 +17,12 @@ type Props = {
   onClose?: () => void;
 };
 
-const NAV: Array<{ id: ProfileSection; label: string; icon: string }> = [
-  { id: 'identity', label: 'Resume & JD', icon: '◎' },
-  { id: 'profile', label: 'Profile', icon: '◉' },
-  { id: 'company', label: 'Company Intel', icon: '▣' },
-  { id: 'documents', label: 'Documents', icon: '▤' },
-  { id: 'questions', label: 'Questions & STAR', icon: '✎' },
+const NAV: Array<{ id: ProfileSection; label: string; icon: IconName }> = [
+  { id: 'identity', label: 'Resume & JD', icon: 'file' },
+  { id: 'profile', label: 'Profile', icon: 'user' },
+  { id: 'company', label: 'Company Intel', icon: 'briefcase' },
+  { id: 'documents', label: 'Documents', icon: 'book' },
+  { id: 'questions', label: 'Questions & STAR', icon: 'message' },
 ];
 
 function readInitialSection(): ProfileSection {
@@ -257,7 +258,7 @@ export function ProfilePanel({ settings, onChange, onSave, status, onClose }: Pr
       <aside className="hub-modal__nav">
         {onClose ? (
           <button type="button" className="hub-modal__close" onClick={onClose} aria-label="Close">
-            ×
+            <Icon name="x" size={16} />
           </button>
         ) : null}
         <div className="hub-modal__nav-label">Profile Intelligence</div>
@@ -269,13 +270,13 @@ export function ProfilePanel({ settings, onChange, onSave, status, onClose }: Pr
               className={`hub-nav-item${section === item.id ? ' hub-nav-item--active' : ''}`}
               onClick={() => setSection(item.id)}
             >
-              <span aria-hidden>{item.icon}</span>
+              <Icon name={item.icon} size={17} />
               {item.label}
             </button>
           ))}
         </nav>
         <button type="button" className="hub-modal__manage" onClick={onSave}>
-          Save profile <span aria-hidden>✓</span>
+          Save profile <Icon name="check" size={15} />
         </button>
       </aside>
 
@@ -292,7 +293,7 @@ export function ProfilePanel({ settings, onChange, onSave, status, onClose }: Pr
             </button>
           ))}
           <button type="button" className="profile-chip profile-chip--add" onClick={addProfile}>
-            + New
+            <Icon name="plus" size={14} /> New
           </button>
         </div>
 
@@ -306,7 +307,7 @@ export function ProfilePanel({ settings, onChange, onSave, status, onClose }: Pr
               <div className="hub-upload">
                 <span>Add your resume as real-time context</span>
                 <button type="button" className="hub-upload__btn" onClick={() => resumeInputRef.current?.click()}>
-                  📎 Upload file
+                  <Icon name="file" size={14} /> Upload file
                 </button>
                 <input
                   ref={resumeInputRef}
@@ -337,7 +338,7 @@ export function ProfilePanel({ settings, onChange, onSave, status, onClose }: Pr
               <div className="hub-upload">
                 <span>Add a job description as real-time context</span>
                 <button type="button" className="hub-upload__btn" onClick={() => jdInputRef.current?.click()}>
-                  📎 Upload file
+                  <Icon name="file" size={14} /> Upload file
                 </button>
                 <input
                   ref={jdInputRef}

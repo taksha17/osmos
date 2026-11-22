@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Icon } from './Icon';
 
 type Session = {
   id: string;
@@ -7,6 +8,25 @@ type Session = {
   createdAt: number;
   updatedAt: number;
 };
+
+function sessionTitle(s: Session): string {
+  const firstUser = s.messages.find((m) => m.role === 'user' && m.content.trim());
+  if (firstUser) {
+    const text = firstUser.content.replace(/\s+/g, ' ').trim();
+    return text.length > 86 ? `${text.slice(0, 83)}…` : text;
+  }
+  const mode = (s.mode || 'chat').replace(/^\w/, (c) => c.toUpperCase());
+  return `${mode} session`;
+}
+
+function formatWhen(ts: number): string {
+  return new Date(ts).toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
 
 export function HistoryTab() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -55,68 +75,94 @@ export function HistoryTab() {
     setNotice(res.ok ? `Saved ${res.summary ?? 'report'} → ${res.path}` : res.error || 'Export failed');
   };
 
-  if (loading) return <section className="panel"><h2>Sessions</h2><p>Loading…</p></section>;
-  // Only a failed *load* replaces the view; export/delete problems are notices,
-  // otherwise one failed export would hide every session until remount.
-  if (error) return <section className="panel"><h2>Sessions</h2><div className="error">{error}</div></section>;
-
   return (
-    <section className="panel">
-      <h2>Sessions</h2>
-      <p>Past chat sessions stored locally. Select a session to review its messages.</p>
-      {notice && <p className="meta">{notice}</p>}
-      {sessions.length === 0 && <p className="meta">No sessions yet.</p>}
-      <ul style={{ listStyle: 'none', padding: 0, margin: '12px 0 0' }}>
-        {sessions.map((s) => {
-          const expanded = expandedId === s.id;
-          const firstUser = s.messages.find((m) => m.role === 'user' && m.content.trim());
-          const preview = firstUser
-            ? firstUser.content.replace(/\s+/g, ' ').slice(0, 90)
-            : `${s.messages.length} messages`;
-          return (
-            <li key={s.id} style={{ marginBottom: 12, border: '1px solid var(--line)', borderRadius: 12, padding: 12 }}>
-              <button
-                type="button"
-                onClick={() => setExpandedId(expanded ? null : s.id)}
-                style={{
-                  // Reset without `all:unset`, which also removes the focus ring
-                  // keyboard users need to see where they are.
-                  display: 'block',
-                  width: '100%',
-                  background: 'none',
-                  border: 0,
-                  padding: 0,
-                  margin: 0,
-                  color: 'inherit',
-                  font: 'inherit',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                }}
-                aria-expanded={expanded}
-              >
-                <strong>{s.mode || 'chat'} · {new Date(s.createdAt).toLocaleString()}</strong>
-                <div className="meta">{s.messages.length} messages · {preview}</div>
-              </button>
-              {expanded && (
-                <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflow: 'auto' }}>
-                  {s.messages.map((m, i) => (
-                    <div key={i} className={`bubble ${m.role}`} style={{ fontSize: '0.84rem' }}>
-                      {m.content.slice(0, 2000)}
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
-                <button type="button" onClick={() => setExpandedId(expanded ? null : s.id)}>
-                  {expanded ? 'Collapse' : 'Review'}
+    <section className="history">
+      <header className="history__head">
+        <div>
+          <p className="history__eyebrow">Local library</p>
+          <h1>Sessions</h1>
+          <p className="history__lede">
+            Every conversation, transcript, and answer — stored on this machine and nowhere else.
+          </p>
+        </div>
+        {!loading && !error ? (
+          <span className="history__count">
+            {sessions.length} {sessions.length === 1 ? 'session' : 'sessions'}
+          </span>
+        ) : null}
+      </header>
+
+      {loading ? (
+        <div className="history-empty">
+          <Icon name="history" size={22} />
+          <p>Loading your sessions…</p>
+        </div>
+      ) : error ? (
+        <div className="history-empty history-empty--error">
+          <Icon name="info" size={22} />
+          <p>{error}</p>
+        </div>
+      ) : sessions.length === 0 ? (
+        <div className="history-empty">
+          <span className="history-empty__icon"><Icon name="history" size={24} /></span>
+          <p>No sessions yet</p>
+          <span className="meta">Start Osmos during a call — the transcript and recap will land here.</span>
+        </div>
+      ) : (
+        <ul className="history-list">
+          {sessions.map((s) => {
+            const expanded = expandedId === s.id;
+            return (
+              <li key={s.id} className={`history-card${expanded ? ' is-open' : ''}`}>
+                <button
+                  type="button"
+                  className="history-card__head"
+                  onClick={() => setExpandedId(expanded ? null : s.id)}
+                  aria-expanded={expanded}
+                >
+                  <span className="history-card__title">
+                    <span className="history-card__topline">
+                      <span className="history-card__mode">{s.mode || 'chat'}</span>
+                      <span className="history-card__when">{formatWhen(s.updatedAt)}</span>
+                    </span>
+                    <strong>{sessionTitle(s)}</strong>
+                    <span className="history-card__meta">
+                      {s.messages.length} {s.messages.length === 1 ? 'message' : 'messages'}
+                    </span>
+                  </span>
+                  <span className={`history-card__chevron${expanded ? ' is-open' : ''}`}>
+                    <Icon name="chevron-down" size={17} />
+                  </span>
                 </button>
-                <button type="button" onClick={() => void exportReport(s.id)}>Export report</button>{' '}
-                <button type="button" onClick={() => void remove(s.id)}>Delete</button>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+
+                {expanded ? (
+                  <div className="history-messages">
+                    {s.messages.map((m, i) => (
+                      <div key={i} className={`bubble ${m.role}`}>
+                        {m.content.slice(0, 2000)}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                <div className="history-card__actions">
+                  <button type="button" className="history-action" onClick={() => setExpandedId(expanded ? null : s.id)}>
+                    <Icon name="message" size={14} /> {expanded ? 'Collapse' : 'Review'}
+                  </button>
+                  <button type="button" className="history-action" onClick={() => void exportReport(s.id)}>
+                    <Icon name="download" size={14} /> Export report
+                  </button>
+                  <button type="button" className="history-action history-action--danger" onClick={() => void remove(s.id)}>
+                    <Icon name="trash" size={14} /> Delete
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {notice ? <div className="history-notice">{notice}</div> : null}
     </section>
   );
 }
